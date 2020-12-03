@@ -1,0 +1,3 @@
+#define multiqueue_VERSION_MAJOR @multiqueue_VERSION_MAJOR@
+#define multiqueue_VERSION_MINOR @multiqueue_VERSION_MINOR@
+#define multiqueue_VERSION_MINOR @multiqueue_VERSION_PATH@

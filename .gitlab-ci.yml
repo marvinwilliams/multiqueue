@@ -1,0 +1,99 @@
+image: $CI_REGISTRY/marvinwilliams/multiqueue-ci
+
+stages:
+  - prepare
+  - build
+  - test
+  - docs
+  - deploy
+
+generate-build:
+  stage: prepare
+  script:
+    - uname -a
+    - gcc -v
+    - cmake -version
+    - cmake -B build -Dmultiqueue_BUILD_EXAMPLES=1 -Dmultiqueue_BUILD_BENCHMARKS=1
+  variables:
+    GIT_SUBMODULE_STRATEGY: normal
+  artifacts:
+    name: build_system
+    paths:
+      - build/
+
+build-tests:
+  stage: build
+  dependencies:
+    - generate-build
+  script:
+    - cmake --build build --target tests
+  artifacts:
+    name: built_tests
+    paths:
+      - build/
+  variables:
+    GIT_SUBMODULE_STRATEGY: normal
+
+build-examples:
+  stage: build
+  dependencies:
+    - generate-build
+  script:
+    - cmake --build build --target examples
+  variables:
+    GIT_SUBMODULE_STRATEGY: normal
+
+build-benchmarks:
+  stage: build
+  dependencies:
+    - generate-build
+  script:
+    - cmake --build build --target benchmarks
+  variables:
+    GIT_SUBMODULE_STRATEGY: normal
+
+test-ci-only:
+  stage: test
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "master"'
+  needs:
+    - build-tests
+  dependencies:
+    - build-tests
+  script:
+    - ./build/tests/tests
+
+build-and-test-cdash:
+  stage: test
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+  needs: []
+  script:
+    - ctest -S cmake/CICTestScript.cmake -DCDASH_TOKEN=$CDASH_TOKEN -DCTEST_SITE=gitlab-ci -DCTEST_BUILD_NAME="`uname --kernel-name --kernel-release --machine`" --output-on-failure
+  variables:
+    GIT_SUBMODULE_STRATEGY: normal
+
+gendocs:
+  stage: docs
+  dependencies:
+    - generate-build
+  script:
+    - cmake --build build --target doxygen
+  artifacts:
+    name: docs
+    paths:
+      - build/html
+  variables:
+    GIT_SUBMODULE_STRATEGY: normal
+
+pages:
+  stage: deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+  dependencies:
+    - gendocs
+  script:
+    - mv build/html/ public/
+  artifacts:
+    paths:
+      - public

@@ -1,0 +1,10 @@
+include(Catch)
+
+add_executable(benchmarks main.cpp heap.cpp)
+target_link_libraries(benchmarks PRIVATE Catch2::Catch2)
+target_link_libraries(benchmarks PRIVATE multiqueue::multiqueue)
+target_link_libraries(benchmarks PRIVATE multiqueue_warnings)
+target_compile_definitions(benchmarks PRIVATE CATCH_CONFIG_ENABLE_BENCHMARKING)
+target_compile_definitions(benchmarks PRIVATE "NDEBUG")
+target_compile_options(benchmarks PRIVATE "-O3")
+target_compile_options(benchmarks PRIVATE "-march=native")
