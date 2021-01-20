@@ -7,7 +7,7 @@ target_link_libraries(test_target INTERFACE multiqueue_warnings)
 target_compile_options(test_target INTERFACE "-g")
 target_compile_options(test_target INTERFACE "-Og")
 
-add_executable(tests main.cpp pq_api.cpp pq_correctness.cpp kv_pq_api.cpp kv_pq_correctness.cpp multiqueue.cpp)
+add_executable(tests main.cpp pq_api.cpp pq_correctness.cpp kv_pq_api.cpp kv_pq_correctness.cpp)
 target_link_libraries(tests PRIVATE test_target)
 
 if(BUILD_TESTING)

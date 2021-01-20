@@ -27,23 +27,20 @@ template <> struct Sentinel<int> {
 } // namespace rsm
 } // namespace multiqueue
 
-using pq_t = multiqueue::local_nonaddressable::pq<int, std::less<int>,
-                                                  std::vector<int>, 4>;
-using multiqueue_t = multiqueue::rsm::priority_queue<int, pq_t>;
+using multiqueue_t = multiqueue::rsm::priority_queue<int>;
 
 static constexpr size_t elements_per_thread = 10000u;
 
 TEST_CASE("multiqueue single thread", "[multiqueue][workloads]") {
   auto pq = multiqueue_t{1u};
 
-  auto handle = pq.get_handle();
   SECTION("push increasing numbers and pop them") {
     for (size_t n = 0u; n < elements_per_thread; ++n) {
-      handle.push(static_cast<int>(n));
+      pq.push(static_cast<int>(n));
     }
     auto v = std::vector<int>();
     for (size_t i = 0u; i < elements_per_thread; ++i) {
-      int top = handle.extract_top();
+      int top = pq.extract_top();
       if (top != std::numeric_limits<int>::max()) {
         v.push_back(top);
       }
@@ -60,11 +57,11 @@ TEST_CASE("multiqueue single thread", "[multiqueue][workloads]") {
 
   SECTION("push decreasing numbers and pop them") {
     for (size_t n = 0u; n < elements_per_thread; ++n) {
-      handle.push(static_cast<int>(elements_per_thread - n - 1));
+      pq.push(static_cast<int>(elements_per_thread - n - 1));
     }
     auto v = std::vector<int>();
     for (size_t i = 0u; i < elements_per_thread; ++i) {
-      int top = handle.extract_top();
+      int top = pq.extract_top();
       if (top != std::numeric_limits<int>::max()) {
         v.push_back(top);
       }
@@ -85,20 +82,18 @@ TEMPLATE_TEST_CASE_SIG("multiqueue seq push multi pop",
                        ((unsigned int threads), threads), 2, 4, 8, 16) {
   static constexpr size_t num_elements = elements_per_thread * threads;
   auto pq = multiqueue_t{threads};
-  auto handle = pq.get_handle();
 
   SECTION("push increasing numbers and pop them") {
     for (size_t n = 0u; n < num_elements; ++n) {
-      handle.push(static_cast<int>(n));
+      pq.push(static_cast<int>(n));
     }
     auto t = std::vector<std::thread>();
     std::vector<int> v(num_elements, 0);
     std::atomic_size_t count = 0u;
     for (unsigned int id = 0u; id < threads; ++id) {
       t.emplace_back([&pq, &v, &count]() {
-        auto handle = pq.get_handle();
         for (unsigned int i = 0u; i < elements_per_thread; ++i) {
-          int top = handle.extract_top();
+          int top = pq.extract_top();
           if (top != std::numeric_limits<int>::max()) {
             size_t pos = count.fetch_add(1u, std::memory_order_relaxed);
             v[pos] = top;
@@ -120,16 +115,15 @@ TEMPLATE_TEST_CASE_SIG("multiqueue seq push multi pop",
 
   SECTION("push decreasing numbers and pop them") {
     for (size_t n = 0u; n < num_elements; ++n) {
-      handle.push(static_cast<int>(num_elements - n - 1));
+      pq.push(static_cast<int>(num_elements - n - 1));
     }
     auto t = std::vector<std::thread>();
     std::vector<int> v(num_elements, 0);
     std::atomic_size_t count = 0;
     for (unsigned int id = 0; id < threads; ++id) {
       t.emplace_back([&pq, &v, &count]() {
-        auto handle = pq.get_handle();
         for (unsigned int i = 0u; i < elements_per_thread; ++i) {
-          int top = handle.extract_top();
+          int top = pq.extract_top();
           if (top != std::numeric_limits<int>::max()) {
             size_t pos = count.fetch_add(1u, std::memory_order_relaxed);
             v[pos] = top;
@@ -160,9 +154,8 @@ TEMPLATE_TEST_CASE_SIG("multiqueue multi push seq pop",
     auto t = std::vector<std::thread>();
     for (unsigned int id = 0u; id < threads; ++id) {
       t.emplace_back([&pq, id]() {
-        auto handle = pq.get_handle();
         for (unsigned int i = 0u; i < elements_per_thread; ++i) {
-          handle.push(static_cast<int>(id * elements_per_thread + i));
+          pq.push(static_cast<int>(id * elements_per_thread + i));
         }
       });
     }
@@ -172,9 +165,8 @@ TEMPLATE_TEST_CASE_SIG("multiqueue multi push seq pop",
     std::atomic_size_t count = 0;
     for (unsigned int id = 0; id < threads; ++id) {
       t.emplace_back([&pq, &v, &count]() {
-        auto handle = pq.get_handle();
         for (unsigned int i = 0; i < elements_per_thread; ++i) {
-          int top = handle.extract_top();
+          int top = pq.extract_top();
           if (top != std::numeric_limits<int>::max()) {
             size_t pos = count.fetch_add(1u, std::memory_order_relaxed);
             v[pos] = top;
@@ -198,9 +190,8 @@ TEMPLATE_TEST_CASE_SIG("multiqueue multi push seq pop",
     auto t = std::vector<std::thread>();
     for (unsigned int id = 0u; id < threads; ++id) {
       t.emplace_back([&pq, id]() {
-        auto handle = pq.get_handle();
         for (size_t i = 0; i < elements_per_thread; ++i) {
-          handle.push(static_cast<int>((id + 1) * elements_per_thread - i - 1));
+          pq.push(static_cast<int>((id + 1) * elements_per_thread - i - 1));
         }
       });
     }
@@ -210,9 +201,8 @@ TEMPLATE_TEST_CASE_SIG("multiqueue multi push seq pop",
     std::atomic_size_t count = 0;
     for (unsigned int id = 0; id < threads; ++id) {
       t.emplace_back([&pq, &v, &count]() {
-        auto handle = pq.get_handle();
         for (unsigned int i = 0; i < elements_per_thread; ++i) {
-          int top = handle.extract_top();
+          int top = pq.extract_top();
           if (top != std::numeric_limits<int>::max()) {
             size_t pos = count.fetch_add(1u, std::memory_order_relaxed);
             v[pos] = top;

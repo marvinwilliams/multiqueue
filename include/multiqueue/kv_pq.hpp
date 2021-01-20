@@ -9,7 +9,9 @@
 #ifndef KV_PQ_HPP_8MTIGDLA
 #define KV_PQ_HPP_8MTIGDLA
 
-#include "multiqueue/heap.hpp"
+#include "multiqueue/heap/full_down_strategy.hpp"
+#include "multiqueue/heap/heap.hpp"
+#include "multiqueue/util/extractors.hpp"
 
 #include <cassert>
 #include <functional> // std::identity, std::less
@@ -19,9 +21,15 @@
 namespace multiqueue {
 namespace local_nonaddressable {
 
-template <typename Key, typename T, typename Comparator = std::less<Key>,
-          typename Container = std::vector<std::pair<Key, T>>,
-          unsigned int Degree = 4>
+template <typename T>
+struct default_kv_heap_settings {
+    static constexpr unsigned int Degree = 4;
+    using Container = std::vector<T>;
+    using Strategy = full_down_strategy;
+};
+
+template <typename Key, typename Value, typename Comparator = std::less<Key>,
+          template <typename> typename HeapSettings = default_kv_heap_settings>
 class kv_pq {
 public:
   using key_type = Key;
@@ -78,34 +86,58 @@ public:
   explicit kv_pq(std::allocator_arg_t, Allocator const &a, Comparator const &c)
       : heap_(std::allocator_arg, a, c) {}
 
-  constexpr iterator begin() noexcept { return heap_.begin(); }
+    inline iterator begin() noexcept {
+        return heap_.begin();
+    }
 
-  constexpr const_iterator begin() const noexcept { return heap_.cbegin(); }
+    inline const_iterator begin() const noexcept {
+        return heap_.cbegin();
+    }
 
-  constexpr const_iterator cbegin() const noexcept { return heap_.cbegin(); }
+    inline const_iterator cbegin() const noexcept {
+        return heap_.cbegin();
+    }
 
-  constexpr iterator end() noexcept { return heap_.end(); }
+    inline iterator end() noexcept {
+        return heap_.end();
+    }
 
-  constexpr const_iterator end() const noexcept { return heap_.cend(); }
+    inline const_iterator end() const noexcept {
+        return heap_.cend();
+    }
 
-  constexpr const_iterator cend() const noexcept { return heap_.cend(); }
+    inline const_iterator cend() const noexcept {
+        return heap_.cend();
+    }
 
-  constexpr size_type size() const noexcept { return heap_.size(); }
+    inline size_type size() const noexcept {
+        return heap_.size();
+    }
 
-  constexpr size_type max_size() const noexcept { return heap_.max_size(); }
+    [[nodiscard]] inline bool empty() const noexcept {
+        return heap_.empty();
+    }
 
-  [[nodiscard]] constexpr bool empty() const noexcept { return heap_.empty(); }
+    inline const_reference top() const {
+        return heap_.top();
+    }
 
-  constexpr const_reference top() const { return heap_.top(); }
+    inline void clear() noexcept {
+        heap_.clear();
+    }
 
-  constexpr void clear() noexcept { heap_.clear(); }
+    inline void reserve(size_type new_cap) {
+        heap_.reserve(new_cap);
+    }
 
-  constexpr void reserve(size_type new_cap) { heap_.reserve(new_cap); }
+    void pop() {
+        assert(!empty());
+        heap_.remove_front();
+    }
 
-  constexpr void pop() {
-    assert(!empty());
-    heap_.remove_front();
-  }
+    [[nodiscard]]value_type extract_top() {
+        return heap_.extract_front();
+    }
 
   constexpr value_type extract_top() { return heap_.extract_front(); }
 
