@@ -111,8 +111,7 @@ target_compile_options(
   $<BUILD_INTERFACE:${WARNING_FLAGS}>
 )
 
-if(${PROJECT_NAME}_BUILD_TESTS)
-  set(TEST_RUNNER_PARAMS "" CACHE STRING "Options added to the test runner")
+if(${PROJECT_NAME}_BUILD_TESTS OR ${PROJECT_NAME}_BUILD_BENCHMARKS)
   if(${PROJECT_NAME}_SYSTEM_CATCH)
     find_package(Catch2 REQUIRED)
   else()
@@ -122,6 +121,10 @@ if(${PROJECT_NAME}_BUILD_TESTS)
     add_subdirectory("${${PROJECT_NAME}_CATCH_DIR}" EXCLUDE_FROM_ALL)
     list(APPEND CMAKE_MODULE_PATH "${${PROJECT_NAME}_CATCH_DIR}/contrib")
   endif()
+endif()
+
+if(${PROJECT_NAME}_BUILD_TESTS)
+  set(TEST_RUNNER_PARAMS "" CACHE STRING "Options added to the test runner")
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/tests")
 endif()
 
@@ -139,6 +142,7 @@ if(${PROJECT_NAME}_USE_DOXYGEN)
 endif()
 
 if(${PROJECT_NAME}_BUILD_BENCHMARKS)
+  add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/external/cxxopts")
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/benchmark")
 endif()
 

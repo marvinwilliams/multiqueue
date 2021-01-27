@@ -4,3 +4,7 @@
 [submodule "external/klsm"]
 	path = external/klsm
 	url = https://github.com/marvinwilliams/klsm.git
+[submodule "external/cxxopts"]
+	path = external/cxxopts
+	url = https://github.com/jarro2783/cxxopts.git
+	branch = v2.2.1

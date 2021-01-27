@@ -32,31 +32,25 @@ struct DefaultConfiguration {
 };
 
 template <typename T>
-struct Sentinel {
-    static constexpr T get() noexcept {
-        return T();
-    }
-    static constexpr bool is(T const &v) noexcept {
-        return v == get();
-    }
-};
+struct Sentinel;
 
 template <typename T, typename Configuration = DefaultConfiguration,
-          typename Queue = multiqueue::local_nonaddressable::pq<int>>
+          typename Queue = multiqueue::local_nonaddressable::pq<T>, typename Allocator = std::allocator<T>>
 class priority_queue {
    private:
     struct alignas(64) aligned_pq {
         Queue queue = Queue();
-        T top_value = Sentinel<T>::get();
+        T top= Sentinel<T>::get();
         mutable std::atomic_flag in_use = ATOMIC_FLAG_INIT;
     };
+    using allocator_type = typename std::allocator_traits<Allocator>::template rebind_alloc<aligned_pq>;
 
    public:
     using value_type = T;
     using pop_return_type = value_type;
 
    private:
-    std::vector<aligned_pq> queue_list_;
+    std::vector<aligned_pq, allocator_type> queue_list_;
     unsigned int const num_queues_;
     typename Queue::value_comparator comp_;
 
@@ -96,7 +90,7 @@ class priority_queue {
                 while (!try_lock(queue_index)) {
                     queue_index = (queue_index + 1) % num_queues_;
                 }
-                if (!Sentinel<T>::is(queue_list_[queue_index].top_value)) {
+                if (!Sentinel<T>::is_sentinel(queue_list_[queue_index].top)) {
                     break;
                 }
                 unlock(queue_index);
@@ -105,18 +99,18 @@ class priority_queue {
                 // already unlocked
                 continue;
             }
-            assert(!Sentinel<T>::is(queue_list_[queue_index].top_value));
-            T min_value = queue_list_[queue_index].top_value;
+            assert(!Sentinel<T>::is_sentinel(queue_list_[queue_index].top));
+            T min_value = queue_list_[queue_index].top;
             size_t min_index = queue_index;
             for (; peek_count < Configuration::Peek; ++peek_count) {
                 queue_index = random_queue_index();
                 while (!try_lock(queue_index)) {
                     queue_index = (queue_index + 1) % num_queues_;
                 }
-                if (!Sentinel<T>::is(queue_list_[queue_index].top_value) &&
-                    comp_(queue_list_[queue_index].top_value, min_value)) {
+                if (!Sentinel<T>::is_sentinel(queue_list_[queue_index].top) &&
+                    comp_(queue_list_[queue_index].top, min_value)) {
                     unlock(min_index);
-                    min_value = queue_list_[queue_index].top_value;
+                    min_value = queue_list_[queue_index].top;
                     min_index = queue_index;
                 } else {
                     unlock(queue_index);
@@ -129,16 +123,16 @@ class priority_queue {
     }
 
     void push(value_type value) {
-        assert(!Sentinel<T>::is(value));
+        assert(!Sentinel<T>::is_sentinel(value));
         size_t queue_index = random_queue_index();
         while (!try_lock(queue_index)) {
             queue_index = (queue_index + 1) % num_queues_;
         }
-        if (queue_list_[queue_index].top_value == Sentinel<T>::get()) {
-            queue_list_[queue_index].top_value = std::move(value);
-        } else if (comp_(value, queue_list_[queue_index].top_value)) {
-            queue_list_[queue_index].queue.push(std::move(queue_list_[queue_index].top_value));
-            queue_list_[queue_index].top_value = std::move(value);
+        if (queue_list_[queue_index].top == Sentinel<T>::get()) {
+            queue_list_[queue_index].top = std::move(value);
+        } else if (comp_(value, queue_list_[queue_index].top)) {
+            queue_list_[queue_index].queue.push(std::move(queue_list_[queue_index].top));
+            queue_list_[queue_index].top = std::move(value);
         } else {
             queue_list_[queue_index].queue.push(std::move(value));
         }
@@ -154,7 +148,7 @@ class priority_queue {
                 while (!try_lock(queue_index)) {
                     queue_index = (queue_index + 1) % num_queues_;
                 }
-                if (!Sentinel<T>::is(queue_list_[queue_index].top_value)) {
+                if (!Sentinel<T>::is_sentinel(queue_list_[queue_index].top)) {
                     break;
                 }
                 unlock(queue_index);
@@ -163,27 +157,27 @@ class priority_queue {
                 // already unlocked
                 continue;
             }
-            assert(!Sentinel<T>::is(queue_list_[queue_index].top_value));
-            T min_value = queue_list_[queue_index].top_value;
+            assert(!Sentinel<T>::is_sentinel(queue_list_[queue_index].top));
+            T min_value = queue_list_[queue_index].top;
             size_t min_index = queue_index;
             for (; peek_count < Configuration::Peek; ++peek_count) {
                 queue_index = random_queue_index();
                 while (!try_lock(queue_index)) {
                     queue_index = (queue_index + 1) % num_queues_;
                 }
-                if (!Sentinel<T>::is(queue_list_[queue_index].top_value) &&
-                    comp_(queue_list_[queue_index].top_value, min_value)) {
+                if (!Sentinel<T>::is_sentinel(queue_list_[queue_index].top) &&
+                    comp_(queue_list_[queue_index].top, min_value)) {
                     unlock(min_index);
-                    min_value = queue_list_[queue_index].top_value;
+                    min_value = queue_list_[queue_index].top;
                     min_index = queue_index;
                 } else {
                     unlock(queue_index);
                 }
             }
             if (queue_list_[min_index].queue.empty()) {
-                queue_list_[min_index].top_value = Sentinel<T>::get();
+                queue_list_[min_index].top = Sentinel<T>::get();
             } else {
-                queue_list_[min_index].top_value = queue_list_[min_index].queue.top();
+                queue_list_[min_index].top = queue_list_[min_index].queue.top();
                 queue_list_[min_index].queue.pop();
             }
             unlock(min_index);
