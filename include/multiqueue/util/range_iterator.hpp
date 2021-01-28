@@ -116,6 +116,9 @@ class predicate_iterator {
     constexpr explicit predicate_iterator(T value, T max_value = std::numeric_limits<T>::max(),
                                           Predicate const& pred = Predicate{})
         : v_{value}, max_{max_value}, pred_{pred} {
+        while (v_ < max_ && !pred_(v_)) {
+            ++v_;
+        }
     }
 
     constexpr predicate_iterator end() const noexcept {

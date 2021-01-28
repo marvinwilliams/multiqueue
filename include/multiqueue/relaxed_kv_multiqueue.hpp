@@ -182,11 +182,19 @@ class kv_priority_queue {
                 if (!try_lock(*min_it)) {
                     continue;
                 }
-                auto result_key = queue_list_[*it].top.first.load(std::memory_order_relaxed);
+                auto result_key = queue_list_[*min_it].top.first.load(std::memory_order_relaxed);
                 if (Sentinel<key_type>::is_sentinel(result_key)) {
                     continue;
                 }
-                return {result_key, queue_list_[*it].top.first.load(std::memory_order_relaxed)};
+                value_type result = {result_key, queue_list_[*min_it].top.second.load(std::memory_order_relaxed)};
+                if (queue_list_[*min_it].queue.empty()) {
+                    queue_list_[*min_it].top.first.store(Sentinel<key_type>::get(), std::memory_order_relaxed);
+                    queue_list_[*min_it].top.second.store(mapped_type{}, std::memory_order_relaxed);
+                } else {
+                    queue_list_[*min_it].top = queue_list_[*min_it].queue.extract_top();
+                }
+                unlock(*min_it);
+                return result;
             }
         }
         return {Sentinel<key_type>::get(), mapped_type{}};
