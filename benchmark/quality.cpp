@@ -6,7 +6,8 @@
 #include "multiqueue/kv_pq.hpp"
 #include "multiqueue/pq.hpp"
 #include "multiqueue/relaxed_multiqueue.hpp"
-#include "utils.hpp"
+#include "thread_coordination.hpp"
+#include "threading.hpp"
 
 #include <chrono>
 #include <memory>
@@ -45,6 +46,54 @@ struct Settings {
     unsigned int num_threads = default_num_threads;
 };
 
+struct T {
+    int i;
+    T() {
+        i = 0;
+        std::cout << "default\n";
+    }
+    T(T const& o) {
+        i = o.i;
+        std::cout << "copy\n";
+    }
+    T(T&& o) {
+        i = o.i;
+        o.i = 0;
+        std::cout << "move\n";
+    }
+    T& operator=(T const& o) {
+        i = o.i;
+        std::cout << "assign\n";
+        return *this;
+    }
+    T& operator=(T&& o) {
+        i = o.i;
+        o.i = 0;
+        std::cout << "moveassign\n";
+        return *this;
+    }
+};
+
+struct Task {
+    static void run(thread_coordination::Context context, T& t) {
+        context.synchronize(0);
+        if (context.is_main()) {
+            std::cout << "I'm the main thread" << std::endl;
+            context.synchronize(1);
+        }
+        context.synchronize(2);
+        t.i = context.get_id();
+        context.synchronize(4, [&]() { std::cout << "All done: " << context.get_id() << '\n'; });
+    }
+
+    static threading::thread_config get_config(unsigned int i) {
+        threading::thread_config config;
+        config.cpu_set.reset();
+        config.cpu_set.set(i);
+        return config;
+    }
+};
+
 int main(int argc, char* argv[]) {
     cxxopts::Options options("quality benchmark", "This executable measures the quality of relaxed priority queues");
     options.positional_help("[test test2]");
@@ -77,16 +126,10 @@ int main(int argc, char* argv[]) {
         std::cerr << e.what() << '\n';
         return 1;
     }
-    std::vector<std::thread> threads;
-    barrier b(settings.num_threads + 1, [](unsigned int id) { std::cout << "Barrier broken " << id << std::endl; });
-    for (unsigned int i = 0; i < settings.num_threads; ++i) {
-        threads.emplace_back([&b, i]() { b.wait(i + 1); });
-    }
-    std::cout << "Im waiting too\n";
-    b.wait(0);
-    for (unsigned int i = 0; i < settings.num_threads; ++i) {
-        threads[i].join();
-    }
-    std::cout << "All done!\n";
+    thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
+    T t{};
+    t.i = 5;
+    coordinator.run<Task>(std::ref(t));
+    std::cout << t.i << '\n';
     return 0;
 }
