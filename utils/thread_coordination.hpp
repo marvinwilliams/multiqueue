@@ -51,6 +51,7 @@ class ThreadCoordinator {
     friend Context;
     unsigned int num_threads_;
     threading::barrier barrier_;
+    std::vector<threading::pthread> threads;
 
    public:
     ThreadCoordinator(unsigned int num_threads) : num_threads_{num_threads}, barrier_{num_threads} {
@@ -58,7 +59,7 @@ class ThreadCoordinator {
 
     template <typename Task, typename... Args>
     void run(Args&&... args) {
-        std::vector<threading::pthread> threads;
+        threads.clear();
         threads.reserve(num_threads_);
         for (unsigned int i = 0; i < num_threads_; ++i) {
             // No forward, since we don't want to move the args
@@ -67,6 +68,9 @@ class ThreadCoordinator {
             threading::thread_config config = Task::get_config(i);
             threads.emplace_back(config, Task::run, Context{*this, i, num_threads_}, args...);
         }
+    }
+
+    void join() {
         for (auto& t : threads) {
             if (t.joinable()) {
                 t.join();

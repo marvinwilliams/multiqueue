@@ -31,12 +31,42 @@ struct default_kv_heap_settings {
 template <typename Key, typename Value, typename Comparator = std::less<Key>,
           template <typename> typename HeapSettings = default_kv_heap_settings>
 class kv_pq {
-public:
-  using key_type = Key;
-  using value_type = std::pair<Key, T>;
-  using key_comparator = Comparator;
-  struct value_comparator : private Comparator {
-    friend class kv_pq<Key, T, Comparator, Container, Degree>;
+   public:
+    using key_type = Key;
+    using mapped_type = Value;
+    using value_type = std::pair<Key, Value>;
+    using key_comparator = Comparator;
+
+    using heap_type = heap<value_type, Key, util::pair_first, Comparator, HeapSettings<value_type>::Degree,
+                           typename HeapSettings<value_type>::Container, typename HeapSettings<value_type>::Strategy>;
+
+    class value_comparator : private key_comparator {
+        friend kv_pq;
+        explicit value_comparator(key_comparator const &comp) : key_comparator{comp} {
+        }
+
+       public:
+        constexpr bool operator()(value_type const &lhs, value_type const &rhs) const {
+            return key_comparator::operator()(util::pair_first::operator()(lhs), util::pair_first::operator()(rhs));
+        }
+    };
+
+   public:
+    using reference = typename heap_type::reference;
+    using const_reference = typename heap_type::const_reference;
+    using iterator = typename heap_type::iterator;
+    using const_iterator = typename heap_type::const_iterator;
+    using difference_type = typename heap_type::difference_type;
+    using size_type = typename heap_type::size_type;
+
+   private:
+    heap_type heap_;
+
+   public:
+    kv_pq() = default;
+
+    explicit kv_pq(Comparator const &c) : heap_(c) {
+    }
 
   private:
     value_comparator(Comparator c) : Comparator(c) {}
@@ -132,45 +162,23 @@ public:
 
     void pop() {
         assert(!empty());
-        heap_.remove_front();
+        heap_.pop();
     }
 
-    [[nodiscard]]value_type extract_top() {
-        return heap_.extract_front();
+    void extract_top(value_type &value) {
+        heap_.extract_top(value);
     }
 
-  constexpr value_type extract_top() { return heap_.extract_front(); }
+    template <typename insert_type>
+    void push(insert_type &&value) {
+        heap_.insert(std::forward<insert_type>(value));
+    }
 
-  constexpr void push(value_type const &value) {
-    heap_.insert_reference(value);
-  }
-
-  constexpr void push(value_type &&value) {
-    heap_.insert_reference(std::move(value));
-  }
-
-  template <typename... Args> constexpr void emplace(Args &&...args) {
-    heap_.emplace(std::forward<Args>(args)...);
-  }
-
-  template <typename... Args>
-  constexpr void emplace_hint(key_type const &key, Args &&...args) {
-    heap_.emplace_hint(key, std::forward<Args>(args)...);
-  }
-
-  template <typename... Args>
-  constexpr void emplace_key(key_type const &key, Args &&...args) {
-    heap_.emplace_known(key, std::piecewise_construct,
-                        std::forward_as_tuple(key),
-                        std::forward_as_tuple(std::forward<Args>(args)...));
-  }
-
-  template <typename... Args>
-  constexpr void emplace_key(key_type &&key, Args &&...args) {
-    heap_.emplace_known(key, std::piecewise_construct,
-                        std::forward_as_tuple(std::move(key)),
-                        std::forward_as_tuple(std::forward<Args>(args)...));
-  }
+    template <typename insert_key_type, typename... Args>
+    void emplace_key(insert_key_type &&key, Args &&...args) {
+        heap_.emplace_known(key, std::piecewise_construct, std::forward_as_tuple(std::forward<insert_key_type>(key)),
+                            std::forward_as_tuple(std::forward<Args>(args)...));
+    }
 };
 
 } // namespace local_nonaddressable

@@ -37,7 +37,7 @@ class pq {
 
     using key_comparator = Comparator;
     using value_comparator = Comparator;
-    using heap_type = heap<T, T, util::identity, Comparator, HeapSettings<value_type>::Degree,
+    using heap_type = heap<T, T, std::identity, Comparator, HeapSettings<value_type>::Degree,
                            typename HeapSettings<value_type>::Container, typename HeapSettings<value_type>::Strategy>;
 
    private:

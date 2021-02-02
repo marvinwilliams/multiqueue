@@ -24,44 +24,49 @@
 namespace multiqueue {
 namespace rsm {
 
+template <typename Key, typename Value>
 struct DefaultKVConfiguration {
     // With `p` threads, use `C*p` queues
     static constexpr unsigned int C = 4;
     // Number of local queues to test for finding the smallest
     static constexpr unsigned int Peek = 4;
+    using Queue = multiqueue::local_nonaddressable::kv_pq<Key, Value>;
 };
 
 template <typename T>
 struct Sentinel;
 
-template <typename Key, typename Value, typename Configuration = DefaultKVConfiguration,
-          typename Queue = multiqueue::local_nonaddressable::kv_pq<Key, Value>,
+template <typename Key, typename Value, template <typename, typename> typename Configuration = DefaultKVConfiguration,
           typename Allocator = std::allocator<Key>>
 class kv_priority_queue {
    public:
     using key_type = Key;
     using mapped_type = Value;
-    using value_type = typename Queue::value_type;
-    using pop_return_type = value_type;
+    using queue_type = typename Configuration<key_type, mapped_type>::Queue;
+    using value_type = typename queue_type::value_type;
+    static constexpr auto C = static_cast<unsigned int>(Configuration<key_type, mapped_type>::C);
+    static constexpr auto Peek = static_cast<unsigned int>(Configuration<key_type, mapped_type>::Peek);
 
    private:
     struct alignas(64) aligned_pq {
-        Queue queue = Queue();
-        std::pair<std::atomic<Key>, std::atomic<Value>> top = {Sentinel<Key>::get(), mapped_type{}};
+        queue_type queue = queue_type();
+        std::atomic<Key> top_key = Sentinel<Key>::get();
         mutable std::atomic_flag in_use = ATOMIC_FLAG_INIT;
     };
+
     struct is_nonempty {
         constexpr bool operator()(size_t index) {
-            return !Sentinel<Key>::is_sentinel(pq->queue_list_[index].top.first.load(std::memory_order_relaxed));
+            return !Sentinel<Key>::is_sentinel(pq->queue_list_[index].top_key.load(std::memory_order_relaxed));
         }
         kv_priority_queue const *pq;
     };
+
     using allocator_type = typename std::allocator_traits<Allocator>::template rebind_alloc<aligned_pq>;
 
    private:
     std::vector<aligned_pq, allocator_type> queue_list_;
     size_t num_queues_;
-    typename Queue::key_comparator comp_;
+    typename queue_type::key_comparator comp_;
 
     inline std::mt19937 &get_rng() const {
         static thread_local std::mt19937 gen;
@@ -69,12 +74,12 @@ class kv_priority_queue {
     }
 
     inline size_t random_queue_index() const {
-        static thread_local std::mt19937 gen;
         std::uniform_int_distribution<size_t> dist{0, num_queues_ - 1};
-        return dist(gen);
+        return dist(get_rng());
     }
 
     inline bool try_lock(size_t const index) const noexcept {
+        // TODO: MEASURE
         if (!queue_list_[index].in_use.test_and_set(std::memory_order_relaxed)) {
             std::atomic_thread_fence(std::memory_order_acquire);
             return true;
@@ -88,53 +93,58 @@ class kv_priority_queue {
 
    public:
     explicit kv_priority_queue(unsigned int const num_threads)
-        : queue_list_(num_threads * Configuration::C),
+        : queue_list_(num_threads * C), num_queues_{static_cast<unsigned int>(queue_list_.size())}, comp_{} {
+        assert(num_threads >= 1);
+        assert(num_queues_ >= Configuration::Peek);
+    }
+
+    explicit kv_priority_queue(std::allocator_arg_t, Allocator const &a, unsigned int const num_threads)
+        : queue_list_(num_threads * C, {queue_type(a)}),
           num_queues_{static_cast<unsigned int>(queue_list_.size())},
           comp_{} {
         assert(num_threads >= 1);
         assert(num_queues_ >= Configuration::Peek);
     }
 
-    explicit kv_priority_queue(std::allocator_arg_t, Allocator const &a, unsigned int const num_threads)
-        : queue_list_(num_threads * Configuration::C, a),
-          num_queues_{static_cast<unsigned int>(queue_list_.size())},
-          comp_{} {
-    }
-
-    value_type top() const {
-        std::array<size_t, Configuration::Peek> sample;
+    bool top(value_type &retval) const {
         while (true) {
-            auto queue_it = util::predicate_iterator<size_t, is_nonempty>{0, num_queues_, is_nonempty{this}};
-            auto sample_end = std::sample(queue_it, queue_it.end(), std::begin(sample), Configuration::Peek, get_rng());
-            if (std::begin(sample) == sample_end) {
-                return {Sentinel<key_type>::get(), mapped_type{}};
-            }
+            auto const start_index = random_queue_index();
+            auto index = start_index;
+            auto min_index = index;
+            /* auto nonempty_it = util::predicate_iterator<size_t, is_nonempty>{index, num_queues_, is_nonempty{this}};
+             */
             auto min_key = Sentinel<key_type>{};
-            auto min_value = mapped_type{};
-            auto it = std::begin(sample);
-            for (; it != sample_end; ++it) {
-                min_key = queue_list_[*it].top.first.load(std::memory_order_relaxed);
-                if (!Sentinel<Key>::is_sentinel(min_key)) {
-                    min_value = queue_list_[*it].top.second.load(std::memory_order_relaxed);
-                    if (min_key == queue_list_[*it].top.first.load(std::memory_order_relaxed)) {
+            unsigned int num_nonempty = 0;
+            while (true) {
+                auto current_key = queue_list_[index].top_key.load(std::memory_order_relaxed);
+                if (!Sentinel<Key>::is_sentinel(current_key)) {
+                    if ((num_nonempty == 0 || comp_(current_key, min_key))) {
+                        min_key = std::move(current_key);
+                        min_index = index;
+                    }
+                    if (++num_nonempty == Peek) {
                         break;
                     }
                 }
-            }
-            for (++it; it < sample_end; ++it) {
-                auto current_key = queue_list_[*it].top.first.load(std::memory_order_relaxed);
-                if (!Sentinel<Key>::is_sentinel(current_key) && comp_(current_key, min_key)) {
-                    auto current_val = queue_list_[*it].top.second.load(std::memory_order_relaxed);
-                    if (current_key == queue_list_[*it].top.first.load(std::memory_order_relaxed)) {
-                        min_key = std::move(current_key);
-                        min_value = std::move(current_val);
-                    }
+                index = (index + 1) % num_queues_;
+                if (index == start_index) {
+                    break;
                 }
             }
-            if (!Sentinel<Key>::is_sentinel(min_key)) {
-                return {min_key, min_value};
+            if (num_nonempty == 0) {
+                return false;
             }
+            if (!try_lock(min_index)) {
+                continue;
+            }
+            if (!queue_list_[min_index].queue.empty()) {
+                retval = queue_list_[min_index].queue.top();
+                unlock(min_index);
+                return true;
+            }
+            unlock(min_index);
         }
+        return false;
     }
 
     void push(value_type value) {
@@ -143,61 +153,56 @@ class kv_priority_queue {
         while (!try_lock(queue_index)) {
             queue_index = (queue_index + 1) % num_queues_;
         }
-        if (queue_list_[queue_index].top.first == Sentinel<key_type>::get()) {
-            queue_list_[queue_index].top = std::move(value);
-        } else if (comp_(value.first, queue_list_[queue_index].top.first)) {
-            queue_list_[queue_index].queue.push(std::move(queue_list_[queue_index].top));
-            queue_list_[queue_index].top = std::move(value);
-        } else {
-            queue_list_[queue_index].queue.push(std::move(value));
-        }
+        queue_list_[queue_index].queue.push(std::move(value));
+        queue_list_[queue_index].top_key.store(queue_list_[queue_index].queue.top().first, std::memory_order_relaxed);
         unlock(queue_index);
     }
 
-    inline value_type extract_top() {
-        std::array<size_t, Configuration::Peek> sample;
+    bool extract_top(value_type &retval) {
         while (true) {
-            auto queue_it = util::predicate_iterator<size_t, is_nonempty>{0, num_queues_, is_nonempty{this}};
-            auto sample_end = std::sample(queue_it, queue_it.end(), std::begin(sample), Configuration::Peek, get_rng());
-            if (std::begin(sample) == sample_end) {
-                return {Sentinel<key_type>::get(), mapped_type{}};
-            }
+            auto const start_index = random_queue_index();
+            auto index = start_index;
+            auto min_index = index;
+            /* auto nonempty_it = util::predicate_iterator<size_t, is_nonempty>{index, num_queues_, is_nonempty{this}};
+             */
             auto min_key = Sentinel<key_type>::get();
-            auto it = std::begin(sample);
-            for (; it != sample_end; ++it) {
-                min_key = queue_list_[*it].top.first.load(std::memory_order_relaxed);
-                if (!Sentinel<Key>::is_sentinel(min_key)) {
+            unsigned int num_nonempty = 0;
+            while (true) {
+                auto current_key = queue_list_[index].top_key.load(std::memory_order_relaxed);
+                if (!Sentinel<Key>::is_sentinel(current_key)) {
+                    if ((num_nonempty == 0 || comp_(current_key, min_key))) {
+                        min_key = std::move(current_key);
+                        min_index = index;
+                    }
+                    if (++num_nonempty == Peek) {
+                        break;
+                    }
+                }
+                index = (index + 1) % num_queues_;
+                if (index == start_index) {
                     break;
                 }
             }
-            auto min_it = it;
-            for (++it; it < sample_end; ++it) {
-                auto current_key = queue_list_[*it].top.first.load(std::memory_order_relaxed);
-                if (!Sentinel<Key>::is_sentinel(current_key) && comp_(current_key, min_key)) {
-                    min_key = std::move(current_key);
-                    min_it = it;
-                }
+            if (num_nonempty == 0) {
+                return false;
             }
-            if (min_it < sample_end) {
-                if (!try_lock(*min_it)) {
-                    continue;
-                }
-                auto result_key = queue_list_[*min_it].top.first.load(std::memory_order_relaxed);
-                if (Sentinel<key_type>::is_sentinel(result_key)) {
-                    continue;
-                }
-                value_type result = {result_key, queue_list_[*min_it].top.second.load(std::memory_order_relaxed)};
-                if (queue_list_[*min_it].queue.empty()) {
-                    queue_list_[*min_it].top.first.store(Sentinel<key_type>::get(), std::memory_order_relaxed);
-                    queue_list_[*min_it].top.second.store(mapped_type{}, std::memory_order_relaxed);
+            if (!try_lock(min_index)) {
+                continue;
+            }
+            if (!queue_list_[min_index].queue.empty()) {
+                queue_list_[min_index].queue.extract_top(retval);
+                if (queue_list_[min_index].queue.empty()) {
+                    queue_list_[min_index].top_key.store(Sentinel<Key>::get(), std::memory_order_relaxed);
                 } else {
-                    queue_list_[*min_it].top = queue_list_[*min_it].queue.extract_top();
+                    queue_list_[min_index].top_key.store(queue_list_[min_index].queue.top().first,
+                                                         std::memory_order_relaxed);
                 }
-                unlock(*min_it);
-                return result;
+                unlock(min_index);
+                return true;
             }
+            unlock(min_index);
         }
-        return {Sentinel<key_type>::get(), mapped_type{}};
+        return false;
     }
 };
 

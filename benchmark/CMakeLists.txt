@@ -17,3 +17,12 @@ target_link_libraries_system(quality PRIVATE cxxopts)
 target_compile_definitions(quality PRIVATE "NDEBUG")
 target_compile_options(quality PRIVATE "-O3")
 target_compile_options(quality PRIVATE "-march=native")
+
+add_executable(evaluate_quality evaluate_quality.cpp)
+target_link_libraries(evaluate_quality PRIVATE multiqueue_warnings)
+target_link_libraries_system(evaluate_quality PRIVATE cxxopts)
+target_compile_options(evaluate_quality PRIVATE "-O3")
+target_compile_features(
+  evaluate_quality PRIVATE
+  cxx_std_17
+)

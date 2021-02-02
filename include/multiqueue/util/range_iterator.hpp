@@ -99,7 +99,7 @@ class range_iterator {
 template <typename T, typename Predicate>
 class predicate_iterator {
    public:
-    using iterator_category = std::forward_iterator_tag;
+    using iterator_category = std::input_iterator_tag;
     using value_type = T;
     using difference_type = std::ptrdiff_t;
     using pointer = T*;
@@ -116,9 +116,6 @@ class predicate_iterator {
     constexpr explicit predicate_iterator(T value, T max_value = std::numeric_limits<T>::max(),
                                           Predicate const& pred = Predicate{})
         : v_{value}, max_{max_value}, pred_{pred} {
-        while (v_ < max_ && !pred_(v_)) {
-            ++v_;
-        }
     }
 
     constexpr predicate_iterator end() const noexcept {
@@ -130,6 +127,9 @@ class predicate_iterator {
     }
 
     constexpr predicate_iterator& operator++() noexcept {
+        if (v_ == max_) {
+            return *this;
+        }
         do {
             ++v_;
         } while (v_ < max_ && !pred_(v_));
@@ -140,13 +140,6 @@ class predicate_iterator {
         auto tmp = *this;
         ++*this;
         return tmp;
-    }
-
-    constexpr predicate_iterator& operator+=(difference_type n) {
-        for (difference_type i = 0; i < n; ++i) {
-            ++*this;
-        }
-        return *this;
     }
 
     friend constexpr bool operator==(const predicate_iterator& it, const predicate_iterator&) {

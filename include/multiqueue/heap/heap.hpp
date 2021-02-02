@@ -208,7 +208,7 @@ class heap {
         data_.container.reserve(new_cap);
     }
 
-    void remove_front() {
+    void pop() {
         assert(!data_.container.empty());
         auto const index = SiftStrategy::remove(*this, 0u);
         if (index + 1 < data_.container.size()) {
@@ -218,56 +218,24 @@ class heap {
         assert(is_heap());
     }
 
-    value_type extract_front() {
+    void extract_top(value_type &retval) {
         assert(!data_.container.empty());
-        auto ret = std::move(data_.container.front());
-        remove_front();
-        return ret;
+        retval = std::move(data_.container.front());
+        pop();
     }
 
-    void insert_copy(value_type value) {
+    template <typename insert_type>
+    void insert(insert_type &&value) {
         if (empty()) {
-            data_.container.push_back(std::move(value));
+            data_.container.push_back(std::forward<insert_type>(value));
         } else {
             if (auto const parent = parent_index(size());
                 compare(extract_key(value), extract_key(data_.container[parent]))) {
                 data_.container.push_back(std::move(data_.container[parent]));
                 auto const index = SiftStrategy::sift_up_hole(*this, parent, extract_key(value));
-                data_.container[index] = std::move(value);
+                data_.container[index] = std::forward<insert_type>(value);
             } else {
-                data_.container.push_back(std::move(value));
-            }
-        }
-        assert(is_heap());
-    }
-
-    void insert_reference(value_type const &value) {
-        if (empty()) {
-            data_.container.push_back(value);
-        } else {
-            if (auto const parent = parent_index(size());
-                compare(extract_key(value), extract_key(data_.container[parent]))) {
-                data_.container.push_back(std::move(data_.container[parent]));
-                auto const index = SiftStrategy::sift_up_hole(*this, parent, extract_key(value));
-                data_.container[index] = value;
-            } else {
-                data_.container.push_back(value);
-            }
-        }
-        assert(is_heap());
-    }
-
-    void insert_reference(value_type &&value) {
-        if (empty()) {
-            data_.container.push_back(std::move(value));
-        } else {
-            if (auto const parent = parent_index(size());
-                compare(extract_key(value), extract_key(data_.container[parent]))) {
-                data_.container.push_back(std::move(data_.container[parent]));
-                auto const index = SiftStrategy::sift_up_hole(*this, parent, extract_key(value));
-                data_.container[index] = std::move(value);
-            } else {
-                data_.container.push_back(std::move(value));
+                data_.container.push_back(std::forward<insert_type>(value));
             }
         }
         assert(is_heap());

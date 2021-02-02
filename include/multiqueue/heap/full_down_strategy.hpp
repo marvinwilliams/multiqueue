@@ -2,6 +2,7 @@
 #define FULL_DOWN_STRATEGY_JHFMCDVI
 
 #include <utility>
+#include <cassert>
 
 namespace multiqueue {
 namespace local_nonaddressable {
