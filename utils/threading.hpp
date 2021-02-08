@@ -156,6 +156,9 @@ struct thread_config {
             throw std::domain_error{"Empty cpu set"};
         }
         if (policy) {
+            if (std::holds_alternative<scheduling::Idle>(*policy)) {
+                throw std::domain_error{"Not possible to schedule idle thread"};
+            }
             scheduling::check_policy(*policy);
         }
     }

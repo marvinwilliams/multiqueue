@@ -1,10 +1,14 @@
 #include <x86intrin.h>
+#include <atomic>
+#include <cassert>
 #include <chrono>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <memory>
 #include <new>
+#include <random>
 #include <thread>
 #include <type_traits>
 
@@ -32,13 +36,10 @@ static constexpr unsigned int bits_represent_thread_id = 8;
 static_assert(bits_represent_thread_id < 12, "Must use at most 12 bits to represent the thread id");
 
 using key_type = uint64_t;
-struct value_type {
-    uint64_t thread_id : bits_represent_thread_id;
-    uint64_t elem_id : 64 - bits_represent_thread_id;
-};
+using value_type = uint64_t;
 
 template <typename Key, typename Value>
-struct KVConfiguration  : multiqueue::rsm::DefaultKVConfiguration<Key, Value> {
+struct KVConfiguration : multiqueue::rsm::DefaultKVConfiguration<Key, Value> {
     static constexpr unsigned int Peek = 2;
     static constexpr unsigned int C = 4;
 };
@@ -151,7 +152,7 @@ struct KeyGenerator<KeyDistribution::Descending> {
     }
 
     uint64_t operator()() {
-        assert(current != std::numeric_limits<uint64_t>::max());
+        assert(current_ != std::numeric_limits<uint64_t>::max());
         return current_--;
     }
 };
@@ -173,16 +174,6 @@ struct KeyGenerator<KeyDistribution::Dijkstra> {
     }
 };
 
-struct insertion_log {
-    uint64_t tick;
-    key_type key;
-};
-
-struct deletion_log {
-    uint64_t tick;
-    value_type value;
-};
-
 std::atomic_bool start_flag;
 std::atomic_bool stop_flag;
 std::mutex m;
@@ -192,10 +183,12 @@ bool prefill_done;
 // Assume rdtsc is thread-safe and synchronized on each CPU
 // Assumption false
 
+std::atomic_uint64_t global_insertions = 0;
+std::atomic_uint64_t global_deletions = 0;
+std::atomic_uint64_t global_failed_deletions = 0;
+
 struct Task {
-    static void run(thread_coordination::Context context, pq_t& pq, Settings const& settings,
-                    std::vector<std::vector<insertion_log>>& global_insertions,
-                    std::vector<std::vector<deletion_log>>& global_deletions) {
+    static void run(thread_coordination::Context context, pq_t& pq, Settings const& settings) {
         std::variant<Inserter<InsertPolicy::Uniform>, Inserter<InsertPolicy::Split>, Inserter<InsertPolicy::Producer>,
                      Inserter<InsertPolicy::Alternating>>
             inserter;
@@ -233,28 +226,22 @@ struct Task {
                     settings.dijkstra_increase_min, settings.dijkstra_increase_max, context.get_id()};
                 break;
         }
-        std::vector<insertion_log> insertions;
-        insertions.reserve(1'000'000);
-        std::vector<deletion_log> deletions;
-        deletions.reserve(1'000'000);
-        context.synchronize(0, []() { std::cout << "Prefilling the queue..." << std::flush; });
+        uint64_t insertions = 0;
+        uint64_t deletions = 0;
+        uint64_t failed_deletions = 0;
+        context.synchronize(0, []() { std::clog << "Prefilling the queue..." << std::flush; });
         size_t num_insertions = settings.prefill_size / context.get_num_threads();
         if (context.is_main()) {
             num_insertions +=
                 settings.prefill_size - (settings.prefill_size / context.get_num_threads()) * context.get_num_threads();
         }
         context.synchronize(1);
-        uint64_t local_rdtsc = _rdtsc();
         for (size_t i = 0u; i < num_insertions; ++i) {
             key_type key = std::visit([](auto& g) noexcept { return g(); }, key_generator);
-            value_type value{context.get_id(), insertions.size()};
-            /* insertions.push_back(insertion_log{_rdtsc() - local_rdtsc, key}); */
-            auto now = std::chrono::steady_clock::now();
-            insertions.push_back(insertion_log{now.time_since_epoch().count(), key});
-            pq.push({key, value});
+            pq.push({key, key});
         }
         context.synchronize(2, []() {
-            std::cout << "done\nStarting the workload..." << std::flush;
+            std::clog << "done\nStarting the workload..." << std::flush;
             {
                 auto lock = std::unique_lock(m);
                 prefill_done = true;
@@ -268,35 +255,27 @@ struct Task {
         while (!stop_flag.load(std::memory_order_relaxed)) {
             if (std::visit([](auto& i) noexcept { return i(); }, inserter)) {
                 key_type key = std::visit([](auto& g) noexcept { return g(); }, key_generator);
-                value_type value{context.get_id(), insertions.size()};
-                /* insertions.push_back(insertion_log{_rdtsc() - local_rdtsc, key}); */
-                auto now = std::chrono::steady_clock::now();
-                insertions.push_back(insertion_log{now.time_since_epoch().count(), key});
-                pq.push({key, value});
+                pq.push({key, key});
+                ++insertions;
             } else {
                 if (pq.extract_top(retval)) {
-                    /* deletions.push_back(deletion_log{_rdtsc() - local_rdtsc, retval.second}); */
-                    auto now = std::chrono::steady_clock::now();
-                    deletions.push_back(deletion_log{now.time_since_epoch().count(), retval.second});
+                    ++deletions;
                 } else {
-                    auto now = std::chrono::steady_clock::now();
-                    deletions.push_back(
-                        /* deletion_log{_rdtsc() - local_rdtsc, value_type{(1u << bits_represent_thread_id) - 1, 0}});
-                         */
-                        deletion_log{now.time_since_epoch().count(),
-                                     value_type{(1u << bits_represent_thread_id) - 1, 0}});
+                    ++failed_deletions;
                 }
             }
         }
-        context.synchronize(3, []() { std::cout << "done" << std::endl; });
-        global_insertions[context.get_id()] = std::move(insertions);
-        global_deletions[context.get_id()] = std::move(deletions);
+        context.synchronize(3, []() { std::clog << "done" << std::endl; });
+        global_insertions += insertions;
+        global_deletions += deletions;
+        global_failed_deletions += failed_deletions;
     }
 
     static threading::thread_config get_config(unsigned int i) {
         threading::thread_config config;
         config.cpu_set.reset();
         config.cpu_set.set(i);
+        config.policy = threading::scheduling::Fifo{1};
         return config;
     }
 };
@@ -323,7 +302,7 @@ int main(int argc, char* argv[]) {
     try {
         auto result = options.parse(argc, argv);
         if (result.count("help")) {
-            std::cout << options.help() << std::endl;
+            std::cerr << options.help() << std::endl;
             exit(0);
         }
         if (result.count("prefill") > 0) {
@@ -375,9 +354,7 @@ int main(int argc, char* argv[]) {
     pq_t pq{settings.num_threads};
     std::atomic_thread_fence(std::memory_order_release);
     thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
-    std::vector<std::vector<insertion_log>> global_insertions(settings.num_threads);
-    std::vector<std::vector<deletion_log>> global_deletions(settings.num_threads);
-    coordinator.run<Task>(std::ref(pq), settings, std::ref(global_insertions), std::ref(global_deletions));
+    coordinator.run<Task>(std::ref(pq), settings);
     {
         auto lock = std::unique_lock(m);
         cv.wait(lock, []() { return prefill_done; });
@@ -386,23 +363,9 @@ int main(int argc, char* argv[]) {
     std::this_thread::sleep_for(settings.working_time);
     stop_flag.store(true, std::memory_order_release);
     coordinator.join();
-    std::cout << "Writing logs..." << std::flush;
-    {
-        std::ofstream out("insertions.txt");
-        for (unsigned int t = 0; t < settings.num_threads; ++t) {
-            for (auto const& [time, key] : global_insertions[t]) {
-                out << t << " " << time << " " << key << '\n';
-            }
-        }
-    }
-    {
-        std::ofstream out("deletions.txt");
-        for (unsigned int t = 0; t < settings.num_threads; ++t) {
-            for (auto const& [time, val] : global_deletions[t]) {
-                out << t << " " << time << " " << val.thread_id << " " << val.elem_id << '\n';
-            }
-        }
-    }
-    std::cout << "done" << std::endl;
+    std::cout << "Insertions: " << global_insertions << "\nDeletions: " << global_deletions
+              << "\nFDeletions: " << global_failed_deletions << "\nOps/s: " << std::fixed << std::setprecision(1)
+              << 1000.0 * static_cast<double>(global_insertions + global_deletions) / settings.working_time.count()
+              << std::endl;
     return 0;
 }
