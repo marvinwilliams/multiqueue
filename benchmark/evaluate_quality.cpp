@@ -25,10 +25,31 @@ bool operator!=(insertion_log const& lhs, insertion_log const& rhs) {
     return !(lhs == rhs);
 }
 
+static constexpr unsigned int bits_represent_thread_id = 8;
+static constexpr uint64_t thread_id_mask = (static_cast<uint64_t>(1u) << (64u - bits_represent_thread_id)) - 1u;
+
+struct log_value {
+    uint64_t data;
+
+    log_value(uint64_t from_uint) noexcept : data{from_uint} {
+    }
+    log_value(unsigned int thread_id, uint64_t elem_id) noexcept {
+        data = (static_cast<uint64_t>(thread_id) << (64u - bits_represent_thread_id)) | (elem_id & thread_id_mask);
+    }
+    constexpr unsigned int thread_id() const noexcept {
+        return static_cast<unsigned int>(data >> (64u - bits_represent_thread_id));
+    }
+    constexpr uint64_t elem_id() const noexcept {
+        return data & thread_id_mask;
+    }
+    operator uint64_t() const noexcept {
+        return data;
+    }
+};
+
 struct deletion_log {
     uint64_t tick;
-    uint64_t thread_id : 8;
-    uint64_t id : 56;
+    log_value value;
 };
 
 int main(int argc, char* argv[]) {
@@ -66,6 +87,7 @@ int main(int argc, char* argv[]) {
         std::cerr << e.what() << '\n';
         return 1;
     }
+
     std::vector<std::vector<insertion_log>> insertions;
     std::vector<deletion_log> deletions;
     auto in_f = std::ifstream{in};
@@ -80,7 +102,7 @@ int main(int argc, char* argv[]) {
     }
     {
         std::clog << "Reading insertion file...\n";
-        uint64_t thread_id;
+        unsigned int thread_id;
         uint64_t tick;
         uint64_t key;
         while (in_f >> thread_id >> tick >> key) {
@@ -94,13 +116,13 @@ int main(int argc, char* argv[]) {
     }
     {
         std::clog << "Reading deletion file...\n";
-        uint64_t thread_id;
+        unsigned int thread_id;
         uint64_t tick;
-        uint64_t other_thread_id;
+        unsigned int other_thread_id;
         uint64_t id;
         deletions.reserve(1'000'000);
         while (del_f >> thread_id >> tick >> other_thread_id >> id) {
-            deletions.push_back(deletion_log{tick, other_thread_id, id});
+            deletions.push_back(deletion_log{tick, {other_thread_id, id}});
         }
         del_f.close();
     }
@@ -116,7 +138,7 @@ int main(int argc, char* argv[]) {
     uint64_t failed_deletions = 0;
     size_t counter = 0;
     size_t progress = 0;
-    for (auto const& [tick, thread_id, id] : deletions) {
+    for (auto const& [tick, value] : deletions) {
         if ((10 * counter) / deletions.size() >= progress) {
             std::clog << "Processed " << std::setprecision(3)
                       << 100. * static_cast<double>(counter) / static_cast<double>(deletions.size()) << "%\n";
@@ -124,7 +146,7 @@ int main(int argc, char* argv[]) {
         }
         ++counter;
         /* std::cout << "Deletion tick is at " << tick << std::endl; */
-        if (thread_id == (1u << 8) - 1) {
+        if (value.thread_id() == (1u << 8) - 1) {
             if (!replay_heap.empty()) {
                 for (auto& [num, delay] : replay_heap) {
                     ++delay;
@@ -134,9 +156,9 @@ int main(int argc, char* argv[]) {
             }
             continue;
         }
-        if (thread_id >= insertions.size() || id >= insertions[thread_id].size()) {
-            std::cerr << "No insertion corresponding to deletion of '" << thread_id << " " << id << "' at tick " << tick
-                      << " was found\n";
+        if (value.thread_id() >= insertions.size() || value.elem_id() >= insertions[value.thread_id()].size()) {
+            std::cerr << "No insertion corresponding to deletion of '" << value.thread_id() << " " << value.elem_id()
+                      << "' at tick " << tick << " was found\n";
             return 1;
         }
         /* std::cout << "Delete key " << insertions[thread_id][id].key << std::endl; */
@@ -150,31 +172,31 @@ int main(int argc, char* argv[]) {
             }
         }
         /* std::cout << std::endl; */
-        if (auto it = replay_heap.lower_bound(insertions[thread_id][id].key);
-            it != replay_heap.end() && it->first == insertions[thread_id][id].key) {
-            size_t rank_error = static_cast<size_t>(std::distance(replay_heap.begin(), it));
-            if (rank_error >= rank_histogram.size()) {
-                rank_histogram.resize(rank_error + 1, 0);
-            }
-            ++rank_histogram[rank_error];
-            if (it->second >= delay_histogram.size()) {
-                delay_histogram.resize(it->second + 1, 0);
-            }
-            ++delay_histogram[it->second];
-            for (auto smaller = replay_heap.begin(); smaller != it; ++smaller) {
-                ++smaller->second;
-            }
-            replay_heap.erase(it);
-        } else {
-            /* if (it == replay_heap.end()) { */
-            /*     std::cout << "No element was found" << std::endl; */
-            /* } else { */
-            /*     std::cout << "Next greater element in heap is " << *it << std::endl; */
-            /* } */
-            std::cerr << "Element with key " << insertions[thread_id][id].key << " and value '" << thread_id << " "
-                      << id << "' was deleted before being inserted\n";
-            return 1;
-        }
+        /* if (auto it = replay_heap.lower_bound(insertions[value.thread_id()][value.elem_id()].key); */
+        /*     it != replay_heap.end() && it->first == insertions[value.thread_id()][value.elem_id()].key) { */
+        /*     size_t rank_error = static_cast<size_t>(std::distance(replay_heap.begin(), it)); */
+        /*     if (rank_error >= rank_histogram.size()) { */
+        /*         rank_histogram.resize(rank_error + 1, 0); */
+        /*     } */
+        /*     ++rank_histogram[rank_error]; */
+        /*     if (it->second >= delay_histogram.size()) { */
+        /*         delay_histogram.resize(it->second + 1, 0); */
+        /*     } */
+        /*     ++delay_histogram[it->second]; */
+        /*     for (auto smaller = replay_heap.begin(); smaller != it; ++smaller) { */
+        /*         ++smaller->second; */
+        /*     } */
+        /*     replay_heap.erase(it); */
+        /* } else { */
+        /*     /1* if (it == replay_heap.end()) { *1/ */
+        /*     /1*     std::cout << "No element was found" << std::endl; *1/ */
+        /*     /1* } else { *1/ */
+        /*     /1*     std::cout << "Next greater element in heap is " << *it << std::endl; *1/ */
+        /*     /1* } *1/ */
+        /*     std::cerr << "Element with key " << insertions[value.thread_id()][value.elem_id()].key << " and value '" */
+        /*               << value.thread_id() << " " << value.elem_id() << "' was deleted before being inserted\n"; */
+        /*     return 1; */
+        /* } */
     }
     std::clog << "Processed 100%" << std::endl;
     {

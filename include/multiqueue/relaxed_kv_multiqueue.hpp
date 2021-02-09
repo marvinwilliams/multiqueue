@@ -20,7 +20,7 @@
 #include <cassert>
 #include <random>
 #include <vector>
-
+#include 
 namespace multiqueue {
 namespace rsm {
 
@@ -30,7 +30,7 @@ struct DefaultKVConfiguration {
     static constexpr unsigned int C = 4;
     // Number of local queues to test for finding the smallest
     static constexpr unsigned int Peek = 4;
-    using Queue = multiqueue::local_nonaddressable::kv_pq<Key, Value>;
+    using Queue = local_nonaddressable::kv_pq<Key, Value>;
 };
 
 template <typename T>

@@ -1,16 +1,15 @@
 #ifndef THREAD_COORDINATION_HPP_7F7173D6
 #define THREAD_COORDINATION_HPP_7F7173D6
 
-#include <pthread.h>
 #include "threading.hpp"
 
+#include <pthread.h>
 #include <algorithm>
 #include <chrono>
 #include <optional>
 #include <system_error>
 #include <utility>
 #include <vector>
-#include "threading.hpp"
 
 namespace thread_coordination {
 

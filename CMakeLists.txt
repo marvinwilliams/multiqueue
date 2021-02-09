@@ -1,12 +1,6 @@
 cmake_minimum_required(VERSION 3.19)
 
-if("${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}")
-  set(IS_SUBPROJECT OFF)
-else()
-  set(IS_SUBPROJECT OFF)
-endif()
-
-project(multiqueue VERSION 0.1.0 LANGUAGES CXX)
+project(multiqueue VERSION 0.1.0 LANGUAGES CXX C)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
@@ -18,16 +12,20 @@ include(GNUInstallDirs)
 
 prevent_intree_builds()
 
+set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/external")
+
 option(${PROJECT_NAME}_USE_DOXYGEN "Add a doxygen target to generate the documentation" ON)
 cmake_dependent_option(${PROJECT_NAME}_INSTALL_DOCS "Add the generated documentation to the install list" ON, ${PROJECT_NAME}_USE_DOXYGEN OFF)
 option(${PROJECT_NAME}_INSTALL "Add ${PROJECT_NAME} to the install list" ON)
 cmake_dependent_option("${PROJECT_NAME}_BUILD_TESTS" "Build tests for ${PROJECT_NAME}" ON "BUILD_TESTING" OFF)
 cmake_dependent_option("${PROJECT_NAME}_SYSTEM_CATCH" "Use catch version installed on the system" OFF "${PROJECT_NAME}_BUILD_TESTS" OFF)
-set("${PROJECT_NAME}_CATCH_DIR" "${CMAKE_CURRENT_LIST_DIR}/external/Catch2" CACHE PATH "Path to the Catch2 source directory")
+set("${PROJECT_NAME}_CATCH_DIR" "${EXTERNAL_DIR}/Catch2" CACHE PATH "Path to the Catch2 source directory")
 option("${PROJECT_NAME}_BUILD_BENCHMARKS" "Build examples" OFF)
 option("${PROJECT_NAME}_BUILD_EXAMPLES" "Build examples" OFF)
 option(${PROJECT_NAME}_USE_DOXYGEN "Add a doxygen target to generate the documentation" ON)
-set(${PROJECT_NAME}_L1_CACHE_LINESIZE "Set the L1 cache linesize to be used for cache alignment, to encourage true sharing and to prevent false sharing" ON)
+
+# taken from klsm
+execute_process(COMMAND getconf LEVEL1_DCACHE_LINESIZE OUTPUT_VARIABLE CACHE_LINE_SIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
@@ -60,8 +58,7 @@ target_include_directories(
   $<BUILD_INTERFACE:${PROJECT_CURRENT_BINARY_DIR}>
 )
 
-# This interface reflects the requirements to the compiler for building targets
-# linking against.
+# This interface reflects the compile requirements for targets linking against this project.
 add_library("${PROJECT_NAME}_compile_requirements" INTERFACE)
 
 # We just want c++17 or above
@@ -70,10 +67,9 @@ target_compile_features(
   cxx_std_17
 )
 
-# Link against the pthread library
+# Find the pthread library
 set(THREADS_PREFER_PTHREAD_FLAG ON)
-find_package(Threads REQUIRED)
-target_link_libraries("${PROJECT_NAME}_compile_requirements" INTERFACE Threads::Threads)
+find_package(Threads)
 
 target_link_libraries("${PROJECT_NAME}" INTERFACE "${PROJECT_NAME}_compile_requirements")
 
@@ -82,7 +78,7 @@ target_link_libraries("${PROJECT_NAME}" INTERFACE "${PROJECT_NAME}_compile_requi
 add_library("${PROJECT_NAME}::${PROJECT_NAME}" ALIAS "${PROJECT_NAME}")
 
 # Not added as link target to avoid propagation of warning
-# flags.  Only to be used by internal targets that compile the library.
+# flags.  Is used only by internal targets that compile the library.
 add_library("${PROJECT_NAME}_warnings" INTERFACE)
 
 string(
@@ -111,6 +107,8 @@ target_compile_options(
   $<BUILD_INTERFACE:${WARNING_FLAGS}>
 )
 
+add_subdirectory(utils)
+
 if(${PROJECT_NAME}_BUILD_TESTS OR ${PROJECT_NAME}_BUILD_BENCHMARKS)
   if(${PROJECT_NAME}_SYSTEM_CATCH)
     find_package(Catch2 REQUIRED)
@@ -121,11 +119,13 @@ if(${PROJECT_NAME}_BUILD_TESTS OR ${PROJECT_NAME}_BUILD_BENCHMARKS)
     add_subdirectory("${${PROJECT_NAME}_CATCH_DIR}" EXCLUDE_FROM_ALL)
     list(APPEND CMAKE_MODULE_PATH "${${PROJECT_NAME}_CATCH_DIR}/contrib")
   endif()
+  add_subdirectory("${EXTERNAL_DIR}/cxxopts")
+  add_subdirectory(wrapper)
 endif()
 
 if(${PROJECT_NAME}_BUILD_TESTS)
   set(TEST_RUNNER_PARAMS "" CACHE STRING "Options added to the test runner")
-  add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/tests")
+  add_subdirectory(tests)
 endif()
 
 if(${PROJECT_NAME}_USE_DOXYGEN)
@@ -134,7 +134,7 @@ if(${PROJECT_NAME}_USE_DOXYGEN)
     doxygen_add_docs(
       doxygen
       "${CMAKE_CURRENT_LIST_DIR}/include/${PROJECT_NAME}"
-      COMMENT "Generate man pages"
+      COMMENT "Generate documentation"
     )
   else()
     message("Doxygen not found, skipping documentation generation")
@@ -142,12 +142,11 @@ if(${PROJECT_NAME}_USE_DOXYGEN)
 endif()
 
 if(${PROJECT_NAME}_BUILD_BENCHMARKS)
-  add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/external/cxxopts")
-  add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/benchmark")
+  add_subdirectory(benchmark)
 endif()
 
 if(${PROJECT_NAME}_BUILD_EXAMPLES)
-  add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/examples")
+  add_subdirectory(examples)
 endif()
 
 if(${PROJECT_NAME}_INSTALL)

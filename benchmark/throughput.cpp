@@ -13,11 +13,38 @@
 #include <type_traits>
 
 #include "cxxopts.hpp"
-#include "multiqueue/kv_pq.hpp"
-/* #include "multiqueue/pq.hpp" */
-#include "multiqueue/relaxed_kv_multiqueue.hpp"
 #include "thread_coordination.hpp"
 #include "threading.hpp"
+
+#define PQ_MQ
+
+#if defined PQ_CAPQ1 || defined PQ_CAPQ2 || defined PQ_CAPQ3 || defined PQ_CAPQ4
+#include "capq.hpp"
+#elif defined PQ_LINDEN
+#include "linden.hpp"
+#elif defined PQ_SKIPQUEUE
+#include "skip_queue.hpp"
+#elif defined PQ_SPRAYLIST
+#include "spraylist.hpp"
+#elif defined PQ_KLSM
+#include "k_lsm/k_lsm.h"
+#include "klsm.hpp"
+#elif defined PQ_DLSM
+#include "dist_lsm/dist_lsm.h"
+#include "klsm.hpp"
+#elif defined PQ_MLSM
+#include "klsm.hpp"
+#include "multi_lsm/multi_lsm.h"
+#elif defined PQ_SLSM
+#include "klsm.hpp"
+#include "shared_lsm/shared_lsm.h"
+#else
+#include "multiqueue/kv_pq.hpp"
+#include "multiqueue/relaxed_kv_multiqueue.hpp"
+#ifndef PQ_MQ
+#define PQ_MQ
+#endif
+#endif
 
 using namespace std::chrono_literals;
 
@@ -32,31 +59,19 @@ static constexpr KeyDistribution default_key_distribution = KeyDistribution::Uni
 static constexpr uint64_t default_dijkstra_increase_min = 1u;
 static constexpr uint64_t default_dijkstra_increase_max = 100u;
 
-static constexpr unsigned int bits_represent_thread_id = 8;
-static_assert(bits_represent_thread_id < 12, "Must use at most 12 bits to represent the thread id");
-
 using key_type = uint64_t;
 using value_type = uint64_t;
 
+#ifdef PQ_MQ
 template <typename Key, typename Value>
 struct KVConfiguration : multiqueue::rsm::DefaultKVConfiguration<Key, Value> {
     static constexpr unsigned int Peek = 2;
     static constexpr unsigned int C = 4;
 };
-using pq_t = multiqueue::rsm::kv_priority_queue<key_type, value_type, KVConfiguration>;
-
-struct Settings {
-    size_t prefill_size = default_prefill_size;
-    std::chrono::milliseconds working_time = default_working_time;
-    unsigned int num_threads = default_num_threads;
-    InsertPolicy policy = default_policy;
-    KeyDistribution key_distribution = default_key_distribution;
-    uint64_t dijkstra_increase_min = default_dijkstra_increase_min;
-    uint64_t dijkstra_increase_max = default_dijkstra_increase_max;
-};
 
 namespace multiqueue {
 namespace rsm {
+
 template <>
 struct Sentinel<key_type> {
     static constexpr key_type get() noexcept {
@@ -67,8 +82,21 @@ struct Sentinel<key_type> {
         return v == get();
     }
 };
+
 }  // namespace rsm
 }  // namespace multiqueue
+
+#endif
+
+struct Settings {
+    size_t prefill_size = default_prefill_size;
+    std::chrono::milliseconds working_time = default_working_time;
+    unsigned int num_threads = default_num_threads;
+    InsertPolicy policy = default_policy;
+    KeyDistribution key_distribution = default_key_distribution;
+    uint64_t dijkstra_increase_min = default_dijkstra_increase_min;
+    uint64_t dijkstra_increase_max = default_dijkstra_increase_max;
+};
 
 template <InsertPolicy>
 struct Inserter {
@@ -180,13 +208,20 @@ std::mutex m;
 std::condition_variable cv;
 bool prefill_done;
 
-// Assume rdtsc is thread-safe and synchronized on each CPU
-// Assumption false
-
 std::atomic_uint64_t global_insertions = 0;
 std::atomic_uint64_t global_deletions = 0;
 std::atomic_uint64_t global_failed_deletions = 0;
 
+// Assume rdtsc is thread-safe and synchronized on each CPU
+// Assumption false
+
+template <typename T, typename = std::void_t<>>
+struct has_thread_init : std::false_type {};
+
+template <typename T>
+struct has_thread_init<T, std::void_t<decltype(std::declval<T>().init_thread(0))>> : std::true_type {};
+
+template <typename pq_t>
 struct Task {
     static void run(thread_coordination::Context context, pq_t& pq, Settings const& settings) {
         std::variant<Inserter<InsertPolicy::Uniform>, Inserter<InsertPolicy::Split>, Inserter<InsertPolicy::Producer>,
@@ -251,7 +286,7 @@ struct Task {
         while (!start_flag.load(std::memory_order_relaxed)) {
         }
         std::atomic_thread_fence(std::memory_order_acquire);
-        typename pq_t::value_type retval;
+        std::pair<key_type, value_type> retval;
         while (!stop_flag.load(std::memory_order_relaxed)) {
             if (std::visit([](auto& i) noexcept { return i(); }, inserter)) {
                 key_type key = std::visit([](auto& g) noexcept { return g(); }, key_generator);
@@ -281,6 +316,31 @@ struct Task {
 };
 
 int main(int argc, char* argv[]) {
+#if defined PQ_CAPQ1
+    using pq_t = multiqueue::wrapper::capq<true, true, true>;
+#elif defined PQ_CAPQ2
+    using pq_t = multiqueue::wrapper::capq<true, false, true>;
+#elif defined PQ_CAPQ3
+    using pq_t = multiqueue::wrapper::capq<false, true, true>;
+#elif defined PQ_CAPQ4
+    using pq_t = multiqueue::wrapper::capq<false, false, true>;
+#elif defined PQ_LINDEN
+    using pq_t = multiqueue::wrapper::linden;
+#elif defined PQ_SKIPQUEUE
+    using pq_t = multiqueue::wrapper::skip_queue<std::pair<key_type, value_type>>;
+#elif defined PQ_SPRAYLIST
+    using pq_t = multiqueue::wrapper::spraylist;
+#elif defined PQ_KLSM
+    using pq_t = multiqueue::wrapper::klsm<kpq::k_lsm<key_type, value_type, 256>, false>;
+#elif defined PQ_DLSM
+    using pq_t = multiqueue::wrapper::klsm<kpq::dist_lsm<key_type, value_type, 256>, false>;
+#elif defined PQ_MLSM
+    using pq_t = multiqueue::wrapper::klsm<kpq::multi_lsm<key_type, value_type>, true>;
+#elif defined PQ_SLSM
+    using pq_t = multiqueue::wrapper::klsm<kpq::shared_lsm<key_type, value_type, 256>, false>;
+#else
+    using pq_t = multiqueue::rsm::kv_priority_queue<key_type, value_type, KVConfiguration>;
+#endif
     cxxopts::Options options("quality benchmark", "This executable measures the quality of relaxed priority queues");
     // clang-format off
     options.add_options()
@@ -352,9 +412,10 @@ int main(int argc, char* argv[]) {
     stop_flag.store(false, std::memory_order_relaxed);
     prefill_done = false;
     pq_t pq{settings.num_threads};
+
     std::atomic_thread_fence(std::memory_order_release);
     thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
-    coordinator.run<Task>(std::ref(pq), settings);
+    coordinator.run<Task<pq_t>>(std::ref(pq), settings);
     {
         auto lock = std::unique_lock(m);
         cv.wait(lock, []() { return prefill_done; });

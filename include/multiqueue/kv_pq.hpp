@@ -5,7 +5,11 @@
  * Created:          01/07/21
  * Description:
  *****************************************************************************/
+#pragma once
+#ifndef test_test _INCLUDED
+#define test_test _INCLUDED
 
+#endif  //!test_test_INCLUDED
 #ifndef KV_PQ_HPP_8MTIGDLA
 #define KV_PQ_HPP_8MTIGDLA
 

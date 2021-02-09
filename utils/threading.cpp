@@ -102,7 +102,7 @@ void pthread::detach() {
     if (detached_) {
         throw std::runtime_error{"Thread is already detached"};
     }
-    int rc = pthread_detach(*thread_handle_);
+    int rc = pthread_detach(*thread_handle_)  ;
     if (rc != 0) {
         throw std::system_error{rc, std::system_category(), "Failed to detach thread: "};
     }

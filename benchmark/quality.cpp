@@ -1,19 +1,48 @@
 #include <x86intrin.h>
+#include <atomic>
+#include <cassert>
 #include <chrono>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
 #include <new>
+#include <random>
 #include <thread>
 #include <type_traits>
+#include <utility>
 
 #include "cxxopts.hpp"
-#include "multiqueue/kv_pq.hpp"
-/* #include "multiqueue/pq.hpp" */
-#include "multiqueue/relaxed_kv_multiqueue.hpp"
 #include "thread_coordination.hpp"
 #include "threading.hpp"
+
+#define PQ_SPRAYLIST
+
+#if defined PQ_CAPQ1 || defined PQ_CAPQ2 || defined PQ_CAPQ3 || defined PQ_CAPQ4
+#include "capq.hpp"
+#elif defined PQ_LINDEN
+#include "linden.hpp"
+#elif defined PQ_SPRAYLIST
+#include "spraylist.hpp"
+#elif defined PQ_KLSM
+#include "k_lsm/k_lsm.h"
+#include "klsm.hpp"
+#elif defined PQ_DLSM
+#include "dist_lsm/dist_lsm.h"
+#include "klsm.hpp"
+#elif defined PQ_MLSM
+#include "klsm.hpp"
+#include "multi_lsm/multi_lsm.h"
+#elif defined PQ_SLSM
+#include "klsm.hpp"
+#include "shared_lsm/shared_lsm.h"
+#else
+#include "multiqueue/kv_pq.hpp"
+#include "multiqueue/relaxed_kv_multiqueue.hpp"
+#ifndef PQ_MQ
+#define PQ_MQ
+#endif
+#endif
 
 using namespace std::chrono_literals;
 
@@ -29,33 +58,40 @@ static constexpr uint64_t default_dijkstra_increase_min = 1u;
 static constexpr uint64_t default_dijkstra_increase_max = 100u;
 
 static constexpr unsigned int bits_represent_thread_id = 8;
-static_assert(bits_represent_thread_id < 12, "Must use at most 12 bits to represent the thread id");
+static constexpr uint64_t thread_id_mask = (static_cast<uint64_t>(1u) << (64u - bits_represent_thread_id)) - 1u;
 
 using key_type = uint64_t;
-struct value_type {
-    uint64_t thread_id : bits_represent_thread_id;
-    uint64_t elem_id : 64 - bits_represent_thread_id;
+using value_type = uint64_t;
+
+struct log_value {
+    uint64_t data;
+
+    log_value(uint64_t from_uint) noexcept : data{from_uint} {
+    }
+    log_value(unsigned int thread_id, uint64_t elem_id) noexcept {
+        data = (static_cast<uint64_t>(thread_id) << (64u - bits_represent_thread_id)) | (elem_id & thread_id_mask);
+    }
+    constexpr unsigned int thread_id() const noexcept {
+        return static_cast<unsigned int>(data >> (64u - bits_represent_thread_id));
+    }
+    constexpr uint64_t elem_id() const noexcept {
+        return data & thread_id_mask;
+    }
+    operator uint64_t() const noexcept {
+        return data;
+    }
 };
 
+#ifdef PQ_MQ
 template <typename Key, typename Value>
-struct KVConfiguration  : multiqueue::rsm::DefaultKVConfiguration<Key, Value> {
+struct KVConfiguration : multiqueue::rsm::DefaultKVConfiguration<Key, Value> {
     static constexpr unsigned int Peek = 2;
     static constexpr unsigned int C = 4;
-};
-using pq_t = multiqueue::rsm::kv_priority_queue<key_type, value_type, KVConfiguration>;
-
-struct Settings {
-    size_t prefill_size = default_prefill_size;
-    std::chrono::milliseconds working_time = default_working_time;
-    unsigned int num_threads = default_num_threads;
-    InsertPolicy policy = default_policy;
-    KeyDistribution key_distribution = default_key_distribution;
-    uint64_t dijkstra_increase_min = default_dijkstra_increase_min;
-    uint64_t dijkstra_increase_max = default_dijkstra_increase_max;
 };
 
 namespace multiqueue {
 namespace rsm {
+
 template <>
 struct Sentinel<key_type> {
     static constexpr key_type get() noexcept {
@@ -66,8 +102,21 @@ struct Sentinel<key_type> {
         return v == get();
     }
 };
+
 }  // namespace rsm
 }  // namespace multiqueue
+
+#endif
+
+struct Settings {
+    size_t prefill_size = default_prefill_size;
+    std::chrono::milliseconds working_time = default_working_time;
+    unsigned int num_threads = default_num_threads;
+    InsertPolicy policy = default_policy;
+    KeyDistribution key_distribution = default_key_distribution;
+    uint64_t dijkstra_increase_min = default_dijkstra_increase_min;
+    uint64_t dijkstra_increase_max = default_dijkstra_increase_max;
+};
 
 template <InsertPolicy>
 struct Inserter {
@@ -151,7 +200,7 @@ struct KeyGenerator<KeyDistribution::Descending> {
     }
 
     uint64_t operator()() {
-        assert(current != std::numeric_limits<uint64_t>::max());
+        assert(current_ != std::numeric_limits<uint64_t>::max());
         return current_--;
     }
 };
@@ -180,7 +229,7 @@ struct insertion_log {
 
 struct deletion_log {
     uint64_t tick;
-    value_type value;
+    log_value value;
 };
 
 std::atomic_bool start_flag;
@@ -192,10 +241,18 @@ bool prefill_done;
 // Assume rdtsc is thread-safe and synchronized on each CPU
 // Assumption false
 
+template <typename T, typename = void>
+struct has_thread_init : std::false_type {};
+
+template <typename T>
+struct has_thread_init<T, std::void_t<decltype(std::declval<T>().init_thread(static_cast<size_t>(0)))>> : std::true_type {};
+
+template <typename pq_t>
 struct Task {
     static void run(thread_coordination::Context context, pq_t& pq, Settings const& settings,
                     std::vector<std::vector<insertion_log>>& global_insertions,
                     std::vector<std::vector<deletion_log>>& global_deletions) {
+      std::cout << "Starting thread " << context.get_id() + 1 << "/" << context.get_num_threads() << '\n';
         std::variant<Inserter<InsertPolicy::Uniform>, Inserter<InsertPolicy::Split>, Inserter<InsertPolicy::Producer>,
                      Inserter<InsertPolicy::Alternating>>
             inserter;
@@ -237,24 +294,27 @@ struct Task {
         insertions.reserve(1'000'000);
         std::vector<deletion_log> deletions;
         deletions.reserve(1'000'000);
-        context.synchronize(0, []() { std::cout << "Prefilling the queue..." << std::flush; });
+
+        if constexpr (has_thread_init<pq_t>::value) {
+            pq.init_thread(context.get_num_threads());
+        }
+
+        context.synchronize(0, []() { std::clog << "Prefilling the queue..." << std::flush; });
         size_t num_insertions = settings.prefill_size / context.get_num_threads();
         if (context.is_main()) {
             num_insertions +=
                 settings.prefill_size - (settings.prefill_size / context.get_num_threads()) * context.get_num_threads();
         }
         context.synchronize(1);
-        uint64_t local_rdtsc = _rdtsc();
         for (size_t i = 0u; i < num_insertions; ++i) {
             key_type key = std::visit([](auto& g) noexcept { return g(); }, key_generator);
-            value_type value{context.get_id(), insertions.size()};
-            /* insertions.push_back(insertion_log{_rdtsc() - local_rdtsc, key}); */
+            log_value value{context.get_id(), insertions.size()};
             auto now = std::chrono::steady_clock::now();
-            insertions.push_back(insertion_log{now.time_since_epoch().count(), key});
+            insertions.push_back(insertion_log{static_cast<uint64_t>(now.time_since_epoch().count()), key});
             pq.push({key, value});
         }
         context.synchronize(2, []() {
-            std::cout << "done\nStarting the workload..." << std::flush;
+            std::clog << "done\nStarting the workload..." << std::flush;
             {
                 auto lock = std::unique_lock(m);
                 prefill_done = true;
@@ -264,31 +324,29 @@ struct Task {
         while (!start_flag.load(std::memory_order_relaxed)) {
         }
         std::atomic_thread_fence(std::memory_order_acquire);
-        typename pq_t::value_type retval;
+        std::pair<key_type, value_type> retval;
         while (!stop_flag.load(std::memory_order_relaxed)) {
             if (std::visit([](auto& i) noexcept { return i(); }, inserter)) {
                 key_type key = std::visit([](auto& g) noexcept { return g(); }, key_generator);
-                value_type value{context.get_id(), insertions.size()};
+                log_value value{context.get_id(), insertions.size()};
                 /* insertions.push_back(insertion_log{_rdtsc() - local_rdtsc, key}); */
                 auto now = std::chrono::steady_clock::now();
-                insertions.push_back(insertion_log{now.time_since_epoch().count(), key});
+                insertions.push_back(insertion_log{static_cast<uint64_t>(now.time_since_epoch().count()), key});
                 pq.push({key, value});
             } else {
                 if (pq.extract_top(retval)) {
                     /* deletions.push_back(deletion_log{_rdtsc() - local_rdtsc, retval.second}); */
                     auto now = std::chrono::steady_clock::now();
-                    deletions.push_back(deletion_log{now.time_since_epoch().count(), retval.second});
+                    deletions.push_back(
+                        deletion_log{static_cast<uint64_t>(now.time_since_epoch().count()), retval.second});
                 } else {
                     auto now = std::chrono::steady_clock::now();
-                    deletions.push_back(
-                        /* deletion_log{_rdtsc() - local_rdtsc, value_type{(1u << bits_represent_thread_id) - 1, 0}});
-                         */
-                        deletion_log{now.time_since_epoch().count(),
-                                     value_type{(1u << bits_represent_thread_id) - 1, 0}});
+                    deletions.push_back(deletion_log{static_cast<uint64_t>(now.time_since_epoch().count()),
+                                                     log_value{(1u << bits_represent_thread_id) - 1u, 0u}});
                 }
             }
         }
-        context.synchronize(3, []() { std::cout << "done" << std::endl; });
+        context.synchronize(3, []() { std::clog << "done" << std::endl; });
         global_insertions[context.get_id()] = std::move(insertions);
         global_deletions[context.get_id()] = std::move(deletions);
     }
@@ -302,6 +360,30 @@ struct Task {
 };
 
 int main(int argc, char* argv[]) {
+#if defined PQ_CAPQ1
+    using pq_t = multiqueue::wrapper::capq<true, true, true>;
+#elif defined PQ_CAPQ2
+    using pq_t = multiqueue::wrapper::capq<true, false, true>;
+#elif defined PQ_CAPQ3
+    using pq_t = multiqueue::wrapper::capq<false, true, true>;
+#elif defined PQ_CAPQ4
+    using pq_t = multiqueue::wrapper::capq<false, false, true>;
+#elif defined PQ_LINDEN
+    using pq_t = multiqueue::wrapper::linden;
+#elif defined PQ_SPRAYLIST
+    using pq_t = multiqueue::wrapper::spraylist;
+#elif defined PQ_KLSM
+    using pq_t = multiqueue::wrapper::klsm<kpq::k_lsm<key_type, value_type, 256>, false>;
+#elif defined PQ_DLSM
+    using pq_t = multiqueue::wrapper::klsm<kpq::dist_lsm<key_type, value_type, 256>, false>;
+#elif defined PQ_MLSM
+    using pq_t = multiqueue::wrapper::klsm<kpq::multi_lsm<key_type, value_type>, true>;
+#elif defined PQ_SLSM
+    using pq_t = multiqueue::wrapper::klsm<kpq::shared_lsm<key_type, value_type, 256>, false>;
+#else
+    using pq_t = multiqueue::rsm::kv_priority_queue<key_type, value_type, KVConfiguration>;
+#endif
+
     cxxopts::Options options("quality benchmark", "This executable measures the quality of relaxed priority queues");
     // clang-format off
     options.add_options()
@@ -323,7 +405,7 @@ int main(int argc, char* argv[]) {
     try {
         auto result = options.parse(argc, argv);
         if (result.count("help")) {
-            std::cout << options.help() << std::endl;
+            std::cerr << options.help() << std::endl;
             exit(0);
         }
         if (result.count("prefill") > 0) {
@@ -373,11 +455,12 @@ int main(int argc, char* argv[]) {
     stop_flag.store(false, std::memory_order_relaxed);
     prefill_done = false;
     pq_t pq{settings.num_threads};
+
     std::atomic_thread_fence(std::memory_order_release);
     thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
     std::vector<std::vector<insertion_log>> global_insertions(settings.num_threads);
     std::vector<std::vector<deletion_log>> global_deletions(settings.num_threads);
-    coordinator.run<Task>(std::ref(pq), settings, std::ref(global_insertions), std::ref(global_deletions));
+    coordinator.run<Task<pq_t>>(std::ref(pq), settings, std::ref(global_insertions), std::ref(global_deletions));
     {
         auto lock = std::unique_lock(m);
         cv.wait(lock, []() { return prefill_done; });
@@ -386,7 +469,7 @@ int main(int argc, char* argv[]) {
     std::this_thread::sleep_for(settings.working_time);
     stop_flag.store(true, std::memory_order_release);
     coordinator.join();
-    std::cout << "Writing logs..." << std::flush;
+    std::clog << "Writing logs..." << std::flush;
     {
         std::ofstream out("insertions.txt");
         for (unsigned int t = 0; t < settings.num_threads; ++t) {
@@ -399,10 +482,10 @@ int main(int argc, char* argv[]) {
         std::ofstream out("deletions.txt");
         for (unsigned int t = 0; t < settings.num_threads; ++t) {
             for (auto const& [time, val] : global_deletions[t]) {
-                out << t << " " << time << " " << val.thread_id << " " << val.elem_id << '\n';
+                out << t << " " << time << " " << val.thread_id() << " " << val.elem_id() << '\n';
             }
         }
     }
-    std::cout << "done" << std::endl;
+    std::clog << "done" << std::endl;
     return 0;
 }
