@@ -14,12 +14,13 @@
 #include <memory>       // allocator
 #include <type_traits>  // is_constructible, enable_if
 #include <utility>      // move, forward
+#include <vector>
 
 namespace multiqueue {
 namespace local_nonaddressable {
 
-template <typename T, typename Key, typename KeyExtractor, typename Comparator, unsigned int Degree, typename Container,
-          typename SiftStrategy>
+template <typename T, typename Key, typename KeyExtractor, typename Comparator, unsigned int Degree,
+          typename SiftStrategy, typename Allocator = std::allocator<T>>
 class heap {
     friend SiftStrategy;
 
@@ -28,13 +29,14 @@ class heap {
     using key_type = Key;
     using key_extractor = KeyExtractor;
     using key_comparator = Comparator;
-
-    using reference = typename Container::reference;
-    using const_reference = typename Container::const_reference;
-    using iterator = typename Container::const_iterator;
-    using const_iterator = typename Container::const_iterator;
-    using difference_type = typename Container::difference_type;
-    using size_type = typename Container::size_type;
+    using allocator_type = Allocator;
+    using container_type = std::vector<value_type, allocator_type>;
+    using reference = value_type &;
+    using const_reference = value_type const &;
+    using iterator = typename container_type::const_iterator;
+    using const_iterator = typename container_type::const_iterator;
+    using difference_type = typename container_type::difference_type;
+    using size_type = std::size_t;
 
     static constexpr unsigned int degree = Degree;
     static constexpr bool is_nothrow_comparable =
@@ -45,16 +47,13 @@ class heap {
     static_assert(
         std::is_invocable_r_v<key_type const &, key_extractor const &, value_type const &>,
         "Keys must be extractable from values using the signature `Key const& KeyExtractor(Value const&) const &`");
-    static_assert(std::is_same_v<value_type, typename Container::value_type>,
-                  "`Container::value_type` must be the same as `Value`");
-    static_assert(std::is_default_constructible_v<Container>, "`Container` must be default-constructible");
     static_assert(std::is_default_constructible_v<key_extractor>, "`KeyExtractor` must be default-constructible");
     static_assert(Degree >= 1u, "Degree must be at least one");
 
    private:
     struct heap_data : private key_comparator, private key_extractor {
        public:
-        Container container;
+        container_type container;
 
        public:
         explicit heap_data() noexcept(std::is_nothrow_default_constructible_v<key_comparator>)
@@ -64,15 +63,13 @@ class heap {
         explicit heap_data(key_comparator const &comp) noexcept : key_comparator{comp}, key_extractor{}, container() {
         }
 
-        template <typename Allocator, typename = std::enable_if_t<std::uses_allocator_v<Container, Allocator>>>
-        explicit heap_data(std::allocator_arg_t,
-                           Allocator const &allocator) noexcept(std::is_nothrow_default_constructible_v<key_comparator>)
-            : key_comparator{}, key_extractor{}, container(allocator) {
+        explicit heap_data(allocator_type const &alloc) noexcept(
+            std::is_nothrow_default_constructible_v<key_comparator>)
+            : key_comparator{}, key_extractor{}, container(alloc) {
         }
 
-        template <typename Allocator, typename = std::enable_if_t<std::uses_allocator_v<Container, Allocator>>>
-        explicit heap_data(std::allocator_arg_t, Allocator const &allocator, key_comparator const &comp) noexcept
-            : key_comparator{comp}, key_extractor{}, container(allocator) {
+        explicit heap_data(key_comparator const &comp, allocator_type const &alloc) noexcept
+            : key_comparator{comp}, key_extractor{}, container(alloc) {
         }
 
         constexpr key_comparator const &to_comparator() const noexcept {
@@ -161,15 +158,13 @@ class heap {
     explicit heap(key_comparator const &comp) noexcept : data_{comp} {
     }
 
-    template <typename Allocator, typename = std::enable_if_t<std::uses_allocator_v<Container, Allocator>>>
-    explicit heap(std::allocator_arg_t, Allocator const &a) noexcept(
-        std::is_nothrow_constructible_v<heap_data, std::allocator_arg_t, Allocator const &>)
-        : data_{std::allocator_arg, a} {
+    explicit heap(allocator_type const &alloc) noexcept(
+        std::is_nothrow_constructible_v<heap_data, allocator_type const &>)
+        : data_{alloc} {
     }
 
-    template <typename Allocator, typename = std::enable_if_t<std::uses_allocator_v<Container, Allocator>>>
-    heap(std::allocator_arg_t, Allocator const &allocator, key_comparator const &comp) noexcept
-        : data_{std::allocator_arg, allocator, comp} {
+    explicit heap(key_comparator const &comp, allocator_type const &alloc) noexcept
+        : data_{comp, alloc} {
     }
 
     constexpr key_comparator key_comp() const noexcept {
@@ -283,13 +278,5 @@ class heap {
 
 }  // namespace local_nonaddressable
 }  // namespace multiqueue
-
-namespace std {
-template <typename T, typename Key, typename KeyExtractor, typename Comparator, unsigned int Degree, typename Container,
-          typename SiftStrategy, typename Alloc>
-struct uses_allocator<
-    multiqueue::local_nonaddressable::heap<T, Key, KeyExtractor, Comparator, Degree, Container, SiftStrategy>, Alloc>
-    : public uses_allocator<Container, Alloc>::type {};
-}  // namespace std
 
 #endif /* end of include guard: HEAP_HPP_MKBRIGPA */

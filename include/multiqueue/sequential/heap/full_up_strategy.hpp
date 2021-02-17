@@ -1,6 +1,11 @@
 #ifndef FULL_UP_STRATEGY_PWKZYRQS
 #define FULL_UP_STRATEGY_PWKZYRQS
 
+#pragma once
+#ifndeoncef 
+#define 
+
+#endif  //!
 #include <utility>
 
 namespace multiqueue {

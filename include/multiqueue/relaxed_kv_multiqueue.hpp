@@ -12,7 +12,8 @@
 #ifndef RSM_KV_PQ_HPP_LTZXQCH1
 #define RSM_KV_PQ_HPP_LTZXQCH1
 
-#include "multiqueue/kv_pq.hpp"
+#include "multiqueue/sequential/heap/full_down_strategy.hpp"
+#include "multiqueue/sequential/heap/heap.hpp"
 #include "multiqueue/util/range_iterator.hpp"
 
 #include <array>
@@ -20,17 +21,22 @@
 #include <cassert>
 #include <random>
 #include <vector>
-#include 
+
 namespace multiqueue {
 namespace rsm {
 
-template <typename Key, typename Value>
+template <typename T>
 struct DefaultKVConfiguration {
     // With `p` threads, use `C*p` queues
     static constexpr unsigned int C = 4;
     // Number of local queues to test for finding the smallest
     static constexpr unsigned int Peek = 4;
-    using Queue = local_nonaddressable::kv_pq<Key, Value>;
+    // The underlying sequential priority queue to use
+    static constexpr unsigned int HeapDegree = 4;
+    // The container to use in the underlying sequential priority queue
+    using Container = std::vector<T>;
+    // The sifting strategy to use
+    using SiftStrategy = local_nonadddressable::full_down_strategy;
 };
 
 template <typename T>

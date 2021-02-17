@@ -9,8 +9,8 @@
 #ifndef PQ_HPP_0PET2KO5
 #define PQ_HPP_0PET2KO5
 
-#include "multiqueue/heap/full_down_strategy.hpp"
-#include "multiqueue/heap/heap.hpp"
+#include "multiqueue/sequential/heap/full_down_strategy.hpp"
+#include "multiqueue/sequential/heap/heap.hpp"
 #include "multiqueue/util/extractors.hpp"
 
 #include <cassert>
@@ -37,19 +37,23 @@ class pq {
 
     using key_comparator = Comparator;
     using value_comparator = Comparator;
-    using heap_type = heap<T, T, std::identity, Comparator, HeapSettings<value_type>::Degree,
-                           typename HeapSettings<value_type>::Container, typename HeapSettings<value_type>::Strategy>;
 
    private:
-    heap_type heap_;
+    using heap_type =
+        heap<key_type, key_type, util::identity<key_type>, key_comparator, HeapSettings<value_type>::Degree,
+             typename HeapSettings<value_type>::Container, typename HeapSettings<value_type>::Strategy>;
 
    public:
+    using this_type = pq<T, Comparator, HeapSettings>;
     using reference = typename heap_type::reference;
     using const_reference = typename heap_type::const_reference;
     using iterator = typename heap_type::iterator;
     using const_iterator = typename heap_type::const_iterator;
     using difference_type = typename heap_type::difference_type;
     using size_type = typename heap_type::size_type;
+
+   private:
+    heap_type heap_;
 
    public:
     pq() = default;

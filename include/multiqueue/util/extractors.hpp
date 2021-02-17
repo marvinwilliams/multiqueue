@@ -6,17 +6,23 @@
 namespace multiqueue {
 namespace util {
 
+template <typename T>
 struct identity {
-    template <typename T>
-    constexpr T &&operator()(T &&v) const noexcept {
-        return std::forward<T>(v);
+    constexpr T &operator()(T &v) const noexcept {
+        return v;
+    }
+    constexpr T const &operator()(T const &v) const noexcept {
+        return v;
     }
 };
 
-struct pair_first {
-    template <typename Pair>
-    constexpr auto const &operator()(Pair const &p) const noexcept {
-        return std::get<0>(p);
+template <typename T, std::size_t I = 0>
+struct get_nth {
+    constexpr auto &operator()(T &v) const noexcept {
+        return std::get<I>(v);
+    }
+    constexpr auto const &operator()(T const &v) const noexcept {
+        return std::get<I>(v);
     }
 };
 
