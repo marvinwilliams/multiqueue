@@ -8,21 +8,6 @@
 #include <utility>
 #include <vector>
 
-static constexpr unsigned int bits_represent_thread_id = 8;
-static constexpr uint32_t thread_id_mask = (static_cast<uint32_t>(1u) << (32u - bits_represent_thread_id)) - 1u;
-
-static constexpr uint32_t to_value(unsigned int thread_id, uint32_t elem_id) noexcept {
-    return (static_cast<uint32_t>(thread_id) << (32u - bits_represent_thread_id)) | (elem_id & thread_id_mask);
-}
-
-static constexpr unsigned int get_thread_id(uint32_t value) noexcept {
-    return static_cast<unsigned int>(value >> (32u - bits_represent_thread_id));
-}
-
-static constexpr uint32_t get_elem_id(uint32_t value) noexcept {
-    return value & thread_id_mask;
-}
-
 struct log_entry {
     unsigned int thread_id;
     uint64_t tick;

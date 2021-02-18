@@ -1,4 +1,3 @@
-#include <x86intrin.h>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -8,22 +7,23 @@
 #include <limits>
 #include <memory>
 #include <new>
-#include <random>
 #include <thread>
 #include <type_traits>
 
 #include "cxxopts.hpp"
+#include "inserter.hpp"
+#include "key_generator.hpp"
 #include "thread_coordination.hpp"
 #include "threading.hpp"
 
-#define PQ_MQ
+#ifndef NDEBUG
+#error "Benchmarks must not be compiled in debug build!"
+#endif
 
 #if defined PQ_CAPQ1 || defined PQ_CAPQ2 || defined PQ_CAPQ3 || defined PQ_CAPQ4
 #include "capq.hpp"
 #elif defined PQ_LINDEN
 #include "linden.hpp"
-#elif defined PQ_SKIPQUEUE
-#include "skip_queue.hpp"
 #elif defined PQ_SPRAYLIST
 #include "spraylist.hpp"
 #elif defined PQ_KLSM
@@ -32,61 +32,31 @@
 #elif defined PQ_DLSM
 #include "dist_lsm/dist_lsm.h"
 #include "klsm.hpp"
-#elif defined PQ_MLSM
-#include "klsm.hpp"
-#include "multi_lsm/multi_lsm.h"
-#elif defined PQ_SLSM
-#include "klsm.hpp"
-#include "shared_lsm/shared_lsm.h"
+#elif defined PQ_NBMQ
+#include "multiqueue/no_buffer_pq.hpp"
 #else
-#include "multiqueue/kv_pq.hpp"
-#include "multiqueue/relaxed_kv_multiqueue.hpp"
-#ifndef PQ_MQ
-#define PQ_MQ
+#error No supported priority queue defined!
 #endif
-#endif
+
+using key_type = std::uint32_t;
+using value_type = std::uint32_t;
+static_assert(std::is_unsigned_v<value_type>, "Value type must be unsigned");
+
+using util::Inserter;
+using util::InsertPolicy;
+using util::KeyDistribution;
+using util::KeyGenerator;
 
 using namespace std::chrono_literals;
-
-enum class InsertPolicy { Uniform, Split, Producer, Alternating };
-enum class KeyDistribution { Uniform, Dijkstra, Ascending, Descending };
+using clk = std::chrono::steady_clock;
 
 static constexpr size_t default_prefill_size = 1'000'000;
 static constexpr std::chrono::milliseconds default_working_time = 1s;
 static constexpr unsigned int default_num_threads = 1u;
 static constexpr InsertPolicy default_policy = InsertPolicy::Uniform;
 static constexpr KeyDistribution default_key_distribution = KeyDistribution::Uniform;
-static constexpr uint64_t default_dijkstra_increase_min = 1u;
-static constexpr uint64_t default_dijkstra_increase_max = 100u;
-
-using key_type = uint64_t;
-using value_type = uint64_t;
-
-#ifdef PQ_MQ
-template <typename Key, typename Value>
-struct KVConfiguration : multiqueue::rsm::DefaultKVConfiguration<Key, Value> {
-    static constexpr unsigned int Peek = 2;
-    static constexpr unsigned int C = 4;
-};
-
-namespace multiqueue {
-namespace rsm {
-
-template <>
-struct Sentinel<key_type> {
-    static constexpr key_type get() noexcept {
-        return std::numeric_limits<key_type>::max();
-    }
-
-    static constexpr bool is_sentinel(key_type v) noexcept {
-        return v == get();
-    }
-};
-
-}  // namespace rsm
-}  // namespace multiqueue
-
-#endif
+static constexpr value_type default_dijkstra_increase_min = 1u;
+static constexpr value_type default_dijkstra_increase_max = 100u;
 
 struct Settings {
     size_t prefill_size = default_prefill_size;
@@ -94,132 +64,29 @@ struct Settings {
     unsigned int num_threads = default_num_threads;
     InsertPolicy policy = default_policy;
     KeyDistribution key_distribution = default_key_distribution;
-    uint64_t dijkstra_increase_min = default_dijkstra_increase_min;
-    uint64_t dijkstra_increase_max = default_dijkstra_increase_max;
-};
-
-template <InsertPolicy>
-struct Inserter {
-    bool insert;
-
-    bool operator()() {
-        return insert;
-    }
-};
-
-template <>
-struct Inserter<InsertPolicy::Uniform> {
-   private:
-    std::mt19937 gen_;
-    std::uniform_int_distribution<uint64_t> dist_;
-    uint64_t rand_num_;
-    uint8_t bit_pos_ : 6;
-
-   public:
-    explicit Inserter(unsigned int seed = 0u) : gen_{seed}, rand_num_{0u}, bit_pos_{0u} {
-    }
-
-    bool operator()() {
-        if (bit_pos_ == 0) {
-            rand_num_ = dist_(gen_);
-        }
-        return rand_num_ & (1 << bit_pos_++);
-    }
-};
-
-template <>
-struct Inserter<InsertPolicy::Alternating> {
-   private:
-    bool insert_ = false;
-
-   public:
-    bool operator()() {
-        return insert_ = !insert_, insert_;
-    }
-};
-
-template <KeyDistribution>
-struct KeyGenerator;
-
-template <>
-struct KeyGenerator<KeyDistribution::Uniform> {
-   private:
-    std::mt19937 gen_;
-    std::uniform_int_distribution<uint64_t> dist_;
-
-   public:
-    explicit KeyGenerator(unsigned int seed = 0u) : gen_{seed} {
-    }
-
-    uint64_t operator()() {
-        return dist_(gen_);
-    }
-};
-
-template <>
-struct KeyGenerator<KeyDistribution::Ascending> {
-   private:
-    uint64_t current_;
-
-   public:
-    explicit KeyGenerator(uint64_t start = 0) : current_{start} {
-    }
-
-    uint64_t operator()() {
-        return current_++;
-    }
-};
-
-template <>
-struct KeyGenerator<KeyDistribution::Descending> {
-   private:
-    uint64_t current_;
-
-   public:
-    explicit KeyGenerator(uint64_t start) : current_{start} {
-    }
-
-    uint64_t operator()() {
-        assert(current_ != std::numeric_limits<uint64_t>::max());
-        return current_--;
-    }
-};
-
-template <>
-struct KeyGenerator<KeyDistribution::Dijkstra> {
-   private:
-    std::mt19937 gen_;
-    std::uniform_int_distribution<uint64_t> dist_;
-    uint64_t current_ = 0;
-
-   public:
-    explicit KeyGenerator(uint64_t increase_min, uint64_t increase_max, unsigned int seed = 0u)
-        : gen_{seed}, dist_{increase_min, increase_max} {
-    }
-
-    uint64_t operator()() {
-        return current_++ + dist_(gen_);
-    }
+    value_type dijkstra_increase_min = default_dijkstra_increase_min;
+    value_type dijkstra_increase_max = default_dijkstra_increase_max;
 };
 
 std::atomic_bool start_flag;
 std::atomic_bool stop_flag;
-std::mutex m;
-std::condition_variable cv;
-bool prefill_done;
 
 std::atomic_uint64_t global_insertions = 0;
 std::atomic_uint64_t global_deletions = 0;
 std::atomic_uint64_t global_failed_deletions = 0;
 
+volatile key_type result_key;
+volatile value_type result_value;
+
 // Assume rdtsc is thread-safe and synchronized on each CPU
 // Assumption false
 
-template <typename T, typename = std::void_t<>>
+template <typename T, typename = void>
 struct has_thread_init : std::false_type {};
 
 template <typename T>
-struct has_thread_init<T, std::void_t<decltype(std::declval<T>().init_thread(0))>> : std::true_type {};
+struct has_thread_init<T, std::void_t<decltype(std::declval<T>().init_thread(static_cast<size_t>(0)))>>
+    : std::true_type {};
 
 template <typename pq_t>
 struct Task {
@@ -241,47 +108,51 @@ struct Task {
                 inserter = Inserter<InsertPolicy::Alternating>{};
                 break;
         }
-        std::variant<KeyGenerator<KeyDistribution::Uniform>, KeyGenerator<KeyDistribution::Ascending>,
-                     KeyGenerator<KeyDistribution::Descending>, KeyGenerator<KeyDistribution::Dijkstra>>
+        std::variant<
+            KeyGenerator<key_type, KeyDistribution::Uniform>, KeyGenerator<key_type, KeyDistribution::Ascending>,
+            KeyGenerator<key_type, KeyDistribution::Descending>, KeyGenerator<key_type, KeyDistribution::Dijkstra>>
             key_generator;
         switch (settings.key_distribution) {
             case (KeyDistribution::Uniform):
-                key_generator = KeyGenerator<KeyDistribution::Uniform>{context.get_id()};
+                key_generator = KeyGenerator<key_type, KeyDistribution::Uniform>{context.get_id()};
                 break;
             case (KeyDistribution::Ascending):
-                key_generator = KeyGenerator<KeyDistribution::Ascending>{
+                key_generator = KeyGenerator<key_type, KeyDistribution::Ascending>{
                     (std::numeric_limits<key_type>::max() / context.get_num_threads()) * context.get_id()};
                 break;
             case (KeyDistribution::Descending):
-                key_generator = KeyGenerator<KeyDistribution::Descending>{
+                key_generator = KeyGenerator<key_type, KeyDistribution::Descending>{
                     ((std::numeric_limits<key_type>::max() - 1) / context.get_num_threads()) * (context.get_id() + 1)};
                 break;
             case (KeyDistribution::Dijkstra):
-                key_generator = KeyGenerator<KeyDistribution::Dijkstra>{
+                key_generator = KeyGenerator<key_type, KeyDistribution::Dijkstra>{
                     settings.dijkstra_increase_min, settings.dijkstra_increase_max, context.get_id()};
                 break;
         }
         uint64_t insertions = 0;
         uint64_t deletions = 0;
         uint64_t failed_deletions = 0;
-        context.synchronize(0, []() { std::clog << "Prefilling the queue..." << std::flush; });
-        size_t num_insertions = settings.prefill_size / context.get_num_threads();
-        if (context.is_main()) {
-            num_insertions +=
-                settings.prefill_size - (settings.prefill_size / context.get_num_threads()) * context.get_num_threads();
+        if constexpr (has_thread_init<pq_t>::value) {
+            pq.init_thread(context.get_num_threads());
         }
-        context.synchronize(1);
-        for (size_t i = 0u; i < num_insertions; ++i) {
-            key_type key = std::visit([](auto& g) noexcept { return g(); }, key_generator);
-            pq.push({key, key});
-        }
-        context.synchronize(2, []() {
-            std::clog << "done\nStarting the workload..." << std::flush;
-            {
-                auto lock = std::unique_lock(m);
-                prefill_done = true;
+
+        unsigned int stage = 0u;
+        if (settings.prefill_size > 0u) {
+            context.synchronize(stage++, []() { std::clog << "Prefilling the queue..." << std::flush; });
+            size_t num_insertions = settings.prefill_size / context.get_num_threads();
+            if (context.is_main()) {
+                num_insertions += settings.prefill_size -
+                    (settings.prefill_size / context.get_num_threads()) * context.get_num_threads();
             }
-            cv.notify_one();
+            for (size_t i = 0u; i < num_insertions; ++i) {
+                key_type const key = std::visit([](auto& g) noexcept { return g(); }, key_generator);
+                pq.push({key, key});
+            }
+            context.synchronize(stage++, []() { std::clog << "done" << std::endl; });
+        }
+        context.synchronize(stage++, [&context]() {
+            std::clog << "Starting the workload..." << std::flush;
+            context.notify_coordinator();
         });
         while (!start_flag.load(std::memory_order_relaxed)) {
         }
@@ -289,18 +160,21 @@ struct Task {
         std::pair<key_type, value_type> retval;
         while (!stop_flag.load(std::memory_order_relaxed)) {
             if (std::visit([](auto& i) noexcept { return i(); }, inserter)) {
-                key_type key = std::visit([](auto& g) noexcept { return g(); }, key_generator);
+                key_type const key = std::visit([](auto& g) noexcept { return g(); }, key_generator);
                 pq.push({key, key});
                 ++insertions;
             } else {
                 if (pq.extract_top(retval)) {
+                    // Assign result to make sure the return value is not optimized away
+                    result_key = retval.first;
+                    result_value = retval.second;
                     ++deletions;
                 } else {
                     ++failed_deletions;
                 }
             }
         }
-        context.synchronize(3, []() { std::clog << "done" << std::endl; });
+        context.synchronize(stage++, []() { std::clog << "done" << std::endl; });
         global_insertions += insertions;
         global_deletions += deletions;
         global_failed_deletions += failed_deletions;
@@ -326,21 +200,16 @@ int main(int argc, char* argv[]) {
     using pq_t = multiqueue::wrapper::capq<false, false, true>;
 #elif defined PQ_LINDEN
     using pq_t = multiqueue::wrapper::linden;
-#elif defined PQ_SKIPQUEUE
-    using pq_t = multiqueue::wrapper::skip_queue<std::pair<key_type, value_type>>;
 #elif defined PQ_SPRAYLIST
     using pq_t = multiqueue::wrapper::spraylist;
 #elif defined PQ_KLSM
-    using pq_t = multiqueue::wrapper::klsm<kpq::k_lsm<key_type, value_type, 256>, false>;
+    using pq_t = multiqueue::wrapper::klsm<kpq::k_lsm<key_type, value_type, 256>>;
 #elif defined PQ_DLSM
-    using pq_t = multiqueue::wrapper::klsm<kpq::dist_lsm<key_type, value_type, 256>, false>;
-#elif defined PQ_MLSM
-    using pq_t = multiqueue::wrapper::klsm<kpq::multi_lsm<key_type, value_type>, true>;
-#elif defined PQ_SLSM
-    using pq_t = multiqueue::wrapper::klsm<kpq::shared_lsm<key_type, value_type, 256>, false>;
-#else
-    using pq_t = multiqueue::rsm::kv_priority_queue<key_type, value_type, KVConfiguration>;
+    using pq_t = multiqueue::wrapper::klsm<kpq::dist_lsm<key_type, value_type, 256>>;
+#elif defined PQ_NBMQ
+    using pq_t = multiqueue::rsm::no_buffer_pq<key_type, value_type>;
 #endif
+
     cxxopts::Options options("quality benchmark", "This executable measures the quality of relaxed priority queues");
     // clang-format off
     options.add_options()
@@ -405,28 +274,29 @@ int main(int argc, char* argv[]) {
             }
         }
     } catch (cxxopts::OptionParseException const& e) {
-        std::cerr << e.what() << '\n';
+        std::cerr << e.what() << std::endl;
         return 1;
     }
     start_flag.store(false, std::memory_order_relaxed);
     stop_flag.store(false, std::memory_order_relaxed);
-    prefill_done = false;
     pq_t pq{settings.num_threads};
-
     std::atomic_thread_fence(std::memory_order_release);
     thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
     coordinator.run<Task<pq_t>>(std::ref(pq), settings);
-    {
-        auto lock = std::unique_lock(m);
-        cv.wait(lock, []() { return prefill_done; });
-    }
+    coordinator.wait_until_notified();
     start_flag.store(true, std::memory_order_release);
     std::this_thread::sleep_for(settings.working_time);
     stop_flag.store(true, std::memory_order_release);
     coordinator.join();
     std::cout << "Insertions: " << global_insertions << "\nDeletions: " << global_deletions
               << "\nFDeletions: " << global_failed_deletions << "\nOps/s: " << std::fixed << std::setprecision(1)
-              << 1000.0 * static_cast<double>(global_insertions + global_deletions) / settings.working_time.count()
+              << 1000.0 * static_cast<double>(global_insertions + global_deletions) /
+            static_cast<double>(settings.working_time.count())
               << std::endl;
+    std::clog << "done" << std::endl;
+#ifdef PQ_LINDEN
+    // Avoid segfault
+    pq.push({0, 0});
+#endif
     return 0;
 }

@@ -1,5 +1,7 @@
 #include "catch2/catch.hpp"
-#include "multiqueue/kv_pq.hpp"
+#include "multiqueue/util/extractors.hpp"
+#include "multiqueue/sequential/heap/heap.hpp"
+#include "multiqueue/sequential/kv_pq.hpp"
 
 #include <algorithm>  // std::generate_n, std::min_element
 #include <functional> // std::greater
@@ -59,10 +61,8 @@ TEMPLATE_TEST_CASE_SIG("kv_pq heap representation can have different degrees",
   }
 }
 
-TEST_CASE("kv_pq use std::greater as comparator",
-          "[kv_pq][correctness][comparator]") {
-  using pq_t = multiqueue::local_nonaddressable::kv_pq<int, int, std::greater<int>,
-                                                    std::vector<std::pair<int, int>>, 4>;
+TEST_CASE("kv_pq use std::greater as comparator", "[kv_pq][correctness][comparator]") {
+    using pq_t = multiqueue::local_nonaddressable::kv_pq<int, int, std::greater<int>>;
 
   auto pq = pq_t{};
 

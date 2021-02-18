@@ -15,6 +15,7 @@
 #include "multiqueue/sequential/heap/full_down_strategy.hpp"
 #include "multiqueue/sequential/heap/heap.hpp"
 #include "multiqueue/util/range_iterator.hpp"
+#include "multiqueue/util/extractors.hpp"
 
 #include <array>
 #include <atomic>
@@ -36,12 +37,12 @@ struct NoBufferConfiguration {
     // The underlying sequential priority queue to use
     static constexpr unsigned int HeapDegree = 4;
     // The sifting strategy to use
-    using SiftStrategy = local_nonadddressable::full_down_strategy;
+    using SiftStrategy = local_nonaddressable::full_down_strategy;
     // The allocator to use in the underlying sequential priority queue
     using HeapAllocator = std::allocator<T>;
 };
 
-template <typename Key, typename T, typename Comparator,
+template <typename Key, typename T, typename Comparator = std::less<Key>,
           template <typename> typename Configuration = NoBufferConfiguration, typename Allocator = std::allocator<Key>>
 class no_buffer_pq {
    public:
@@ -54,7 +55,7 @@ class no_buffer_pq {
 
    private:
     using heap_type = local_nonaddressable::heap<
-        value_type, key_type, std::get_nth<key_type>, key_comparator, Configuration<value_type>::HeapDegree,
+        value_type, key_type, util::get_nth<value_type>, key_comparator, Configuration<value_type>::HeapDegree,
         typename Configuration<value_type>::SiftStrategy, typename Configuration<value_type>::HeapAllocator>;
 
     struct alignas(CACHE_LINESIZE) guarded_heap {
@@ -115,25 +116,21 @@ class no_buffer_pq {
         do {
             index = random_queue_index();
         } while (!try_lock(index));
-        bool found_first = false;
+        bool found = false;
         if (!heap_list_[index].heap.empty()) {
             retval = heap_list_[index].heap.top();
-            found_first = true;
+            found = true;
         }
         unlock(index);
         do {
             index = random_queue_index();
         } while (!try_lock(index));
-        if (!heap_list_[index].heap.empty()) {
-            if (found_first && comp_(heap_list_[index].heap.top().first, retval.first)) {
-                retval = heap_list_[index].heap.top();
-            }
-        } else if (!found_first) {
-            unlock(index);
-            return false;
+        if (!heap_list_[index].heap.empty() && (!found || comp_(heap_list_[index].heap.top().first, retval.first))) {
+            retval = heap_list_[index].heap.top();
+            found = true;
         }
         unlock(index);
-        return true;
+        return found;
     }
 
     void push(value_type const &value) {
@@ -141,7 +138,7 @@ class no_buffer_pq {
         do {
             index = random_queue_index();
         } while (!try_lock(index));
-        heap_list_[index].queue.push(value);
+        heap_list_[index].heap.insert(value);
         unlock(index);
     }
 
@@ -150,36 +147,42 @@ class no_buffer_pq {
         do {
             index = random_queue_index();
         } while (!try_lock(index));
-        heap_list_[index].queue.push(std::move(value));
+        heap_list_[index].heap.insert(std::move(value));
         unlock(index);
     }
 
     bool extract_top(value_type &retval) {
-        bool found_first = false;
-        auto const index = random_queue_index();
-        if (try_lock(index)) {
-            if (!heap_list_[index].heap.empty()) {
-                retval = heap_list_[index].heap.top();
-                found_first = true;
-            }
-            unlock(index);
-            while (true) {
-                index = random_queue_index();
-                if (try_lock(index)) {
-                    if (!heap_list_[index].heap.empty()) {
-                        if (found_first && comp_(heap_list_[index].heap.top().first, retval.first)) {
-                            retval = heap_list_[index].heap.top();
-                        }
-                    } else if (!found_first) {
-                        unlock(index);
-                        return false;
-                    }
-                    unlock(index);
-                    break;
-                }
-            }
-            break;
+        size_t first_index;
+        bool found = false;
+        do {
+            first_index = random_queue_index();
+        } while (!try_lock(first_index));
+        if (!heap_list_[first_index].heap.empty()) {
+            retval.first = heap_list_[first_index].heap.top().first;
+            found = true;
+        } else {
+            unlock(first_index);
         }
+        size_t second_index;
+        do {
+            second_index = random_queue_index();
+        } while (!try_lock(second_index));
+        if (!heap_list_[second_index].heap.empty() &&
+            (!found || comp_(heap_list_[second_index].heap.top().first, retval.first))) {
+            if (found) {
+                unlock(first_index);
+            }
+            heap_list_[second_index].heap.extract_top(retval);
+            unlock(second_index);
+            found = true;
+        } else {
+            unlock(second_index);
+            if (found) {
+                heap_list_[first_index].heap.extract_top(retval);
+                unlock(first_index);
+            }
+        }
+        return found;
     }
 };
 

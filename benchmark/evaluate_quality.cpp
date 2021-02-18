@@ -9,10 +9,41 @@
 
 #include "cxxopts.hpp"
 
+struct deletion_log {
+    uint64_t tick;
+    std::optional<std::pair<unsigned int, uint32_t>> value;
+};
+
+std::istream& operator>>(std::istream& in, deletion_log& line) {
+    std::pair<unsigned int, uint32_t> value;
+    in >> line.tick >> value.first >> value.second;
+    line.value = value;
+    return in;
+}
+
+std::ostream& operator<<(std::ostream& out, deletion_log const& line) {
+    if (line.value) {
+        out << "Tick: " << line.tick << " Other thread id: " << line.value->first << " Value: " << line.value->second;
+    } else {
+        out << "Tick: " << line.tick << " Failed";
+    }
+    return out;
+}
+
 struct insertion_log {
     uint64_t tick;
-    uint64_t key;
+    uint32_t key;
 };
+
+std::istream& operator>>(std::istream& in, insertion_log& line) {
+    in >> line.tick >> line.key;
+    return in;
+}
+
+std::ostream& operator<<(std::ostream& out, insertion_log const& line) {
+    out << "Tick: " << line.tick << " Key: " << line.key;
+    return out;
+}
 
 bool operator<(insertion_log const& lhs, insertion_log const& rhs) {
     return lhs.tick < rhs.tick;
@@ -25,36 +56,7 @@ bool operator!=(insertion_log const& lhs, insertion_log const& rhs) {
     return !(lhs == rhs);
 }
 
-static constexpr unsigned int bits_represent_thread_id = 8;
-static constexpr uint64_t thread_id_mask = (static_cast<uint64_t>(1u) << (64u - bits_represent_thread_id)) - 1u;
-
-struct log_value {
-    uint64_t data;
-
-    log_value(uint64_t from_uint) noexcept : data{from_uint} {
-    }
-    log_value(unsigned int thread_id, uint64_t elem_id) noexcept {
-        data = (static_cast<uint64_t>(thread_id) << (64u - bits_represent_thread_id)) | (elem_id & thread_id_mask);
-    }
-    constexpr unsigned int thread_id() const noexcept {
-        return static_cast<unsigned int>(data >> (64u - bits_represent_thread_id));
-    }
-    constexpr uint64_t elem_id() const noexcept {
-        return data & thread_id_mask;
-    }
-    operator uint64_t() const noexcept {
-        return data;
-    }
-};
-
-struct deletion_log {
-    uint64_t tick;
-    log_value value;
-};
-
 int main(int argc, char* argv[]) {
-    std::filesystem::path in;
-    std::filesystem::path del;
     std::filesystem::path out_rank;
     std::filesystem::path out_delay;
 
@@ -62,26 +64,16 @@ int main(int argc, char* argv[]) {
     options.positional_help("INSERT DELETION");
     // clang-format off
     options.add_options()
-      ("insert_file", "The log of the insertions", cxxopts::value<std::filesystem::path>(in), "PATH")
-      ("delete_file", "The log of the deletions", cxxopts::value<std::filesystem::path>(del), "PATH")
       ("r,out-rank", "The output of the rank histogram", cxxopts::value<std::filesystem::path>(out_rank)->default_value("rank_histgram.txt"), "PATH")
       ("d,out-delay", "The output of the delay histogram", cxxopts::value<std::filesystem::path>(out_delay)->default_value("delay_histogram.txt"), "PATH")
-      ("positional", "", cxxopts::value<std::vector<std::filesystem::path>>())
       ("h,help", "Print this help");
     // clang-format on
-
-    options.parse_positional({"insert_file", "delete_file", "positional"});
 
     try {
         auto result = options.parse(argc, argv);
         if (result.count("help")) {
             std::cerr << options.help() << std::endl;
             std::exit(0);
-        }
-        if (result.count("insert_file") == 0 || result.count("delete_file") == 0) {
-            std::cerr << "Provide insertion file and deletion file!\n\n";
-            std::cerr << options.help() << std::endl;
-            std::exit(1);
         }
     } catch (cxxopts::OptionParseException const& e) {
         std::cerr << e.what() << '\n';
@@ -90,115 +82,120 @@ int main(int argc, char* argv[]) {
 
     std::vector<std::vector<insertion_log>> insertions;
     std::vector<deletion_log> deletions;
-    auto in_f = std::ifstream{in};
-    auto del_f = std::ifstream{del};
-    if (!in_f.is_open()) {
-        std::cerr << "failed to open " << in << '\n';
+    std::clog << "Reading quality log file from stdin..." << std::endl;
+    unsigned int num_threads;
+    std::cin >> num_threads;
+    if (!std::cin || num_threads == 0) {
+        std::cerr << "Invalid number of threads" << std::endl;
         return 1;
     }
-    if (!del_f.is_open()) {
-        std::cerr << "failed to open " << del << '\n';
-        return 1;
-    }
-    {
-        std::clog << "Reading insertion file...\n";
-        unsigned int thread_id;
-        uint64_t tick;
-        uint64_t key;
-        while (in_f >> thread_id >> tick >> key) {
-            if (thread_id >= insertions.size()) {
-                insertions.resize(thread_id + 1);
-                insertions[thread_id].reserve(10000);
+    insertions.resize(num_threads);
+    char op;
+    unsigned int thread_id;
+    bool deleting = false;
+    while (std::cin >> op >> thread_id) {
+        if (thread_id >= num_threads) {
+            std::cerr << "Thread id " << thread_id << " too high (Max: " << num_threads - 1 << ')' << std::endl;
+            return 1;
+        }
+        if (op == 'i') {
+            if (deleting) {
+                std::cerr << "Insertion following a deletion" << std::endl;
+                return 1;
             }
-            insertions[thread_id].push_back(insertion_log{tick, key});
+            insertion_log ins;
+            std::cin >> ins;
+            if (!insertions[thread_id].empty() && ins.tick < insertions[thread_id].back().tick) {
+                std::cerr << "Insertion\n\t" << ins << "\nhappens before previous insertion" << std::endl;
+                return 1;
+            }
+            insertions[thread_id].push_back(ins);
+        } else if (op == 'd') {
+            deleting = true;
+            deletion_log del;
+            std::cin >> del;
+            if (del.value->first >= num_threads) {
+                std::cerr << "Thread id " << del.value->first << " too high (Max: " << num_threads - 1 << ')'
+                          << std::endl;
+                return 1;
+            }
+            if (del.value->second >= insertions[del.value->first].size()) {
+                std::cerr << "No insertion corresponding to deletion\n\t" << del << std::endl;
+                return 1;
+            }
+            if (del.tick < insertions[del.value->first][del.value->second].tick) {
+                std::cerr << "Deletion of \n\t" << del << "\nhappens before its insertion" << std::endl;
+                return 1;
+            }
+            deletions.push_back(del);
+        } else if (op == 'f') {
+            deleting = true;
+            uint64_t tick;
+            std::cin >> tick;
+            deletions.push_back(deletion_log{tick, std::nullopt});
+        } else {
+            std::cerr << "Invalid operation: " << op << std::endl;
+            return 1;
         }
-        in_f.close();
     }
-    {
-        std::clog << "Reading deletion file...\n";
-        unsigned int thread_id;
-        uint64_t tick;
-        unsigned int other_thread_id;
-        uint64_t id;
-        deletions.reserve(1'000'000);
-        while (del_f >> thread_id >> tick >> other_thread_id >> id) {
-            deletions.push_back(deletion_log{tick, {other_thread_id, id}});
-        }
-        del_f.close();
-    }
-    /* std::cout << "Num deletions: " << deletions.size() << std::endl; */
+
     std::clog << "Sorting deletions...\n";
     std::sort(deletions.begin(), deletions.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
     std::vector<size_t> rank_histogram;
     std::vector<size_t> delay_histogram;
     rank_histogram.reserve(10'000);
-    std::clog << "Evaluating deletions...\n";
+    delay_histogram.reserve(10'000);
+    std::clog << "Replaying operations...\n";
     std::multimap<uint64_t, size_t> replay_heap{};
     std::vector<size_t> insert_index(insertions.size());
     uint64_t failed_deletions = 0;
-    size_t counter = 0;
-    size_t progress = 0;
-    for (auto const& [tick, value] : deletions) {
-        if ((10 * counter) / deletions.size() >= progress) {
-            std::clog << "Processed " << std::setprecision(3)
-                      << 100. * static_cast<double>(counter) / static_cast<double>(deletions.size()) << "%\n";
-            ++progress;
-        }
-        ++counter;
-        /* std::cout << "Deletion tick is at " << tick << std::endl; */
-        if (value.thread_id() == (1u << 8) - 1) {
-            if (!replay_heap.empty()) {
-                for (auto& [num, delay] : replay_heap) {
-                    ++delay;
-                }
-                ++failed_deletions;
-                ++rank_histogram[static_cast<size_t>(replay_heap.size())];
+    for (size_t i = 0; i < deletions.size(); ++i) {
+        if (!deletions[i].value) {
+            if (replay_heap.empty()) {
+                continue;
             }
-            continue;
+            for (auto& [num, delay] : replay_heap) {
+                ++delay;
+            }
+            ++failed_deletions;
+            ++rank_histogram[static_cast<size_t>(replay_heap.size())];
         }
-        if (value.thread_id() >= insertions.size() || value.elem_id() >= insertions[value.thread_id()].size()) {
-            std::cerr << "No insertion corresponding to deletion of '" << value.thread_id() << " " << value.elem_id()
-                      << "' at tick " << tick << " was found\n";
+
+        // Inserting everything before next deletion
+        for (size_t t = 0; t < insertions.size(); ++t) {
+            while (insert_index[t] < insertions[t].size() && insertions[t][insert_index[t]].tick < deletions[i].tick) {
+                replay_heap.insert({insertions[t][insert_index[t]].key, 0});
+                ++insert_index[t];
+            }
+        }
+
+        if (auto it = replay_heap.lower_bound(insertions[deletions[i].value->first][deletions[i].value->second].key);
+            it != replay_heap.end() &&
+            it->first == insertions[deletions[i].value->first][deletions[i].value->second].key) {
+            size_t rank_error = static_cast<size_t>(std::distance(replay_heap.begin(), it));
+            if (rank_error >= rank_histogram.size()) {
+                rank_histogram.resize(rank_error + 1, 0);
+            }
+            ++rank_histogram[rank_error];
+            if (it->second >= delay_histogram.size()) {
+                delay_histogram.resize(it->second + 1, 0);
+            }
+            ++delay_histogram[it->second];
+            for (auto smaller = replay_heap.begin(); smaller != it; ++smaller) {
+                ++smaller->second;
+            }
+            replay_heap.erase(it);
+        } else {
+            std::cerr << "Element\n\t" << insertions[deletions[i].value->first][deletions[i].value->second] << " "
+                      << deletions[i].value->second << "\nis not in the heap at deletion time" << std::endl;
             return 1;
         }
-        /* std::cout << "Delete key " << insertions[thread_id][id].key << std::endl; */
-        for (size_t i = 0; i < insertions.size(); ++i) {
-            while (insert_index[i] < insertions[i].size() && insertions[i][insert_index[i]].tick < tick) {
-                replay_heap.insert({insertions[i][insert_index[i]].key, 0});
-                /* std::cout << "Insert " << insertions[i][insert_index[i]].key << " at tick " */
-                /*           << insertions[i][insert_index[i]].tick << " (" << i << " " << insert_index[i] << ")" */
-                /*           << std::endl; */
-                ++insert_index[i];
-            }
+        if (i % 10'000 == 0) {
+            std::clog << "\rProcessed " << std::setprecision(4)
+                      << 100. * static_cast<double>(i) / static_cast<double>(deletions.size()) << "%";
         }
-        /* std::cout << std::endl; */
-        /* if (auto it = replay_heap.lower_bound(insertions[value.thread_id()][value.elem_id()].key); */
-        /*     it != replay_heap.end() && it->first == insertions[value.thread_id()][value.elem_id()].key) { */
-        /*     size_t rank_error = static_cast<size_t>(std::distance(replay_heap.begin(), it)); */
-        /*     if (rank_error >= rank_histogram.size()) { */
-        /*         rank_histogram.resize(rank_error + 1, 0); */
-        /*     } */
-        /*     ++rank_histogram[rank_error]; */
-        /*     if (it->second >= delay_histogram.size()) { */
-        /*         delay_histogram.resize(it->second + 1, 0); */
-        /*     } */
-        /*     ++delay_histogram[it->second]; */
-        /*     for (auto smaller = replay_heap.begin(); smaller != it; ++smaller) { */
-        /*         ++smaller->second; */
-        /*     } */
-        /*     replay_heap.erase(it); */
-        /* } else { */
-        /*     /1* if (it == replay_heap.end()) { *1/ */
-        /*     /1*     std::cout << "No element was found" << std::endl; *1/ */
-        /*     /1* } else { *1/ */
-        /*     /1*     std::cout << "Next greater element in heap is " << *it << std::endl; *1/ */
-        /*     /1* } *1/ */
-        /*     std::cerr << "Element with key " << insertions[value.thread_id()][value.elem_id()].key << " and value '" */
-        /*               << value.thread_id() << " " << value.elem_id() << "' was deleted before being inserted\n"; */
-        /*     return 1; */
-        /* } */
     }
-    std::clog << "Processed 100%" << std::endl;
+    std::clog << "\rProcessed 100.0%" << std::endl;
     {
         auto out_f = std::ofstream{out_rank};
         for (size_t i = 0; i < rank_histogram.size(); ++i) {
@@ -217,5 +214,7 @@ int main(int argc, char* argv[]) {
         }
         out_f.close();
     }
+    std::clog << "Histograms have been written" << std::endl;
     std::clog << "Failed deletions: " << failed_deletions << std::endl;
+    return 0;
 }

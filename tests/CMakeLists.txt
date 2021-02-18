@@ -7,37 +7,83 @@ target_compile_features(basic_test INTERFACE cxx_std_17)
 add_library(catch_test INTERFACE)
 target_link_libraries(catch_test INTERFACE basic_test Catch2::Catch2)
 
-add_executable(unit_tests main.cpp pq_api.cpp pq_correctness.cpp kv_pq_api.cpp kv_pq_correctness.cpp multiqueue.cpp)
+add_executable(unit_tests main.cpp pq_api.cpp pq_correctness.cpp kv_pq_api.cpp kv_pq_correctness.cpp no_buffer_pq.cpp)
 target_link_libraries(unit_tests PRIVATE catch_test multiqueue::multiqueue)
+target_link_libraries(unit_tests PRIVATE Threads::Threads)
 
 if(BUILD_TESTING)
   catch_discover_tests(unit_tests)
 endif()
 
 add_library(wrapper_test INTERFACE)
-target_link_libraries(wrapper_test INTERFACE threading)
-target_link_libraries(wrapper_test INTERFACE basic_test)
+target_link_libraries(wrapper_test INTERFACE threading basic_test)
 target_link_libraries_system(wrapper_test INTERFACE cxxopts)
+target_sources(wrapper_test INTERFACE wrapper.cpp)
 
-add_executable(capq_wrapper_test wrapper.cpp)
+add_executable(capq_wrapper_test)
 target_compile_definitions(capq_wrapper_test PRIVATE PQ_CAPQ1)
 target_link_libraries(capq_wrapper_test PRIVATE capq_wrapper wrapper_test)
 
-add_executable(klsm_wrapper_test wrapper.cpp)
+add_executable(klsm_wrapper_test)
 target_compile_definitions(klsm_wrapper_test PRIVATE PQ_KLSM)
 target_link_libraries(klsm_wrapper_test PRIVATE klsm_wrapper wrapper_test)
 
-add_executable(dlsm_wrapper_test wrapper.cpp)
+add_executable(dlsm_wrapper_test)
 target_compile_definitions(dlsm_wrapper_test PRIVATE PQ_DLSM)
 target_link_libraries(dlsm_wrapper_test PRIVATE klsm_wrapper wrapper_test)
 
-add_executable(linden_wrapper_test wrapper.cpp)
+add_executable(linden_wrapper_test)
 target_compile_definitions(linden_wrapper_test PRIVATE PQ_LINDEN)
 target_link_libraries(linden_wrapper_test PRIVATE linden_wrapper wrapper_test)
 
-add_executable(spraylist_wrapper_test wrapper.cpp)
+add_executable(spraylist_wrapper_test)
 target_compile_definitions(spraylist_wrapper_test PRIVATE PQ_SPRAYLIST)
 target_link_libraries(spraylist_wrapper_test PRIVATE spraylist_wrapper wrapper_test)
 
-add_executable(verify verify.cpp)
-target_link_libraries(verify PRIVATE basic_test)
+add_custom_target(all_wrapper_tests COMMENT "Build all wrapper tests")
+add_dependencies(all_wrapper_tests capq_wrapper_test klsm_wrapper_test dlsm_wrapper_test linden_wrapper_test spraylist_wrapper_test)
+
+
+add_library(consistency_test INTERFACE)
+target_link_libraries(consistency_test INTERFACE threading basic_test)
+target_link_libraries_system(consistency_test INTERFACE cxxopts)
+target_sources(consistency_test INTERFACE consistency.cpp)
+target_compile_definitions(consistency_test INTERFACE "NDEBUG")
+target_compile_options(consistency_test INTERFACE "-O3")
+target_compile_options(consistency_test INTERFACE "-march=native")
+if(CMAKE_COMPILER_IS_GNUCXX)
+  target_link_options(consistency_test INTERFACE "-flto")
+endif()
+
+add_executable(capq_consistency_test)
+target_compile_definitions(capq_consistency_test PRIVATE PQ_CAPQ1)
+target_link_libraries(capq_consistency_test PRIVATE capq_wrapper consistency_test)
+
+add_executable(klsm_consistency_test)
+target_compile_definitions(klsm_consistency_test PRIVATE PQ_KLSM)
+target_link_libraries(klsm_consistency_test PRIVATE klsm_wrapper consistency_test)
+
+add_executable(dlsm_consistency_test)
+target_compile_definitions(dlsm_consistency_test PRIVATE PQ_DLSM)
+target_link_libraries(dlsm_consistency_test PRIVATE klsm_wrapper consistency_test)
+
+add_executable(linden_consistency_test)
+target_compile_definitions(linden_consistency_test PRIVATE PQ_LINDEN)
+target_link_libraries(linden_consistency_test PRIVATE linden_wrapper consistency_test)
+
+add_executable(spraylist_consistency_test)
+target_compile_definitions(spraylist_consistency_test PRIVATE PQ_SPRAYLIST)
+target_link_libraries(spraylist_consistency_test PRIVATE spraylist_wrapper consistency_test)
+
+add_executable(nbpq_consistency_test)
+target_compile_definitions(nbpq_consistency_test PRIVATE PQ_NBMQ)
+target_link_libraries(nbpq_consistency_test PRIVATE multiqueue::multiqueue consistency_test)
+
+add_custom_target(all_consistency_tests COMMENT "Build all consistency tests")
+add_dependencies(all_consistency_tests capq_consistency_test klsm_consistency_test dlsm_consistency_test linden_consistency_test spraylist_consistency_test nbpq_consistency_test)
+
+add_executable(verify_consistency verify_consistency.cpp)
+target_link_libraries(verify_consistency PRIVATE basic_test)
+
+add_custom_target(all_tests COMMENT "Build all tests")
+add_dependencies(all_tests unit_tests all_wrapper_tests all_consistency_tests)

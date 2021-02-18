@@ -67,7 +67,7 @@ add_library(
 )
 target_link_libraries(klsm_wrapper INTERFACE wrapper)
 target_include_directories(
-  klsm_wrapper INTERFACE
+  klsm_wrapper SYSTEM INTERFACE
   ${EXTERNAL_DIR}/klsm/src
   ${EXTERNAL_DIR}/klsm/src/util
 )

@@ -1,11 +1,6 @@
-#ifndef FULL_UP_STRATEGY_PWKZYRQS
-#define FULL_UP_STRATEGY_PWKZYRQS
-
 #pragma once
-#ifndeoncef 
-#define 
-
-#endif  //!
+#ifndef FULL_UP_STRATEGY_HPP_INCLUDED
+#define FULL_UP_STRATEGY_HPP_INCLUDED
 #include <utility>
 
 namespace multiqueue {
@@ -72,4 +67,4 @@ struct full_up_strategy {
 }  // namespace local_nonaddressable
 }  // namespace multiqueue
 
-#endif
+#endif  //! FULL_UP_STRATEGY_HPP_INCLUDED

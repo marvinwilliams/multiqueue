@@ -1,13 +1,13 @@
 /******************************************************************************
- * File:             pq.hpp
+ * File:             kv_pq.hpp
  *
  * Author:
- * Created:          01/05/21
+ * Created:          01/07/21
  * Description:
  *****************************************************************************/
-
-#ifndef PQ_HPP_0PET2KO5
-#define PQ_HPP_0PET2KO5
+#pragma once
+#ifndef KV_PQ_HPP_8MTIGDLA
+#define KV_PQ_HPP_8MTIGDLA
 
 #include "multiqueue/sequential/heap/full_down_strategy.hpp"
 #include "multiqueue/sequential/heap/heap.hpp"
@@ -15,37 +15,45 @@
 
 #include <cassert>
 #include <functional>  // std::less
-#include <memory>
-#include <utility>  // std::swap
+#include <utility>     // std::swap
 #include <vector>
 
 namespace multiqueue {
 namespace local_nonaddressable {
 
 template <typename T>
-struct default_heap_settings {
+struct default_kv_heap_settings {
     static constexpr unsigned int Degree = 4;
     using Allocator = std::allocator<T>;
     using Strategy = full_down_strategy;
 };
 
-template <typename T, typename Comparator = std::less<T>,
-          template <typename> typename HeapSettings = default_heap_settings>
-class pq {
+template <typename Key, typename T, typename Comparator = std::less<Key>,
+          template <typename> typename HeapSettings = default_kv_heap_settings>
+class kv_pq {
    public:
-    using key_type = T;
-    using value_type = T;
-
+    using key_type = Key;
+    using mapped_type = T;
+    using value_type = std::pair<key_type, mapped_type>;
     using key_comparator = Comparator;
-    using value_comparator = Comparator;
+    class value_comparator : private key_comparator {
+        friend kv_pq;
+        explicit value_comparator(key_comparator const &comp) : key_comparator{comp} {
+        }
+
+       public:
+        constexpr bool operator()(value_type const &lhs, value_type const &rhs) const {
+            return key_comparator::operator()(util::get_nth<value_type>::operator()(lhs),
+                                              util::get_nth<value_type>::operator()(rhs));
+        }
+    };
 
    private:
     using heap_type =
-        heap<key_type, key_type, util::identity<key_type>, key_comparator, HeapSettings<value_type>::Degree,
+        heap<value_type, key_type, util::get_nth<value_type, 0>, key_comparator, HeapSettings<value_type>::Degree,
              typename HeapSettings<value_type>::Strategy, typename HeapSettings<value_type>::Allocator>;
 
    public:
-    using this_type = pq<T, Comparator, HeapSettings>;
     using reference = typename heap_type::reference;
     using const_reference = typename heap_type::const_reference;
     using iterator = typename heap_type::iterator;
@@ -57,27 +65,27 @@ class pq {
     heap_type heap_;
 
    public:
-    pq() = default;
+    kv_pq() = default;
 
-    explicit pq(Comparator const &c) : heap_(c) {
+    explicit kv_pq(Comparator const &c) : heap_(c) {
     }
 
     template <typename Allocator, typename = std::enable_if_t<std::uses_allocator_v<heap_type, Allocator>>>
-    explicit pq(std::allocator_arg_t, Allocator const &a) : heap_(std::allocator_arg, a) {
+    explicit kv_pq(std::allocator_arg_t, Allocator const &a) : heap_(std::allocator_arg, a) {
     }
 
     template <typename Allocator,
               typename = std::enable_if_t<std::uses_allocator_v<heap_type, Allocator> &&
                                           std::is_default_constructible_v<Comparator>>>
-    explicit pq(std::allocator_arg_t, Allocator const &a, Comparator const &c) : heap_(std::allocator_arg, a, c) {
+    explicit kv_pq(std::allocator_arg_t, Allocator const &a, Comparator const &c) : heap_(std::allocator_arg, a, c) {
     }
 
     constexpr key_comparator key_comp() const noexcept {
-        return heap_.key_comp();
+        return heap_.to_comparator();
     }
 
     constexpr value_comparator value_comp() const noexcept {
-        return key_comparator();
+        return value_comparator{heap_.key_comp()};
     }
 
     inline iterator begin() noexcept {
@@ -137,7 +145,11 @@ class pq {
         return true;
     }
 
-    void push(value_type value) {
+    void push(value_type const &value) {
+        heap_.insert(value);
+    }
+
+    void push(value_type &&value) {
         heap_.insert(std::move(value));
     }
 
@@ -145,16 +157,23 @@ class pq {
     void emplace(Args &&...args) {
         heap_.emplace(std::forward<Args>(args)...);
     }
+
+    template <typename insert_key_type, typename... Args>
+    void emplace_key(insert_key_type &&key, Args &&...args) {
+        heap_.emplace_known(key, std::piecewise_construct, std::forward_as_tuple(std::forward<insert_key_type>(key)),
+                            std::forward_as_tuple(std::forward<Args>(args)...));
+    }
 };
 
 }  // namespace local_nonaddressable
 }  // namespace multiqueue
 
 namespace std {
-template <typename T, typename Comparator, template <typename> typename HeapSettings, typename Alloc>
-struct uses_allocator<multiqueue::local_nonaddressable::pq<T, Comparator, HeapSettings>, Alloc>
-    : public uses_allocator<typename multiqueue::local_nonaddressable::pq<T, Comparator, HeapSettings>::heap_type,
-                            Alloc>::type {};
+template <typename Key, typename Value, typename Comparator, template <typename> typename HeapSettings, typename Alloc>
+struct uses_allocator<multiqueue::local_nonaddressable::kv_pq<Key, Value, Comparator, HeapSettings>, Alloc>
+    : public uses_allocator<
+          typename multiqueue::local_nonaddressable::kv_pq<Key, Value, Comparator, HeapSettings>::heap_type,
+          Alloc>::type {};
 }  // namespace std
 
-#endif /* end of include guard: PQ_HPP_0PET2KO5 */
+#endif /* end of include guard: KV_PQ_HPP_8MTIGDLA */

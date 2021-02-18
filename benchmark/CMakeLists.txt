@@ -1,45 +1,91 @@
 include(Catch)
 
-add_executable(benchmarks main.cpp heap.cpp)
-target_link_libraries(benchmarks PRIVATE multiqueue::multiqueue multiqueue_warnings)
-target_link_libraries_system(benchmarks PRIVATE Catch2::Catch2)
-target_compile_definitions(benchmarks PRIVATE CATCH_CONFIG_ENABLE_BENCHMARKING)
-target_compile_definitions(benchmarks PRIVATE "NDEBUG")
-target_compile_options(benchmarks PRIVATE "-O3")
-target_compile_options(benchmarks PRIVATE "-march=native")
+add_library(basic_benchmark INTERFACE)
+target_link_libraries(basic_benchmark INTERFACE multiqueue_warnings)
+target_compile_features(basic_benchmark INTERFACE cxx_std_17)
+target_compile_definitions(basic_benchmark INTERFACE "NDEBUG")
+target_compile_options(basic_benchmark INTERFACE "-O3")
+target_compile_options(basic_benchmark INTERFACE "-march=native")
 if(CMAKE_COMPILER_IS_GNUCXX)
-  target_link_options(benchmarks PRIVATE "-flto")
+  target_link_options(basic_benchmark INTERFACE "-flto")
 endif()
 
-add_library(performance_benchmark INTERFACE)
-target_include_directories(performance_benchmark INTERFACE "../utils")
-target_link_libraries(
-  performance_benchmark INTERFACE
-  multiqueue::multiqueue
-  multiqueue_warnings
-  capq_wrapper
-  linden_wrapper
-  spraylist_wrapper
-  klsm_wrapper
-)
-target_link_libraries_system(performance_benchmark INTERFACE cxxopts)
-target_compile_definitions(performance_benchmark INTERFACE "NDEBUG")
-target_compile_options(performance_benchmark INTERFACE "-O3" "-march=native")
-if(CMAKE_COMPILER_IS_GNUCXX)
-  target_link_options(performance_benchmark INTERFACE "-flto")
-endif()
+add_executable(micro_benchmarks main.cpp heap.cpp)
+target_link_libraries(micro_benchmarks PRIVATE multiqueue::multiqueue basic_benchmark)
+target_link_libraries_system(micro_benchmarks PRIVATE Catch2::Catch2)
+target_compile_definitions(micro_benchmarks PRIVATE CATCH_CONFIG_ENABLE_BENCHMARKING)
 
-add_executable(quality quality.cpp ../utils/threading.cpp)
-target_link_libraries(quality PRIVATE performance_benchmark)
+add_library(quality_benchmark INTERFACE)
+target_link_libraries(quality_benchmark INTERFACE threading basic_benchmark)
+target_link_libraries_system(quality_benchmark INTERFACE cxxopts)
+target_sources(quality_benchmark INTERFACE quality.cpp)
 
-add_executable(throughput throughput.cpp ../utils/threading.cpp)
-target_link_libraries(throughput PRIVATE performance_benchmark)
+add_executable(capq_quality_benchmark)
+target_compile_definitions(capq_quality_benchmark PRIVATE PQ_CAPQ1)
+target_link_libraries(capq_quality_benchmark PRIVATE capq_wrapper quality_benchmark)
+
+add_executable(klsm_quality_benchmark)
+target_compile_definitions(klsm_quality_benchmark PRIVATE PQ_KLSM)
+target_link_libraries(klsm_quality_benchmark PRIVATE klsm_wrapper quality_benchmark)
+
+add_executable(dlsm_quality_benchmark)
+target_compile_definitions(dlsm_quality_benchmark PRIVATE PQ_DLSM)
+target_link_libraries(dlsm_quality_benchmark PRIVATE klsm_wrapper quality_benchmark)
+
+add_executable(linden_quality_benchmark)
+target_compile_definitions(linden_quality_benchmark PRIVATE PQ_LINDEN)
+target_link_libraries(linden_quality_benchmark PRIVATE linden_wrapper quality_benchmark)
+
+add_executable(spraylist_quality_benchmark)
+target_compile_definitions(spraylist_quality_benchmark PRIVATE PQ_SPRAYLIST)
+target_link_libraries(spraylist_quality_benchmark PRIVATE spraylist_wrapper quality_benchmark)
+
+add_executable(nbpq_quality_benchmark)
+target_compile_definitions(nbpq_quality_benchmark PRIVATE PQ_NBMQ)
+target_link_libraries(nbpq_quality_benchmark PRIVATE multiqueue::multiqueue quality_benchmark)
+
+add_custom_target(all_quality_benchmarks COMMENT "Build all quality benchmarks")
+add_dependencies(all_quality_benchmarks capq_quality_benchmark klsm_quality_benchmark dlsm_quality_benchmark linden_quality_benchmark spraylist_quality_benchmark nbpq_quality_benchmark)
 
 add_executable(evaluate_quality evaluate_quality.cpp)
 target_link_libraries(evaluate_quality PRIVATE multiqueue_warnings)
 target_link_libraries_system(evaluate_quality PRIVATE cxxopts)
-target_compile_options(evaluate_quality PRIVATE "-O0" "-g")
 target_compile_features(
   evaluate_quality PRIVATE
   cxx_std_17
 )
+
+add_library(throughput_benchmark INTERFACE)
+target_link_libraries(throughput_benchmark INTERFACE threading basic_benchmark)
+target_link_libraries_system(throughput_benchmark INTERFACE cxxopts)
+target_sources(throughput_benchmark INTERFACE throughput.cpp)
+
+add_executable(capq_throughput_benchmark)
+target_compile_definitions(capq_throughput_benchmark PRIVATE PQ_CAPQ1)
+target_link_libraries(capq_throughput_benchmark PRIVATE capq_wrapper throughput_benchmark)
+
+add_executable(klsm_throughput_benchmark)
+target_compile_definitions(klsm_throughput_benchmark PRIVATE PQ_KLSM)
+target_link_libraries(klsm_throughput_benchmark PRIVATE klsm_wrapper throughput_benchmark)
+
+add_executable(dlsm_throughput_benchmark)
+target_compile_definitions(dlsm_throughput_benchmark PRIVATE PQ_DLSM)
+target_link_libraries(dlsm_throughput_benchmark PRIVATE klsm_wrapper throughput_benchmark)
+
+add_executable(linden_throughput_benchmark)
+target_compile_definitions(linden_throughput_benchmark PRIVATE PQ_LINDEN)
+target_link_libraries(linden_throughput_benchmark PRIVATE linden_wrapper throughput_benchmark)
+
+add_executable(spraylist_throughput_benchmark)
+target_compile_definitions(spraylist_throughput_benchmark PRIVATE PQ_SPRAYLIST)
+target_link_libraries(spraylist_throughput_benchmark PRIVATE spraylist_wrapper throughput_benchmark)
+
+add_executable(nbpq_throughput_benchmark)
+target_compile_definitions(nbpq_throughput_benchmark PRIVATE PQ_NBMQ)
+target_link_libraries(nbpq_throughput_benchmark PRIVATE multiqueue::multiqueue throughput_benchmark)
+
+add_custom_target(all_throughput_benchmarks COMMENT "Build all throughput benchmarks")
+add_dependencies(all_throughput_benchmarks capq_throughput_benchmark klsm_throughput_benchmark dlsm_throughput_benchmark linden_throughput_benchmark spraylist_throughput_benchmark nbpq_throughput_benchmark)
+
+add_custom_target(all_benchmarks COMMENT "Build all benchmarks")
+add_dependencies(all_benchmarks micro_benchmarks all_quality_benchmarks all_throughput_benchmarks)

@@ -163,8 +163,7 @@ class heap {
         : data_{alloc} {
     }
 
-    explicit heap(key_comparator const &comp, allocator_type const &alloc) noexcept
-        : data_{comp, alloc} {
+    explicit heap(key_comparator const &comp, allocator_type const &alloc) noexcept : data_{comp, alloc} {
     }
 
     constexpr key_comparator key_comp() const noexcept {
@@ -217,6 +216,22 @@ class heap {
         assert(!data_.container.empty());
         retval = std::move(data_.container.front());
         pop();
+    }
+
+    void insert_copy(value_type value) {
+        if (empty()) {
+            data_.container.push_back(value);
+        } else {
+            if (auto const parent = parent_index(size());
+                compare(extract_key(value), extract_key(data_.container[parent]))) {
+                data_.container.push_back(std::move(data_.container[parent]));
+                auto const index = SiftStrategy::sift_up_hole(*this, parent, extract_key(value));
+                data_.container[index] = value;
+            } else {
+                data_.container.push_back(value);
+            }
+        }
+        assert(is_heap());
     }
 
     template <typename insert_type>
