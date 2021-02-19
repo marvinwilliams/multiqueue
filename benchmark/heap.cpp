@@ -1,4 +1,5 @@
 #include "multiqueue/sequential/heap/heap.hpp"
+#include "multiqueue/sequential/heap/old_heap.hpp"
 #include "catch2/catch.hpp"
 #include "multiqueue/sequential/heap/full_down_strategy.hpp"
 #include "multiqueue/sequential/heap/full_up_strategy.hpp"
