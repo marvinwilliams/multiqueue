@@ -1,5 +1,3 @@
-include(Catch)
-
 add_library(basic_benchmark INTERFACE)
 target_link_libraries(basic_benchmark INTERFACE multiqueue_warnings)
 target_compile_features(basic_benchmark INTERFACE cxx_std_17)
@@ -49,11 +47,13 @@ add_dependencies(all_quality_benchmarks capq_quality_benchmark klsm_quality_benc
 
 add_executable(evaluate_quality evaluate_quality.cpp)
 target_link_libraries(evaluate_quality PRIVATE multiqueue_warnings)
-target_link_libraries_system(evaluate_quality PRIVATE cxxopts)
+target_link_libraries_system(evaluate_quality PRIVATE cxxopts tlx)
 target_compile_features(
   evaluate_quality PRIVATE
   cxx_std_17
 )
+target_compile_definitions(evaluate_quality INTERFACE "NDEBUG")
+target_compile_options(evaluate_quality INTERFACE "-O3")
 
 add_library(throughput_benchmark INTERFACE)
 target_link_libraries(throughput_benchmark INTERFACE threading basic_benchmark)

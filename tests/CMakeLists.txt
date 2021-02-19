@@ -5,11 +5,11 @@ target_link_libraries(basic_test INTERFACE multiqueue_warnings)
 target_compile_features(basic_test INTERFACE cxx_std_17)
 
 add_library(catch_test INTERFACE)
-target_link_libraries(catch_test INTERFACE basic_test Catch2::Catch2)
+target_link_libraries(catch_test INTERFACE basic_test)
+target_link_libraries_system(catch_test INTERFACE Catch2::Catch2)
 
 add_executable(unit_tests main.cpp pq_api.cpp pq_correctness.cpp kv_pq_api.cpp kv_pq_correctness.cpp no_buffer_pq.cpp)
-target_link_libraries(unit_tests PRIVATE catch_test multiqueue::multiqueue)
-target_link_libraries(unit_tests PRIVATE Threads::Threads)
+target_link_libraries(unit_tests PRIVATE catch_test multiqueue::multiqueue Threads::Threads)
 
 if(BUILD_TESTING)
   catch_discover_tests(unit_tests)

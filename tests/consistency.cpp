@@ -225,13 +225,13 @@ int main(int argc, char* argv[]) {
     std::cout << settings.num_threads << '\n';
     for (unsigned int t = 0; t < settings.num_threads; ++t) {
         for (auto const& [tick, key, val] : global_insertions[t]) {
-            std::cout << "i " << t << ' ' << tick << ' ' << key << ' ' << val.thread_id() << ' ' << val.elem_id()
+            std::cout << "i " << t << ' ' << tick << ' ' << key << ' ' << get_thread_id(val) << ' ' << get_elem_id(val)
                       << '\n';
         }
     }
     for (unsigned int t = 0; t < settings.num_threads; ++t) {
         for (auto const& [tick, key, val] : global_deletions[t]) {
-            std::cout << "d " << t << ' ' << tick << ' ' << key << ' ' << val.thread_id() << ' ' << val.elem_id()
+            std::cout << "d " << t << ' ' << tick << ' ' << key << ' ' << get_thread_id(val) << ' ' << get_elem_id(val)
                       << '\n';
         }
     }

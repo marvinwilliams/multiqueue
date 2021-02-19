@@ -2,12 +2,14 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <list>
 #include <numeric>
 #include <set>
 #include <unordered_map>
 #include <vector>
 
 #include "cxxopts.hpp"
+#include "tlx/container/btree_map.hpp"
 
 struct deletion_log {
     uint64_t tick;
@@ -45,15 +47,27 @@ std::ostream& operator<<(std::ostream& out, insertion_log const& line) {
     return out;
 }
 
-bool operator<(insertion_log const& lhs, insertion_log const& rhs) {
-    return lhs.tick < rhs.tick;
-}
+struct heap_entry {
+    uint32_t key;
+    unsigned int ins_thread_id;
+    uint32_t elem_id;
+};
 
-bool operator==(insertion_log const& lhs, insertion_log const& rhs) {
-    return lhs.key == rhs.key && lhs.tick == rhs.tick;
-}
-bool operator!=(insertion_log const& lhs, insertion_log const& rhs) {
-    return !(lhs == rhs);
+bool operator<(heap_entry const& lhs, heap_entry const& rhs) {
+    if (lhs.key < rhs.key) {
+        return true;
+    }
+    if (lhs.key == rhs.key) {
+        if (lhs.ins_thread_id < rhs.ins_thread_id) {
+            return true;
+        }
+        if (lhs.ins_thread_id == rhs.ins_thread_id) {
+            if (lhs.elem_id < rhs.elem_id) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 int main(int argc, char* argv[]) {
@@ -93,6 +107,7 @@ int main(int argc, char* argv[]) {
     char op;
     unsigned int thread_id;
     bool deleting = false;
+    int line = 0;
     while (std::cin >> op >> thread_id) {
         if (thread_id >= num_threads) {
             std::cerr << "Thread id " << thread_id << " too high (Max: " << num_threads - 1 << ')' << std::endl;
@@ -115,8 +130,8 @@ int main(int argc, char* argv[]) {
             deletion_log del;
             std::cin >> del;
             if (del.value->first >= num_threads) {
-                std::cerr << "Thread id " << del.value->first << " too high (Max: " << num_threads - 1 << ')'
-                          << std::endl;
+                std::cerr << "Line " << line << ": Other thread id " << del.value->first
+                          << " too high (Max: " << num_threads - 1 << ')' << std::endl;
                 return 1;
             }
             if (del.value->second >= insertions[del.value->first].size()) {
@@ -137,57 +152,62 @@ int main(int argc, char* argv[]) {
             std::cerr << "Invalid operation: " << op << std::endl;
             return 1;
         }
+        ++line;
     }
 
     std::clog << "Sorting deletions...\n";
     std::sort(deletions.begin(), deletions.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
+    std::cout << std::flush;
     std::vector<size_t> rank_histogram;
     std::vector<size_t> delay_histogram;
     rank_histogram.reserve(10'000);
     delay_histogram.reserve(10'000);
     std::clog << "Replaying operations...\n";
-    std::multimap<uint64_t, size_t> replay_heap{};
-    std::vector<size_t> insert_index(insertions.size());
+    tlx::btree_map<heap_entry, size_t> replay_heap{};
+    std::vector<size_t> insert_index(insertions.size(), 0);
     uint64_t failed_deletions = 0;
     for (size_t i = 0; i < deletions.size(); ++i) {
         if (!deletions[i].value) {
-            if (replay_heap.empty()) {
-                continue;
+            if (!replay_heap.empty()) {
+                for (auto& [num, delay] : replay_heap) {
+                    ++delay;
+                }
+                ++failed_deletions;
             }
-            for (auto& [num, delay] : replay_heap) {
-                ++delay;
-            }
-            ++failed_deletions;
-            ++rank_histogram[static_cast<size_t>(replay_heap.size())];
+            continue;
         }
 
         // Inserting everything before next deletion
-        for (size_t t = 0; t < insertions.size(); ++t) {
+        for (unsigned int t = 0; t < insertions.size(); ++t) {
             while (insert_index[t] < insertions[t].size() && insertions[t][insert_index[t]].tick < deletions[i].tick) {
-                replay_heap.insert({insertions[t][insert_index[t]].key, 0});
+                replay_heap.insert(
+                    {{insertions[t][insert_index[t]].key, t, static_cast<uint32_t>(insert_index[t])}, 0});
                 ++insert_index[t];
             }
         }
 
-        if (auto it = replay_heap.lower_bound(insertions[deletions[i].value->first][deletions[i].value->second].key);
-            it != replay_heap.end() &&
-            it->first == insertions[deletions[i].value->first][deletions[i].value->second].key) {
-            size_t rank_error = static_cast<size_t>(std::distance(replay_heap.begin(), it));
-            if (rank_error >= rank_histogram.size()) {
-                rank_histogram.resize(rank_error + 1, 0);
-            }
-            ++rank_histogram[rank_error];
+        auto key = insertions[deletions[i].value->first][deletions[i].value->second].key;
+
+        if (auto it = replay_heap.find({key, deletions[i].value->first, deletions[i].value->second});
+            it != replay_heap.end()) {
             if (it->second >= delay_histogram.size()) {
                 delay_histogram.resize(it->second + 1, 0);
             }
             ++delay_histogram[it->second];
-            for (auto smaller = replay_heap.begin(); smaller != it; ++smaller) {
+            auto smaller = replay_heap.begin();
+            for (; smaller != it && smaller->first.key < key; ++smaller) {
                 ++smaller->second;
             }
+            size_t rank_error = static_cast<size_t>(std::distance(replay_heap.begin(), smaller));
+            if (rank_error >= rank_histogram.size()) {
+                rank_histogram.resize(rank_error + 1, 0);
+            }
+            ++rank_histogram[rank_error];
             replay_heap.erase(it);
         } else {
-            std::cerr << "Element\n\t" << insertions[deletions[i].value->first][deletions[i].value->second] << " "
-                      << deletions[i].value->second << "\nis not in the heap at deletion time" << std::endl;
+            std::cerr << "Element\n\t" << insertions[deletions[i].value->first][deletions[i].value->second]
+                      << " Value: " << deletions[i].value->second << " Deletion tick: " << deletions[i].tick
+                      << "\nis not in the heap at deletion time" << std::endl;
             return 1;
         }
         if (i % 10'000 == 0) {
