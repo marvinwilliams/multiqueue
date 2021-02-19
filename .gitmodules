@@ -4,6 +4,7 @@
 [submodule "external/klsm"]
 	path = external/klsm
 	url = https://github.com/marvinwilliams/klsm.git
+	branch = patch
 [submodule "external/cxxopts"]
 	path = external/cxxopts
 	url = https://github.com/jarro2783/cxxopts.git
