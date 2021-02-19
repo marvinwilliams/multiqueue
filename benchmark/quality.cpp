@@ -35,7 +35,11 @@
 #include "dist_lsm/dist_lsm.h"
 #include "klsm.hpp"
 #elif defined PQ_NBMQ
-#include "multiqueue/no_buffer_pq.hpp"
+#include "multiqueue/no_buffer_mq.hpp"
+#elif defined PQ_TBMQ
+#include "multiqueue/top_buffer_mq.hpp"
+#elif defined PQ_DBMQ
+#include "multiqueue/deletion_buffer_mq.hpp"
 #else
 #error No supported priority queue defined!
 #endif
@@ -53,7 +57,7 @@ using namespace std::chrono_literals;
 using clk = std::chrono::steady_clock;
 
 static constexpr size_t default_prefill_size = 1'000'000;
-static constexpr std::chrono::milliseconds default_working_time = 1s;
+static constexpr unsigned int default_num_operations = 100'000u;
 static constexpr unsigned int default_num_threads = 1u;
 static constexpr InsertPolicy default_policy = InsertPolicy::Uniform;
 static constexpr KeyDistribution default_key_distribution = KeyDistribution::Uniform;
@@ -79,7 +83,7 @@ static constexpr value_type get_elem_id(value_type value) noexcept {
 
 struct Settings {
     size_t prefill_size = default_prefill_size;
-    std::chrono::milliseconds working_time = default_working_time;
+    unsigned int num_operations = default_num_operations;
     unsigned int num_threads = default_num_threads;
     InsertPolicy policy = default_policy;
     KeyDistribution key_distribution = default_key_distribution;
@@ -98,7 +102,6 @@ struct deletion_log {
 };
 
 std::atomic_bool start_flag;
-std::atomic_bool stop_flag;
 
 std::vector<std::vector<insertion_log>> global_insertions;
 std::vector<std::vector<deletion_log>> global_deletions;
@@ -154,9 +157,9 @@ struct Task {
                 break;
         }
         std::vector<insertion_log> insertions;
-        insertions.reserve(100'000'000);
+        insertions.reserve(settings.num_operations);
         std::vector<deletion_log> deletions;
-        deletions.reserve(100'000'000);
+        deletions.reserve(settings.num_operations);
 
         if constexpr (has_thread_init<pq_t>::value) {
             pq.init_thread(context.get_num_threads());
@@ -191,8 +194,8 @@ struct Task {
         }
         std::atomic_thread_fence(std::memory_order_acquire);
         std::pair<key_type, value_type> retval;
-        while (!stop_flag.load(std::memory_order_relaxed)) {
-            if (std::visit([](auto& i) noexcept { return i(); }, inserter)) {
+        for (unsigned int i = 0; i < settings.num_operations; ++i) {
+            if (std::visit([](auto& ins) noexcept { return ins(); }, inserter)) {
                 key_type const key = std::visit([](auto& g) noexcept { return g(); }, key_generator);
                 value_type const value = to_value(context.get_id(), static_cast<value_type>(insertions.size()));
                 auto now = std::chrono::steady_clock::now();
@@ -238,7 +241,11 @@ int main(int argc, char* argv[]) {
 #elif defined PQ_DLSM
     using pq_t = multiqueue::wrapper::klsm<kpq::dist_lsm<key_type, value_type, 256>>;
 #elif defined PQ_NBMQ
-    using pq_t = multiqueue::rsm::no_buffer_pq<key_type, value_type>;
+    using pq_t = multiqueue::rsm::no_buffer_mq<key_type, value_type>;
+#elif defined PQ_TBMQ
+    using pq_t = multiqueue::rsm::top_buffer_mq<key_type, value_type>;
+#elif defined PQ_DBMQ
+    using pq_t = multiqueue::rsm::deletion_buffer_mq<key_type, value_type>;
 #endif
 
     cxxopts::Options options("quality benchmark", "This executable measures the quality of relaxed priority queues");
@@ -250,8 +257,8 @@ int main(int argc, char* argv[]) {
        "(default: uniform)", cxxopts::value<std::string>(), "ARG")
       ("j,threads", "Specify the number of threads "
        "(default: 1)", cxxopts::value<unsigned int>(), "NUMBER")
-      ("t,time", "Specify the benchmark timeout (ms)"
-       "(default: 1000)", cxxopts::value<unsigned int>(), "NUMBER")
+      ("o,operations", "Specify the number of operations done by each thread "
+       "(default: " + std::to_string(default_num_operations) + ")", cxxopts::value<unsigned int>(), "NUMBER")
       ("d,key-distribution", "Specify the key distribution as one of \"uniform\", \"dijkstra\", \"ascending\", \"descending\" "
        "(default: uniform)", cxxopts::value<std::string>(), "ARG")
       ("h,help", "Print this help");
@@ -286,8 +293,8 @@ int main(int argc, char* argv[]) {
         if (result.count("threads") > 0) {
             settings.num_threads = result["threads"].as<unsigned int>();
         }
-        if (result.count("time") > 0) {
-            settings.working_time = std::chrono::milliseconds{result["time"].as<unsigned int>()};
+        if (result.count("operations") > 0) {
+            settings.num_operations = result["operations"].as<unsigned int>();
         }
         if (result.count("key-distribution") > 0) {
             std::string dist = result["key-distribution"].as<std::string>();
@@ -313,7 +320,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     start_flag.store(false, std::memory_order_relaxed);
-    stop_flag.store(false, std::memory_order_relaxed);
     pq_t pq{settings.num_threads};
     global_insertions.resize(settings.num_threads);
     global_deletions.resize(settings.num_threads);
@@ -322,8 +328,6 @@ int main(int argc, char* argv[]) {
     coordinator.run<Task<pq_t>>(std::ref(pq), settings);
     coordinator.wait_until_notified();
     start_flag.store(true, std::memory_order_release);
-    std::this_thread::sleep_for(settings.working_time);
-    stop_flag.store(true, std::memory_order_release);
     coordinator.join();
     std::cout << settings.num_threads << '\n';
     for (unsigned int t = 0; t < settings.num_threads; ++t) {

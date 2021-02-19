@@ -1,6 +1,6 @@
 /**
 ******************************************************************************
-* @file:   no_buffer_pq.hpp
+* @file:   no_buffer_mq.hpp
 *
 * @author: Marvin Williams
 * @date:   2021/02/17 16:57
@@ -9,8 +9,8 @@
 *******************************************************************************
 **/
 #pragma once
-#ifndef NO_BUFFER_PQ_HPP_INCLUDED
-#define NO_BUFFER_PQ_HPP_INCLUDED
+#ifndef NO_BUFFER_MQ_HPP_INCLUDED
+#define NO_BUFFER_MQ_HPP_INCLUDED
 
 #include "multiqueue/sequential/heap/full_down_strategy.hpp"
 #include "multiqueue/sequential/heap/heap.hpp"
@@ -44,7 +44,7 @@ struct NoBufferConfiguration {
 
 template <typename Key, typename T, typename Comparator = std::less<Key>,
           template <typename> typename Configuration = NoBufferConfiguration, typename Allocator = std::allocator<Key>>
-class no_buffer_pq {
+class no_buffer_mq {
    public:
     using key_type = Key;
     using mapped_type = T;
@@ -101,12 +101,12 @@ class no_buffer_pq {
     }
 
    public:
-    explicit no_buffer_pq(unsigned int const num_threads)
+    explicit no_buffer_mq(unsigned int const num_threads)
         : heap_list_(num_threads * C), num_queues_{static_cast<unsigned int>(heap_list_.size())}, comp_{} {
         assert(num_threads >= 1);
     }
 
-    explicit no_buffer_pq(unsigned int const num_threads, allocator_type const &alloc)
+    explicit no_buffer_mq(unsigned int const num_threads, allocator_type const &alloc)
         : heap_list_(num_threads * C, alloc), num_queues_{static_cast<unsigned int>(heap_list_.size())}, comp_{} {
         assert(num_threads >= 1);
     }

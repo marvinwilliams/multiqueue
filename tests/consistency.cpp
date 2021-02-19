@@ -26,7 +26,11 @@
 #include "dist_lsm/dist_lsm.h"
 #include "klsm.hpp"
 #elif defined PQ_NBMQ
-#include "multiqueue/no_buffer_pq.hpp"
+#include "multiqueue/no_buffer_mq.hpp"
+#elif defined PQ_TBMQ
+#include "multiqueue/top_buffer_mq.hpp"
+#elif defined PQ_DBMQ
+#include "multiqueue/deletion_buffer_mq.hpp"
 #else
 #error No supported priority queue defined!
 #endif
@@ -170,7 +174,11 @@ int main(int argc, char* argv[]) {
 #elif defined PQ_DLSM
     using pq_t = multiqueue::wrapper::klsm<kpq::dist_lsm<key_type, value_type, 256>>;
 #elif defined PQ_NBMQ
-    using pq_t = multiqueue::rsm::no_buffer_pq<key_type, value_type>;
+    using pq_t = multiqueue::rsm::no_buffer_mq<key_type, value_type>;
+#elif defined PQ_TBMQ
+    using pq_t = multiqueue::rsm::top_buffer_mq<key_type, value_type>;
+#elif defined PQ_DBMQ
+    using pq_t = multiqueue::rsm::deletion_buffer_mq<key_type, value_type>;
 #endif
 
     cxxopts::Options options("Consistency test", "This executable tests the consistency of concurrent priority queues");
