@@ -13,33 +13,12 @@
 #include "cxxopts.hpp"
 #include "inserter.hpp"
 #include "key_generator.hpp"
+#include "select_queue.hpp"
 #include "thread_coordination.hpp"
 #include "threading.hpp"
 
 #ifndef NDEBUG
 #error "Benchmarks must not be compiled in debug build!"
-#endif
-
-#if defined PQ_CAPQ1 || defined PQ_CAPQ2 || defined PQ_CAPQ3 || defined PQ_CAPQ4
-#include "capq.hpp"
-#elif defined PQ_LINDEN
-#include "linden.hpp"
-#elif defined PQ_SPRAYLIST
-#include "spraylist.hpp"
-#elif defined PQ_KLSM
-#include "k_lsm/k_lsm.h"
-#include "klsm.hpp"
-#elif defined PQ_DLSM
-#include "dist_lsm/dist_lsm.h"
-#include "klsm.hpp"
-#elif defined PQ_NBMQ
-#include "multiqueue/no_buffer_mq.hpp"
-#elif defined PQ_TBMQ
-#include "multiqueue/top_buffer_mq.hpp"
-#elif defined PQ_DBMQ
-#include "multiqueue/deletion_buffer_mq.hpp"
-#else
-#error No supported priority queue defined!
 #endif
 
 using key_type = std::uint32_t;
@@ -85,16 +64,9 @@ volatile value_type result_value;
 // Assume rdtsc is thread-safe and synchronized on each CPU
 // Assumption false
 
-template <typename T, typename = void>
-struct has_thread_init : std::false_type {};
-
-template <typename T>
-struct has_thread_init<T, std::void_t<decltype(std::declval<T>().init_thread(static_cast<size_t>(0)))>>
-    : std::true_type {};
-
-template <typename pq_t>
+template <typename Queue>
 struct Task {
-    static void run(thread_coordination::Context context, pq_t& pq, Settings const& settings) {
+    static void run(thread_coordination::Context context, Queue& pq, Settings const& settings) {
         std::variant<Inserter<InsertPolicy::Uniform>, Inserter<InsertPolicy::Split>, Inserter<InsertPolicy::Producer>,
                      Inserter<InsertPolicy::Alternating>>
             inserter;
@@ -136,7 +108,8 @@ struct Task {
         uint64_t insertions = 0;
         uint64_t deletions = 0;
         uint64_t failed_deletions = 0;
-        if constexpr (has_thread_init<pq_t>::value) {
+
+        if constexpr (util::QueueTraits<Queue>::has_thread_init) {
             pq.init_thread(context.get_num_threads());
         }
 
@@ -194,30 +167,6 @@ struct Task {
 };
 
 int main(int argc, char* argv[]) {
-#if defined PQ_CAPQ1
-    using pq_t = multiqueue::wrapper::capq<true, true, true>;
-#elif defined PQ_CAPQ2
-    using pq_t = multiqueue::wrapper::capq<true, false, true>;
-#elif defined PQ_CAPQ3
-    using pq_t = multiqueue::wrapper::capq<false, true, true>;
-#elif defined PQ_CAPQ4
-    using pq_t = multiqueue::wrapper::capq<false, false, true>;
-#elif defined PQ_LINDEN
-    using pq_t = multiqueue::wrapper::linden;
-#elif defined PQ_SPRAYLIST
-    using pq_t = multiqueue::wrapper::spraylist;
-#elif defined PQ_KLSM
-    using pq_t = multiqueue::wrapper::klsm<kpq::k_lsm<key_type, value_type, 256>>;
-#elif defined PQ_DLSM
-    using pq_t = multiqueue::wrapper::klsm<kpq::dist_lsm<key_type, value_type, 256>>;
-#elif defined PQ_NBMQ
-    using pq_t = multiqueue::rsm::no_buffer_mq<key_type, value_type>;
-#elif defined PQ_TBMQ
-    using pq_t = multiqueue::rsm::top_buffer_mq<key_type, value_type>;
-#elif defined PQ_DBMQ
-    using pq_t = multiqueue::rsm::deletion_buffer_mq<key_type, value_type>;
-#endif
-
     cxxopts::Options options("quality benchmark", "This executable measures the quality of relaxed priority queues");
     // clang-format off
     options.add_options()
@@ -285,12 +234,15 @@ int main(int argc, char* argv[]) {
         std::cerr << e.what() << std::endl;
         return 1;
     }
+
+    using Queue = util::QueueSelector<key_type, value_type>::pq_t;
+    Queue pq{settings.num_threads};
+
     start_flag.store(false, std::memory_order_relaxed);
     stop_flag.store(false, std::memory_order_relaxed);
-    pq_t pq{settings.num_threads};
     std::atomic_thread_fence(std::memory_order_release);
     thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
-    coordinator.run<Task<pq_t>>(std::ref(pq), settings);
+    coordinator.run<Task<Queue>>(std::ref(pq), settings);
     coordinator.wait_until_notified();
     start_flag.store(true, std::memory_order_release);
     std::this_thread::sleep_for(settings.working_time);
@@ -302,9 +254,5 @@ int main(int argc, char* argv[]) {
             static_cast<double>(settings.working_time.count())
               << std::endl;
     std::clog << "done" << std::endl;
-#ifdef PQ_LINDEN
-    // Avoid segfault
-    pq.push({0, 0});
-#endif
     return 0;
 }

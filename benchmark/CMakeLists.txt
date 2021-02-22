@@ -18,40 +18,31 @@ target_link_libraries(quality_benchmark INTERFACE threading basic_benchmark)
 target_link_libraries_system(quality_benchmark INTERFACE cxxopts)
 target_sources(quality_benchmark INTERFACE quality.cpp)
 
-add_executable(capq_quality_benchmark)
-target_compile_definitions(capq_quality_benchmark PRIVATE PQ_CAPQ1)
-target_link_libraries(capq_quality_benchmark PRIVATE capq_wrapper quality_benchmark)
-
-add_executable(klsm_quality_benchmark)
-target_compile_definitions(klsm_quality_benchmark PRIVATE PQ_KLSM)
-target_link_libraries(klsm_quality_benchmark PRIVATE klsm_wrapper quality_benchmark)
-
-add_executable(dlsm_quality_benchmark)
-target_compile_definitions(dlsm_quality_benchmark PRIVATE PQ_DLSM)
-target_link_libraries(dlsm_quality_benchmark PRIVATE klsm_wrapper quality_benchmark)
-
-add_executable(linden_quality_benchmark)
-target_compile_definitions(linden_quality_benchmark PRIVATE PQ_LINDEN)
-target_link_libraries(linden_quality_benchmark PRIVATE linden_wrapper quality_benchmark)
-
-add_executable(spraylist_quality_benchmark)
-target_compile_definitions(spraylist_quality_benchmark PRIVATE PQ_SPRAYLIST)
-target_link_libraries(spraylist_quality_benchmark PRIVATE spraylist_wrapper quality_benchmark)
-
-add_executable(nbmq_quality_benchmark)
-target_compile_definitions(nbmq_quality_benchmark PRIVATE PQ_NBMQ)
-target_link_libraries(nbmq_quality_benchmark PRIVATE multiqueue::multiqueue quality_benchmark)
-
-add_executable(tbmq_quality_benchmark)
-target_compile_definitions(tbmq_quality_benchmark PRIVATE PQ_TBMQ)
-target_link_libraries(tbmq_quality_benchmark PRIVATE multiqueue::multiqueue quality_benchmark)
-
-add_executable(dbmq_quality_benchmark)
-target_compile_definitions(dbmq_quality_benchmark PRIVATE PQ_DBMQ)
-target_link_libraries(dbmq_quality_benchmark PRIVATE multiqueue::multiqueue quality_benchmark)
-
 add_custom_target(all_quality_benchmarks COMMENT "Build all quality benchmarks")
-add_dependencies(all_quality_benchmarks capq_quality_benchmark klsm_quality_benchmark dlsm_quality_benchmark linden_quality_benchmark spraylist_quality_benchmark nbmq_quality_benchmark tbmq_quality_benchmark dbmq_quality_benchmark)
+
+function(add_wrapper_quality_benchmark name define)
+  add_executable(${name}_quality_benchmark)
+  target_compile_definitions(${name}_quality_benchmark PRIVATE ${define})
+  target_link_libraries(${name}_quality_benchmark PRIVATE ${name}_wrapper quality_benchmark)
+  add_dependencies(all_quality_benchmarks ${name}_quality_benchmark)
+endfunction()
+
+function(add_mq_quality_benchmark name define)
+  add_executable(${name}_quality_benchmark)
+  target_compile_definitions(${name}_quality_benchmark PRIVATE ${define})
+  target_link_libraries(${name}_quality_benchmark PRIVATE multiqueue::multiqueue quality_benchmark)
+  add_dependencies(all_quality_benchmarks ${name}_quality_benchmark)
+endfunction()
+
+add_wrapper_quality_benchmark(capq PQ_CAPQ)
+add_wrapper_quality_benchmark(klsm PQ_KLSM)
+add_wrapper_quality_benchmark(dlsm PQ_DLSM)
+add_wrapper_quality_benchmark(linden PQ_LINDEN)
+add_wrapper_quality_benchmark(spraylist PQ_SPRAYLIST)
+add_mq_quality_benchmark(nbmq PQ_NBMQ)
+add_mq_quality_benchmark(tbmq PQ_TBMQ)
+add_mq_quality_benchmark(dbmq PQ_DBMQ)
+add_mq_quality_benchmark(smdmq PQ_SMDMQ)
 
 add_executable(evaluate_quality evaluate_quality.cpp)
 target_link_libraries(evaluate_quality PRIVATE multiqueue_warnings)
@@ -68,40 +59,32 @@ target_link_libraries(throughput_benchmark INTERFACE threading basic_benchmark)
 target_link_libraries_system(throughput_benchmark INTERFACE cxxopts)
 target_sources(throughput_benchmark INTERFACE throughput.cpp)
 
-add_executable(capq_throughput_benchmark)
-target_compile_definitions(capq_throughput_benchmark PRIVATE PQ_CAPQ1)
-target_link_libraries(capq_throughput_benchmark PRIVATE capq_wrapper throughput_benchmark)
-
-add_executable(klsm_throughput_benchmark)
-target_compile_definitions(klsm_throughput_benchmark PRIVATE PQ_KLSM)
-target_link_libraries(klsm_throughput_benchmark PRIVATE klsm_wrapper throughput_benchmark)
-
-add_executable(dlsm_throughput_benchmark)
-target_compile_definitions(dlsm_throughput_benchmark PRIVATE PQ_DLSM)
-target_link_libraries(dlsm_throughput_benchmark PRIVATE klsm_wrapper throughput_benchmark)
-
-add_executable(linden_throughput_benchmark)
-target_compile_definitions(linden_throughput_benchmark PRIVATE PQ_LINDEN)
-target_link_libraries(linden_throughput_benchmark PRIVATE linden_wrapper throughput_benchmark)
-
-add_executable(spraylist_throughput_benchmark)
-target_compile_definitions(spraylist_throughput_benchmark PRIVATE PQ_SPRAYLIST)
-target_link_libraries(spraylist_throughput_benchmark PRIVATE spraylist_wrapper throughput_benchmark)
-
-add_executable(nbmq_throughput_benchmark)
-target_compile_definitions(nbmq_throughput_benchmark PRIVATE PQ_NBMQ)
-target_link_libraries(nbmq_throughput_benchmark PRIVATE multiqueue::multiqueue throughput_benchmark)
-
-add_executable(tbmq_throughput_benchmark)
-target_compile_definitions(tbmq_throughput_benchmark PRIVATE PQ_TBMQ)
-target_link_libraries(tbmq_throughput_benchmark PRIVATE multiqueue::multiqueue throughput_benchmark)
-
-add_executable(dbmq_throughput_benchmark)
-target_compile_definitions(dbmq_throughput_benchmark PRIVATE PQ_DBMQ)
-target_link_libraries(dbmq_throughput_benchmark PRIVATE multiqueue::multiqueue throughput_benchmark)
-
 add_custom_target(all_throughput_benchmarks COMMENT "Build all throughput benchmarks")
-add_dependencies(all_throughput_benchmarks capq_throughput_benchmark klsm_throughput_benchmark dlsm_throughput_benchmark linden_throughput_benchmark spraylist_throughput_benchmark nbmq_throughput_benchmark tbmq_throughput_benchmark dbmq_throughput_benchmark)
+
+
+function(add_wrapper_throughput_benchmark name define)
+  add_executable(${name}_throughput_benchmark)
+  target_compile_definitions(${name}_throughput_benchmark PRIVATE ${define})
+  target_link_libraries(${name}_throughput_benchmark PRIVATE ${name}_wrapper throughput_benchmark)
+  add_dependencies(all_throughput_benchmarks ${name}_throughput_benchmark)
+endfunction()
+
+function(add_mq_throughput_benchmark name define)
+  add_executable(${name}_throughput_benchmark)
+  target_compile_definitions(${name}_throughput_benchmark PRIVATE ${define})
+  target_link_libraries(${name}_throughput_benchmark PRIVATE multiqueue::multiqueue throughput_benchmark)
+  add_dependencies(all_throughput_benchmarks ${name}_throughput_benchmark)
+endfunction()
+
+add_wrapper_throughput_benchmark(capq PQ_CAPQ)
+add_wrapper_throughput_benchmark(klsm PQ_KLSM)
+add_wrapper_throughput_benchmark(dlsm PQ_DLSM)
+add_wrapper_throughput_benchmark(linden PQ_LINDEN)
+add_wrapper_throughput_benchmark(spraylist PQ_SPRAYLIST)
+add_mq_throughput_benchmark(nbmq PQ_NBMQ)
+add_mq_throughput_benchmark(tbmq PQ_TBMQ)
+add_mq_throughput_benchmark(dbmq PQ_DBMQ)
+add_mq_throughput_benchmark(smdmq PQ_SMDMQ)
 
 add_custom_target(all_benchmarks COMMENT "Build all benchmarks")
 add_dependencies(all_benchmarks micro_benchmarks all_quality_benchmarks all_throughput_benchmarks)

@@ -20,28 +20,20 @@ target_link_libraries(wrapper_test INTERFACE threading basic_test)
 target_link_libraries_system(wrapper_test INTERFACE cxxopts)
 target_sources(wrapper_test INTERFACE wrapper.cpp)
 
-add_executable(capq_wrapper_test)
-target_compile_definitions(capq_wrapper_test PRIVATE PQ_CAPQ1)
-target_link_libraries(capq_wrapper_test PRIVATE capq_wrapper wrapper_test)
-
-add_executable(klsm_wrapper_test)
-target_compile_definitions(klsm_wrapper_test PRIVATE PQ_KLSM)
-target_link_libraries(klsm_wrapper_test PRIVATE klsm_wrapper wrapper_test)
-
-add_executable(dlsm_wrapper_test)
-target_compile_definitions(dlsm_wrapper_test PRIVATE PQ_DLSM)
-target_link_libraries(dlsm_wrapper_test PRIVATE klsm_wrapper wrapper_test)
-
-add_executable(linden_wrapper_test)
-target_compile_definitions(linden_wrapper_test PRIVATE PQ_LINDEN)
-target_link_libraries(linden_wrapper_test PRIVATE linden_wrapper wrapper_test)
-
-add_executable(spraylist_wrapper_test)
-target_compile_definitions(spraylist_wrapper_test PRIVATE PQ_SPRAYLIST)
-target_link_libraries(spraylist_wrapper_test PRIVATE spraylist_wrapper wrapper_test)
-
 add_custom_target(all_wrapper_tests COMMENT "Build all wrapper tests")
-add_dependencies(all_wrapper_tests capq_wrapper_test klsm_wrapper_test dlsm_wrapper_test linden_wrapper_test spraylist_wrapper_test)
+
+function(add_wrapper_test name define)
+  add_executable(${name}_wrapper_test)
+  target_compile_definitions(${name}_wrapper_test PRIVATE ${define})
+  target_link_libraries(${name}_wrapper_test PRIVATE ${name}_wrapper wrapper_test)
+  add_dependencies(all_wrapper_tests ${name}_wrapper_test)
+endfunction()
+
+add_wrapper_test(capq PQ_CAPQ)
+add_wrapper_test(klsm PQ_KLSM)
+add_wrapper_test(dlsm PQ_DLSM)
+add_wrapper_test(linden PQ_LINDEN)
+add_wrapper_test(spraylist PQ_SPRAYLIST)
 
 
 add_library(consistency_test INTERFACE)
@@ -55,40 +47,32 @@ if(CMAKE_COMPILER_IS_GNUCXX)
   target_link_options(consistency_test INTERFACE "-flto")
 endif()
 
-add_executable(capq_consistency_test)
-target_compile_definitions(capq_consistency_test PRIVATE PQ_CAPQ1)
-target_link_libraries(capq_consistency_test PRIVATE capq_wrapper consistency_test)
-
-add_executable(klsm_consistency_test)
-target_compile_definitions(klsm_consistency_test PRIVATE PQ_KLSM)
-target_link_libraries(klsm_consistency_test PRIVATE klsm_wrapper consistency_test)
-
-add_executable(dlsm_consistency_test)
-target_compile_definitions(dlsm_consistency_test PRIVATE PQ_DLSM)
-target_link_libraries(dlsm_consistency_test PRIVATE klsm_wrapper consistency_test)
-
-add_executable(linden_consistency_test)
-target_compile_definitions(linden_consistency_test PRIVATE PQ_LINDEN)
-target_link_libraries(linden_consistency_test PRIVATE linden_wrapper consistency_test)
-
-add_executable(spraylist_consistency_test)
-target_compile_definitions(spraylist_consistency_test PRIVATE PQ_SPRAYLIST)
-target_link_libraries(spraylist_consistency_test PRIVATE spraylist_wrapper consistency_test)
-
-add_executable(nbmq_consistency_test)
-target_compile_definitions(nbmq_consistency_test PRIVATE PQ_NBMQ)
-target_link_libraries(nbmq_consistency_test PRIVATE multiqueue::multiqueue consistency_test)
-
-add_executable(tbmq_consistency_test)
-target_compile_definitions(tbmq_consistency_test PRIVATE PQ_TBMQ)
-target_link_libraries(tbmq_consistency_test PRIVATE multiqueue::multiqueue consistency_test)
-
-add_executable(dbmq_consistency_test)
-target_compile_definitions(dbmq_consistency_test PRIVATE PQ_DBMQ)
-target_link_libraries(dbmq_consistency_test PRIVATE multiqueue::multiqueue consistency_test)
-
 add_custom_target(all_consistency_tests COMMENT "Build all consistency tests")
-add_dependencies(all_consistency_tests capq_consistency_test klsm_consistency_test dlsm_consistency_test linden_consistency_test spraylist_consistency_test nbmq_consistency_test tbmq_consistency_test dbmq_consistency_test)
+
+function(add_wrapper_consistency_test name define)
+  add_executable(${name}_consistency_test)
+  target_compile_definitions(${name}_consistency_test PRIVATE ${define})
+  target_link_libraries(${name}_consistency_test PRIVATE ${name}_wrapper consistency_test)
+  add_dependencies(all_consistency_tests ${name}_consistency_test)
+endfunction()
+
+function(add_mq_consistency_test name define)
+  add_executable(${name}_consistency_test)
+  target_compile_definitions(${name}_consistency_test PRIVATE ${define})
+  target_link_libraries(${name}_consistency_test PRIVATE multiqueue::multiqueue consistency_test)
+  add_dependencies(all_consistency_tests ${name}_consistency_test)
+endfunction()
+
+
+add_wrapper_consistency_test(capq PQ_CAPQ)
+add_wrapper_consistency_test(klsm PQ_KLSM)
+add_wrapper_consistency_test(dlsm PQ_DLSM)
+add_wrapper_consistency_test(linden PQ_LINDEN)
+add_wrapper_consistency_test(spraylist PQ_SPRAYLIST)
+add_mq_consistency_test(nbmq PQ_NBMQ)
+add_mq_consistency_test(tbmq PQ_TBMQ)
+add_mq_consistency_test(dbmq PQ_DBMQ)
+add_mq_consistency_test(smdmq PQ_SMDMQ)
 
 add_executable(verify_consistency verify_consistency.cpp)
 target_link_libraries(verify_consistency PRIVATE basic_test)

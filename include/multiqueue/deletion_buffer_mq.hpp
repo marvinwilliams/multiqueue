@@ -30,7 +30,6 @@ namespace rsm {
 
 // TODO: CMake defined
 static constexpr unsigned int CACHE_LINESIZE = 64;
-static constexpr unsigned int buffer_size = 16;
 
 template <typename ValueType>
 struct DeletionBufferConfiguration {
@@ -40,6 +39,8 @@ struct DeletionBufferConfiguration {
     static constexpr unsigned int C = 4;
     // The underlying sequential priority queue to use
     static constexpr unsigned int HeapDegree = 4;
+    // Buffer size
+    static constexpr size_t BufferSize = 16;
     // The sentinel
     static constexpr key_type Sentinel = std::numeric_limits<key_type>::max();
     // The sifting strategy to use
@@ -62,6 +63,7 @@ class deletion_buffer_mq {
     using config_type = Configuration<value_type>;
     static constexpr unsigned int C = config_type::C;
     static constexpr key_type Sentinel = config_type::Sentinel;
+    static constexpr size_t BufferSize = config_type::BufferSize;
 
     using heap_type = local_nonaddressable::heap<value_type, key_type, util::get_nth<value_type>, key_comparator,
                                                  config_type::HeapDegree, typename config_type::SiftStrategy,
@@ -71,7 +73,7 @@ class deletion_buffer_mq {
         using allocator_type = typename heap_type::allocator_type;
         mutable std::atomic_bool in_use = false;
         heap_type heap;
-        std::array<value_type, buffer_size> buffer{};
+        std::array<value_type, BufferSize> buffer{};
         std::uint32_t buffer_pos : 16;
         std::uint32_t buffer_end : 16;
 
@@ -85,7 +87,7 @@ class deletion_buffer_mq {
 
         inline void refill_buffer() {
             uint32_t count = 0;
-            while (count < buffer_size && !heap.empty()) {
+            while (count < BufferSize && !heap.empty()) {
                 heap.extract_top(buffer[count]);
                 ++count;
             }
@@ -116,8 +118,8 @@ class deletion_buffer_mq {
     inline bool try_lock(std::size_t const index) const noexcept {
         // TODO: MEASURE
         bool expect_in_use = false;
-        return heap_list_[index].in_use.compare_exchange_strong(expect_in_use, true, std::memory_order_relaxed,
-                                                                std::memory_order_acquire);
+        return heap_list_[index].in_use.compare_exchange_strong(expect_in_use, true, std::memory_order_acquire,
+                                                                std::memory_order_relaxed);
     }
 
     inline void unlock(std::size_t const index) const noexcept {
@@ -165,7 +167,7 @@ class deletion_buffer_mq {
             if (!heap_list_[first_index].buffer_empty()) {
                 if (count == 1) {
                     retval = std::move(heap_list_[first_index].buffer[heap_list_[first_index].buffer_pos++]);
-                    if (heap_list_[first_index].buffer_pos == buffer_size || heap_list_[first_index].buffer_empty()) {
+                    if (heap_list_[first_index].buffer_pos == BufferSize || heap_list_[first_index].buffer_empty()) {
                         heap_list_[first_index].refill_buffer();
                     }
                     unlock(first_index);
@@ -193,14 +195,14 @@ class deletion_buffer_mq {
                   heap_list_[first_index].buffer[heap_list_[first_index].buffer_pos].first)) {
             unlock(first_index);
             retval = std::move(heap_list_[second_index].buffer[heap_list_[second_index].buffer_pos++]);
-            if (heap_list_[second_index].buffer_pos == buffer_size || heap_list_[second_index].buffer_empty()) {
+            if (heap_list_[second_index].buffer_pos == BufferSize || heap_list_[second_index].buffer_empty()) {
                 heap_list_[second_index].refill_buffer();
             }
             unlock(second_index);
         } else {
             unlock(second_index);
             retval = std::move(heap_list_[first_index].buffer[heap_list_[first_index].buffer_pos++]);
-            if (heap_list_[first_index].buffer_pos == buffer_size || heap_list_[first_index].buffer_empty()) {
+            if (heap_list_[first_index].buffer_pos == BufferSize || heap_list_[first_index].buffer_empty()) {
                 heap_list_[first_index].refill_buffer();
             }
             unlock(first_index);

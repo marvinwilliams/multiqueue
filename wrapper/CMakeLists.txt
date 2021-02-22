@@ -71,3 +71,5 @@ target_include_directories(
   ${EXTERNAL_DIR}/klsm/src
   ${EXTERNAL_DIR}/klsm/src/util
 )
+
+add_library(dlsm_wrapper ALIAS klsm_wrapper)

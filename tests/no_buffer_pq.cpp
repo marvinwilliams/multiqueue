@@ -1,5 +1,5 @@
 #include "catch2/catch.hpp"
-#include "multiqueue/no_buffer_pq.hpp"
+#include "multiqueue/no_buffer_mq.hpp"
 
 #include <algorithm>   // std::generate_n, std::min_element
 #include <functional>  // std::greater
@@ -15,7 +15,7 @@ namespace multiqueue {
 namespace rsm {}  // namespace rsm
 }  // namespace multiqueue
 
-using multiqueue_t = multiqueue::rsm::no_buffer_pq<int, int>;
+using multiqueue_t = multiqueue::rsm::no_buffer_mq<int, int>;
 
 static constexpr size_t elements_per_thread = 1000u;
 
