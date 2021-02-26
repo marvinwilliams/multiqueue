@@ -34,6 +34,8 @@
 #include "multiqueue/deletion_buffer_mq.hpp"
 #elif defined PQ_SMDMQ
 #include "multiqueue/sm_deletion_buffer_mq.hpp"
+#elif defined PQ_IDMQ
+#include "multiqueue/ins_del_buffer_mq.hpp"
 #else
 #error No supported priority queue defined!
 #endif
@@ -54,6 +56,8 @@ struct QueueSelector {
     using pq_t = multiqueue::rsm::deletion_buffer_mq<KeyType, ValueType>;
 #elif defined PQ_SMDMQ
     using pq_t = multiqueue::rsm::sm_deletion_buffer_mq<KeyType, ValueType>;
+#elif defined PQ_IDMQ
+    using pq_t = multiqueue::rsm::ins_del_buffer_mq<KeyType, ValueType>;
 #endif
 };
 
@@ -83,6 +87,8 @@ struct QueueSelector<std::uint32_t, std::uint32_t> {
     using pq_t = multiqueue::rsm::deletion_buffer_mq<std::uint32_t, std::uint32_t>;
 #elif defined PQ_SMDMQ
     using pq_t = multiqueue::rsm::sm_deletion_buffer_mq<std::uint32_t, std::uint32_t>;
+#elif defined PQ_IDMQ
+    using pq_t = multiqueue::rsm::ins_del_buffer_mq<std::uint32_t, std::uint32_t>;
 #endif
 };
 

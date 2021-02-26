@@ -36,7 +36,7 @@ using namespace std::chrono_literals;
 using clk = std::chrono::steady_clock;
 
 static constexpr size_t default_prefill_size = 1'000'000;
-static constexpr unsigned int default_num_operations = 100'000u;
+static constexpr unsigned int default_num_deletions = 100'000u;
 static constexpr unsigned int default_num_threads = 1u;
 static constexpr InsertPolicy default_policy = InsertPolicy::Uniform;
 static constexpr KeyDistribution default_key_distribution = KeyDistribution::Uniform;
@@ -62,7 +62,7 @@ constexpr value_type get_elem_id(value_type value) noexcept {
 
 struct Settings {
     size_t prefill_size = default_prefill_size;
-    unsigned int num_operations = default_num_operations;
+    unsigned int num_deletions = default_num_deletions;
     unsigned int num_threads = default_num_threads;
     InsertPolicy policy = default_policy;
     KeyDistribution key_distribution = default_key_distribution;
@@ -129,9 +129,9 @@ struct Task {
                 break;
         }
         std::vector<insertion_log> insertions;
-        insertions.reserve(settings.num_operations);
+        insertions.reserve(settings.prefill_size + settings.num_deletions);
         std::vector<deletion_log> deletions;
-        deletions.reserve(settings.num_operations);
+        deletions.reserve(settings.num_deletions);
 
         if constexpr (util::QueueTraits<Queue>::has_thread_init) {
             pq.init_thread(context.get_num_threads());
@@ -166,7 +166,8 @@ struct Task {
         }
         std::atomic_thread_fence(std::memory_order_acquire);
         std::pair<key_type, value_type> retval;
-        for (unsigned int i = 0; i < settings.num_operations; ++i) {
+        unsigned int deletion_count = 0;
+        while (deletion_count < settings.num_deletions) {
             if (std::visit([](auto& ins) noexcept { return ins(); }, inserter)) {
                 key_type const key = std::visit([](auto& g) noexcept { return g(); }, key_generator);
                 value_type const value = to_value(context.get_id(), static_cast<value_type>(insertions.size()));
@@ -180,6 +181,7 @@ struct Task {
                 auto now = std::chrono::steady_clock::now();
                 deletions.push_back(deletion_log{now.time_since_epoch().count(),
                                                  success ? std::optional<value_type>{retval.second} : std::nullopt});
+                ++deletion_count;
             }
         }
         context.synchronize(stage++, []() { std::clog << "done" << std::endl; });
@@ -205,8 +207,8 @@ int main(int argc, char* argv[]) {
        "(default: uniform)", cxxopts::value<std::string>(), "ARG")
       ("j,threads", "Specify the number of threads "
        "(default: 1)", cxxopts::value<unsigned int>(), "NUMBER")
-      ("o,operations", "Specify the number of operations done by each thread "
-       "(default: " + std::to_string(default_num_operations) + ")", cxxopts::value<unsigned int>(), "NUMBER")
+      ("o,deletions", "Specify the number of deletions done by each thread "
+       "(default: " + std::to_string(default_num_deletions) + ")", cxxopts::value<unsigned int>(), "NUMBER")
       ("d,key-distribution", "Specify the key distribution as one of \"uniform\", \"dijkstra\", \"ascending\", \"descending\" "
        "(default: uniform)", cxxopts::value<std::string>(), "ARG")
       ("h,help", "Print this help");
@@ -241,8 +243,8 @@ int main(int argc, char* argv[]) {
         if (result.count("threads") > 0) {
             settings.num_threads = result["threads"].as<unsigned int>();
         }
-        if (result.count("operations") > 0) {
-            settings.num_operations = result["operations"].as<unsigned int>();
+        if (result.count("deletions") > 0) {
+            settings.num_deletions = result["deletions"].as<unsigned int>();
         }
         if (result.count("key-distribution") > 0) {
             std::string dist = result["key-distribution"].as<std::string>();

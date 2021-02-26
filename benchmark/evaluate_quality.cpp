@@ -178,6 +178,10 @@ int main(int argc, char* argv[]) {
         if (!deletions[i].value) {
             if (!replay_heap.empty()) {
                 ++failed_deletions;
+                for (auto& [entry, delays] : replay_heap) {
+                    ++delays.second;
+                }
+                ++replay_heap.begin()->second.first;
             }
             continue;
         }
@@ -204,7 +208,8 @@ int main(int argc, char* argv[]) {
                 }
                 ++smaller->second.second;
             }
-            size_t rank_error = std::min(static_cast<size_t>(std::distance(replay_heap.begin(), smaller)), static_cast<size_t>(4999));
+            size_t rank_error =
+                std::min(static_cast<size_t>(std::distance(replay_heap.begin(), smaller)), static_cast<size_t>(4999));
             ++rank_histogram[rank_error];
             replay_heap.erase(it);
         } else {
@@ -248,6 +253,6 @@ int main(int argc, char* argv[]) {
         out_f.close();
     }
     std::clog << "Histograms have been written" << std::endl;
-    std::clog << "Failed deletions: " << failed_deletions << std::endl;
+    std::clog << "Failed deletions with nonempty queue: " << failed_deletions << std::endl;
     return 0;
 }

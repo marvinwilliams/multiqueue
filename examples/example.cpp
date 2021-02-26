@@ -1,4 +1,4 @@
-#include "multiqueue/heap.hpp"
+#include "multiqueue/sequential/heap/heap.hpp"
 
 #include <papi.h>
 #include <iterator>
