@@ -8,9 +8,7 @@ reps=5
 
 scenario_dir=${1:- "./experiments/current/default"}
 pq="$2"
-name=${3:- $pq}
-
-echo $name
+name=${3:-$pq}
 
 prefill=$(awk 'NR == 2 {print $1}' ${scenario_dir}/config)
 dist=$(awk 'NR == 2 {print $2}' ${scenario_dir}/config)
@@ -20,7 +18,9 @@ if [[ -z ${prefill} || -z ${dist} || -z ${threads_quality} ]]; then
   exit 1
 fi
 
-echo prefill ${prefill} dist ${dist} threads_quality ${threads_quality}
+echo Prefill: ${prefill}
+echo Distribution: ${dist}
+echo Threads in quality benchmark ${threads_quality}
 
 echo Building consistency test
 cmake --build build --target ${pq}_consistency_test
@@ -42,8 +42,9 @@ cmake --build build --target evaluate_quality
 echo Starting throughput benchmarks
 {
 echo "threads rep throughput"
-for j in threads;do
+for j in "${threads[@]}"; do
   for r in $(seq 1 $reps);do
+    echo "sudo ${build_dir}/benchmark/${pq}_throughput_benchmark -j ${j} -n ${prefill} -d ${dist}" >&2
     echo $j $r $(sudo ${build_dir}/benchmark/${pq}_throughput_benchmark -j ${j} -n ${prefill} -d ${dist} 2> /dev/null | tail -n 1 | cut -d' ' -f2)
   done
 done

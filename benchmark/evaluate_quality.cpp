@@ -175,17 +175,6 @@ int main(int argc, char* argv[]) {
     std::vector<size_t> insert_index(insertions.size(), 0);
     uint64_t failed_deletions = 0;
     for (size_t i = 0; i < 100'000; ++i) {
-        if (!deletions[i].value) {
-            if (!replay_heap.empty()) {
-                ++failed_deletions;
-                for (auto& [entry, delays] : replay_heap) {
-                    ++delays.second;
-                }
-                ++replay_heap.begin()->second.first;
-            }
-            continue;
-        }
-
         // Inserting everything before next deletion
         for (unsigned int t = 0; t < insertions.size(); ++t) {
             while (insert_index[t] < insertions[t].size() && insertions[t][insert_index[t]].tick < deletions[i].tick) {
@@ -193,6 +182,19 @@ int main(int argc, char* argv[]) {
                     {{insertions[t][insert_index[t]].key, t, static_cast<uint32_t>(insert_index[t])}, {0, 0}});
                 ++insert_index[t];
             }
+        }
+
+        if (!deletions[i].value) {
+            if (!replay_heap.empty()) {
+                ++failed_deletions;
+                size_t rank_error = std::min(replay_heap.size(), static_cast<size_t>(4999));
+                ++rank_histogram[rank_error];
+                for (auto& [entry, delays] : replay_heap) {
+                    ++delays.second;
+                }
+                ++replay_heap.begin()->second.first;
+            }
+            continue;
         }
 
         auto key = insertions[deletions[i].value->first][deletions[i].value->second].key;
