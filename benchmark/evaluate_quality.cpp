@@ -190,9 +190,11 @@ int main(int argc, char* argv[]) {
                 size_t rank_error = std::min(replay_heap.size(), static_cast<size_t>(4999));
                 ++rank_histogram[rank_error];
                 for (auto& [entry, delays] : replay_heap) {
+                    if (entry.key == replay_heap.begin()->first.key) {
+                        ++delays.first;
+                    }
                     ++delays.second;
                 }
-                ++replay_heap.begin()->second.first;
             }
             continue;
         }
