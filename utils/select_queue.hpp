@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <type_traits>
+#include <functional>
 
 #if defined PQ_CAPQ || defined PQ_CAPQ1 || defined PQ_CAPQ2 || defined PQ_CAPQ3 || defined PQ_CAPQ4
 #include "capq.hpp"
@@ -36,11 +37,31 @@
 #include "multiqueue/sm_deletion_buffer_mq.hpp"
 #elif defined PQ_IDMQ
 #include "multiqueue/ins_del_buffer_mq.hpp"
+#elif defined PQ_LQMQ
+#include "multiqueue/local_queue_mq.hpp"
 #else
 #error No supported priority queue defined!
 #endif
 
 namespace util {
+
+#ifdef PQ_IDMQ
+template <typename ValueType>
+struct IDBConfig : multiqueue::rsm::InsDelBufferConfiguration<ValueType> {
+#ifdef IDMQ_C
+  static constexpr unsigned int C = IDMQ_C;
+#endif
+#ifdef IDMQ_HEAP_DEGREE
+  static constexpr unsigned int HeapDegree = IDMQ_HEAP_DEGREE;
+#endif
+#ifdef IDMQ_IBUFFER_SIZE
+  static constexpr unsigned int InsertionBufferSize = IDMQ_IBUFFER_SIZE;
+#endif
+#ifdef IDMQ_DBUFFER_SIZE
+  static constexpr unsigned int DeletionBufferSize = IDMQ_DBUFFER_SIZE;
+#endif
+};
+#endif
 
 template <typename KeyType, typename ValueType>
 struct QueueSelector {
@@ -57,7 +78,9 @@ struct QueueSelector {
 #elif defined PQ_SMDMQ
     using pq_t = multiqueue::rsm::sm_deletion_buffer_mq<KeyType, ValueType>;
 #elif defined PQ_IDMQ
-    using pq_t = multiqueue::rsm::ins_del_buffer_mq<KeyType, ValueType>;
+    using pq_t = multiqueue::rsm::ins_del_buffer_mq<KeyType, ValueType, std::less<KeyType>, IDBConfig>;
+#elif defined PQ_LQMQ
+    using pq_t = multiqueue::rsm::local_queue_mq<KeyType, ValueType, std::less<KeyType>>;
 #endif
 };
 
@@ -88,7 +111,9 @@ struct QueueSelector<std::uint32_t, std::uint32_t> {
 #elif defined PQ_SMDMQ
     using pq_t = multiqueue::rsm::sm_deletion_buffer_mq<std::uint32_t, std::uint32_t>;
 #elif defined PQ_IDMQ
-    using pq_t = multiqueue::rsm::ins_del_buffer_mq<std::uint32_t, std::uint32_t>;
+    using pq_t = multiqueue::rsm::ins_del_buffer_mq<std::uint32_t, std::uint32_t, std::less<std::uint32_t>, IDBConfig>;
+#elif defined PQ_LQMQ
+    using pq_t = multiqueue::rsm::local_queue_mq<std::uint32_t, std::uint32_t, std::less<std::uint32_t>>;
 #endif
 };
 

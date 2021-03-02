@@ -3,12 +3,13 @@ include(Catch)
 add_library(basic_test INTERFACE)
 target_link_libraries(basic_test INTERFACE multiqueue_warnings)
 target_compile_features(basic_test INTERFACE cxx_std_17)
+target_compile_options(basic_test INTERFACE "-Og" "-g")
 
 add_library(catch_test INTERFACE)
 target_link_libraries(catch_test INTERFACE basic_test)
 target_link_libraries_system(catch_test INTERFACE Catch2::Catch2)
 
-add_executable(unit_tests main.cpp pq_api.cpp pq_correctness.cpp kv_pq_api.cpp kv_pq_correctness.cpp no_buffer_pq.cpp ring_buffer.cpp buffer.cpp)
+add_executable(unit_tests main.cpp pq_api.cpp pq_correctness.cpp kv_pq_api.cpp kv_pq_correctness.cpp no_buffer_pq.cpp ring_buffer.cpp buffer.cpp merge_heap.cpp)
 target_link_libraries(unit_tests PRIVATE catch_test multiqueue::multiqueue Threads::Threads)
 
 if(BUILD_TESTING)
@@ -40,7 +41,6 @@ add_library(consistency_test INTERFACE)
 target_link_libraries(consistency_test INTERFACE threading basic_test)
 target_link_libraries_system(consistency_test INTERFACE cxxopts)
 target_sources(consistency_test INTERFACE consistency.cpp)
-target_compile_options(consistency_test INTERFACE "-O0" "-g")
 
 add_custom_target(all_consistency_tests COMMENT "Build all consistency tests")
 
@@ -69,6 +69,7 @@ add_mq_consistency_test(tbmq PQ_TBMQ)
 add_mq_consistency_test(dbmq PQ_DBMQ)
 add_mq_consistency_test(smdmq PQ_SMDMQ)
 add_mq_consistency_test(idmq PQ_IDMQ)
+add_mq_consistency_test(lqmq PQ_LQMQ)
 
 add_executable(verify_consistency verify_consistency.cpp)
 target_link_libraries(verify_consistency PRIVATE basic_test)

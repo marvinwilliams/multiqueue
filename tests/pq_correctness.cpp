@@ -1,9 +1,9 @@
 #include "catch2/catch.hpp"
+#include "multiqueue/sequential/heap/full_down_strategy.hpp"
+#include "multiqueue/sequential/heap/full_up_strategy.hpp"
 #include "multiqueue/sequential/heap/heap.hpp"
 #include "multiqueue/sequential/pq.hpp"
 #include "multiqueue/util/extractors.hpp"
-#include "multiqueue/sequential/heap/full_up_strategy.hpp"
-#include "multiqueue/sequential/heap/full_down_strategy.hpp"
 
 #include <algorithm>  // std::generate_n, std::min_element
 #include <functional> // std::greater

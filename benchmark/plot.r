@@ -65,7 +65,7 @@ plot_rank_histogram <- function(data, outdir) {
     labs(x = "Rank", y = "Cummul. Frequency", title = "Rank") +
     geom_line() +
     scale_color_brewer(palette="Set1") +
-    facet_grid(rows = vars(prefill, dist)) +
+    facet_wrap(~ prefill + dist) +
     scale_x_log10()
   ggsave(plot, file = paste(outdir, "/rank_plot.pdf", sep = ""))
 }
@@ -75,7 +75,7 @@ plot_delay_histogram <- function(data, outdir) {
     labs(x = "Rank", y = "Cummul. Frequency", title = "Delay") +
     geom_line() +
     scale_color_brewer(palette="Set1") +
-    facet_grid(rows = vars(prefill, dist)) +
+    facet_wrap(~ prefill + dist) +
     scale_x_log10()
   ggsave(plot, file = paste(outdir, "/delay_plot.pdf", sep = ""))
 }
@@ -89,8 +89,7 @@ plot_top_delay_bar <- function(data, outdir) {
     labs(x = "Priority Queue", y = "Top Delay", title = "Top Delay") +
     geom_bar(stat = "identity") +
     scale_color_brewer(palette="Set1") +
-    # facet_grid(cols = vars(variable), rows = vars(prefill, dist), scales = "free") +
-    facet_grid(rows = vars(variable), cols = vars(prefill, dist), scales = "free") +
+    facet_wrap(~ variable + prefill + dist, scales = "free") +
     theme(axis.ticks.x = element_blank(), axis.text.x = element_blank())
   ggsave(plot, file = paste(outdir, "/top_delay_plot.pdf", sep = ""))
 }
@@ -99,6 +98,7 @@ plot_throughput_by_thread <- function(data, outdir) {
   plot <- ggplot(data, aes(x = threads, y = mean, group = name, color = name)) +
     geom_line() +
     geom_point() +
+    scale_color_brewer(palette="Set1") +
     geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd),
       width = .2,
       position = position_dodge(0.05)
@@ -127,27 +127,11 @@ plot_throughput_by_buffer_size <- function(data, outdir) {
   ggsave(plot, file = paste(outdir, "/throughput_buffer_size_plot.pdf", sep = ""))
 }
 
-plot_throughput_by_c <- function(data, outdir) {
-  data$c <- as.factor(str_extract(data$name, "\\d+$"))
-  data$c <- ordered(data$c, levels=c("2", "4", "8", "16", "32"))
-  plot <- ggplot(data, aes(x = threads, y = mean, group = c, color = c)) +
-    geom_line() +
-    geom_point() +
-    # scale_shape_manual(values = rep(1:5, length.out = 24)) +
-    scale_color_brewer(palette="Set1") +
-    geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd),
-      width = .2,
-      position = position_dodge(0.05)
-    ) +
-    labs(x = "p", y = "10^6 Ops/s", title = "Operations per second")
-  ggsave(plot, file = paste(outdir, "/throughput_by_c_plot.pdf", sep = ""))
-}
-
 plot_throughput_by_prefill <- function(data, outdir) {
-  print(subset(data, threads == 8))
   plot <- ggplot(subset(data, threads == 8), aes(x = prefill, y = mean, group = name, color = name)) +
     geom_line() +
     geom_point() +
+    scale_color_brewer(palette="Set1") +
     geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd),
       width = .2,
       position = position_dodge(0.05)
@@ -165,17 +149,17 @@ plot_throughput_by_dist <- function(data, outdir) {
       position = position_dodge(0.05)
     ) +
     scale_color_brewer(palette="Set1") +
-    facet_grid(rows = vars(dist)) +
+    facet_wrap(~prefill) +
     labs(x = "p", y = "10^6 Ops/s", title = "Operations per second")
   ggsave(plot, file = paste(outdir, "/throughput_by_dist_plot.pdf", sep = ""))
 }
 
 
 plot_scenario <- function(data, dir) {
-   # plot_rank_histogram(data$rank, dir)
-   # plot_delay_histogram(data$delay, dir)
-   plot_top_delay_bar(data$top_delay, dir)
-   # plot_throughput_by_thread(data$throughput, dir)
+   plot_rank_histogram(data$rank, dir)
+   plot_delay_histogram(data$delay, dir)
+  plot_top_delay_bar(data$top_delay, dir)
+   plot_throughput_by_thread(data$throughput, dir)
 }
 
 read_scenario <- function(scenario) {
@@ -201,7 +185,6 @@ read_scenario <- function(scenario) {
   delay_data <- do.call(rbind, delay_list)
   top_delay_data <- do.call(rbind, top_delay_list)
   throughput_data <- do.call(rbind, throughput_list)
-  print(throughput_data)
   list("rank" = rank_data, "delay" = delay_data, "top_delay" = top_delay_data, "throughput" = throughput_data)
 }
 
@@ -215,6 +198,3 @@ plot_throughput_by_dist(data$throughput, paste(experiment_dir, "distribution", s
 
 # data <- read_scenario("buffer")
 # plot_throughput_by_buffer_size(data$throughput, paste(experiment_dir, "buffer", sep = "/"))
-
-# data <- read_scenario("c")
-# plot_throughput_by_c(data$throughput, paste(experiment_dir, "c", sep = "/"))

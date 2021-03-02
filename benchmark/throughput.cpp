@@ -114,6 +114,11 @@ struct Task {
         }
 
         unsigned int stage = 0u;
+
+#ifdef PQ_LQMQ
+        auto handle = pq.get_handle(context.get_id());
+#endif
+
         if (settings.prefill_size > 0u) {
             context.synchronize(stage++, []() { std::clog << "Prefilling the queue..." << std::flush; });
             size_t num_insertions = settings.prefill_size / context.get_num_threads();
@@ -141,7 +146,11 @@ struct Task {
                 pq.push({key, key});
                 ++insertions;
             } else {
+#ifdef PQ_LQMQ
+                if (pq.extract_top(retval, handle)) {
+#else
                 if (pq.extract_top(retval)) {
+#endif
                     // Assign result to make sure the return value is not optimized away
                     result_key = retval.first;
                     result_value = retval.second;

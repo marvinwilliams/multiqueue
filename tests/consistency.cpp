@@ -77,6 +77,10 @@ struct Task {
 
         unsigned int stage = 0u;
 
+#ifdef PQ_LQMQ
+        auto handle = pq.get_handle(context.get_id());
+#endif
+
         if (settings.prefill_size > 0u) {
             context.synchronize(stage++, []() { std::clog << "Prefilling the queue..." << std::flush; });
             size_t num_insertions = settings.prefill_size / context.get_num_threads();
@@ -109,7 +113,11 @@ struct Task {
                 __asm__ __volatile__("" ::: "memory");
                 pq.push({key, value});
                 insertions.push_back(log_entry{now.time_since_epoch().count(), key, value});
+#ifdef PQ_LQMQ
+            } else if (std::pair<key_type, value_type> retval; pq.extract_top(retval, handle)) {
+#else
             } else if (std::pair<key_type, value_type> retval; pq.extract_top(retval)) {
+#endif
                 __asm__ __volatile__("" ::: "memory");
                 auto now = std::chrono::steady_clock::now();
                 deletions.push_back(log_entry{now.time_since_epoch().count(), retval.first, retval.second});
