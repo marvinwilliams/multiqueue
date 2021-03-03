@@ -1,14 +1,15 @@
-/******************************************************************************
- * File:             heap.hpp
- *
- * Author:           Marvin Williams
- * Created:          12/16/20
- * Description:      This header defines the base class for the heap data
- *                   structure.
- *****************************************************************************/
-
-#ifndef HEAP_HPP_MKBRIGPA
-#define HEAP_HPP_MKBRIGPA
+/**
+******************************************************************************
+* @file:   merge_heap.hpp
+*
+* @author: Marvin Williams
+* @date:   2021/03/02 16:21
+* @brief:
+*******************************************************************************
+**/
+#pragma once
+#ifndef MERGE_HEAP_HPP_INCLUDED
+#define MERGE_HEAP_HPP_INCLUDED
 
 #include <cassert>
 #include <memory>       // allocator
@@ -20,17 +21,23 @@ namespace multiqueue {
 namespace local_nonaddressable {
 
 template <typename T, typename Key, typename KeyExtractor, typename Comparator, unsigned int Degree,
-          typename SiftStrategy, typename Allocator = std::allocator<T>>
-class heap {
-    friend SiftStrategy;
-
+          unsigned int NodeSize, typename Allocator = std::allocator<T>>
+class merge_heap {
    public:
     using value_type = T;
     using key_type = Key;
     using key_extractor = KeyExtractor;
     using key_comparator = Comparator;
     using allocator_type = Allocator;
-    using container_type = std::vector<value_type, allocator_type>;
+
+   private:
+    struct Node {
+        std::array<value_type, NodeSize> data;
+        unsigned int start_pos;
+    };
+
+   public:
+    using container_type = std::vector<Node>;
     using reference = value_type &;
     using const_reference = value_type const &;
     using iterator = typename container_type::const_iterator;
@@ -54,6 +61,7 @@ class heap {
     struct heap_data : private key_comparator, private key_extractor {
        public:
         container_type container;
+        unsigned int top_size = 0;
 
        public:
         explicit heap_data() noexcept(std::is_nothrow_default_constructible_v<key_comparator>)
@@ -95,8 +103,24 @@ class heap {
         return data_.to_comparator()(lhs, rhs);
     }
 
+    constexpr std::size_t last_value_index(std::size_t const node_index) const noexcept {
+        return (data_.container[node_index].start_pos + (node_index == 0 ? data_.top_size - 1 : NodeSize - 1)) %
+            NodeSize;
+    }
+
     constexpr key_type const &extract_key(value_type const &value) const noexcept {
         return data_.to_key_extractor()(value);
+    }
+
+    constexpr bool compare_first(std::size_t const lhs_index, std::size_t const rhs_index) const
+        noexcept(is_nothrow_comparable) {
+        return data_.to_comparator()(extract_key(data_.container[lhs_index][data_.container[lhs_index].start_pos]),
+                                     extract_key(data_.container[rhs_index][data_.container[rhs_index].start_pos]));
+    }
+    constexpr bool compare_last(std::size_t const lhs_index, std::size_t const rhs_index) const
+        noexcept(is_nothrow_comparable) {
+        return data_.to_comparator()(extract_key(data_.container[lhs_index][last_value_index(lhs_index)]),
+                                     extract_key(data_.container[rhs_index][last_value_index(rhs_index)]));
     }
 
     // Find the index of the smallest `num_children` children of the node at
@@ -111,7 +135,7 @@ class heap {
         assert(last <= data_.container.size());
         auto result = index;
         while (++index < last) {
-            if (compare(extract_key(data_.container[index]), extract_key(data_.container[result]))) {
+            if (compare_last(index, result)) {
                 result = index;
             }
         }
@@ -130,12 +154,18 @@ class heap {
         assert(last <= data_.container.size());
         auto result = index;
         while (++index < last) {
-            if (compare(extract_key(data_.container[index]), extract_key(data_.container[result]))) {
+            if (compare_last(index, result)) {
                 result = index;
             }
         }
         return result;
     }
+
+    // Merges lhs and rhs into out and move the remaining values into the bigger (by compare_last)
+    size_type merge(size_type lhs, size_type rhs, size_type out) {
+
+    }
+
 
 #ifndef NDEBUG
     bool is_heap() const {
@@ -153,18 +183,18 @@ class heap {
     }
 #endif
    public:
-    heap() noexcept(std::is_nothrow_constructible_v<heap_data>) : data_{} {
+    merge_heap() noexcept(std::is_nothrow_constructible_v<heap_data>) : data_{} {
     }
 
-    explicit heap(key_comparator const &comp) noexcept : data_{comp} {
+    explicit merge_heap(key_comparator const &comp) noexcept : data_{comp} {
     }
 
-    explicit heap(allocator_type const &alloc) noexcept(
+    explicit merge_heap(allocator_type const &alloc) noexcept(
         std::is_nothrow_constructible_v<heap_data, allocator_type const &>)
         : data_{alloc} {
     }
 
-    explicit heap(key_comparator const &comp, allocator_type const &alloc) noexcept : data_{comp, alloc} {
+    explicit merge_heap(key_comparator const &comp, allocator_type const &alloc) noexcept : data_{comp, alloc} {
     }
 
     constexpr key_comparator key_comp() const noexcept {
@@ -205,11 +235,11 @@ class heap {
 
     void pop() {
         assert(!data_.container.empty());
-        auto const index = SiftStrategy::remove(*this, 0u);
-        if (index + 1 < data_.container.size()) {
-            data_.container[index] = std::move(data_.container.back());
+        --top_size;
+        ++data_.container[0].start_pos;
+        if (top_size == 0) {
+          
         }
-        data_.container.pop_back();
         assert(is_heap());
     }
 
@@ -295,4 +325,4 @@ class heap {
 }  // namespace local_nonaddressable
 }  // namespace multiqueue
 
-#endif /* end of include guard: HEAP_HPP_MKBRIGPA */
+#endif  //! MERGE_HEAP_HPP_INCLUDED

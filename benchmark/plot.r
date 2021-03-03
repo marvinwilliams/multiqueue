@@ -3,7 +3,7 @@ library(dplyr)
 library(reshape2)
 library(stringr)
 
-experiment_dir <- "./experiments"
+experiment_dir <- "./experiments_i10pc133"
 
 read_histogram <- function(file, name) {
   data <- read.csv(file = file, header = F, col.names = c("rank", "frequency"), sep = " ")
@@ -64,7 +64,8 @@ plot_rank_histogram <- function(data, outdir) {
   plot <- ggplot(data, aes(x = rank, y = cummulated, group = name, color = name)) +
     labs(x = "Rank", y = "Cummul. Frequency", title = "Rank") +
     geom_line() +
-    facet_wrap(~ prefill + dist) +
+    scale_color_brewer(palette="Set1") +
+    facet_grid(rows = vars(prefill, dist)) +
     scale_x_log10()
   ggsave(plot, file = paste(outdir, "/rank_plot.pdf", sep = ""))
 }
@@ -73,7 +74,8 @@ plot_delay_histogram <- function(data, outdir) {
   plot <- ggplot(data, aes(x = rank, y = cummulated, group = name, color = name)) +
     labs(x = "Rank", y = "Cummul. Frequency", title = "Delay") +
     geom_line() +
-    facet_wrap(~ prefill + dist) +
+    scale_color_brewer(palette="Set1") +
+    facet_grid(rows = vars(prefill, dist)) +
     scale_x_log10()
   ggsave(plot, file = paste(outdir, "/delay_plot.pdf", sep = ""))
 }
@@ -86,7 +88,9 @@ plot_top_delay_bar <- function(data, outdir) {
   plot <- ggplot(transformed, aes(x = as.factor(name), y = value, fill = name)) +
     labs(x = "Priority Queue", y = "Top Delay", title = "Top Delay") +
     geom_bar(stat = "identity") +
-    facet_wrap(~ variable + prefill + dist, scales = "free") +
+    scale_color_brewer(palette="Set1") +
+    # facet_grid(cols = vars(variable), rows = vars(prefill, dist), scales = "free") +
+    facet_grid(rows = vars(variable), cols = vars(prefill, dist), scales = "free") +
     theme(axis.ticks.x = element_blank(), axis.text.x = element_blank())
   ggsave(plot, file = paste(outdir, "/top_delay_plot.pdf", sep = ""))
 }
@@ -99,7 +103,7 @@ plot_throughput_by_thread <- function(data, outdir) {
       width = .2,
       position = position_dodge(0.05)
     ) +
-    facet_wrap(~ prefill + dist) +
+    facet_grid(rows = vars(prefill, dist)) +
     labs(x = "p", y = "10^6 Ops/s", title = "Operations per second")
   ggsave(plot, file = paste(outdir, "/throughput_plot.pdf", sep = ""))
 }
@@ -113,29 +117,30 @@ plot_throughput_by_prefill <- function(data, outdir) {
       width = .2,
       position = position_dodge(0.05)
     ) +
-    facet_wrap(~dist) +
+    facet_grid(rows = vars(dist)) +
     labs(x = "p", y = "10^6 Ops/s", title = "Operations per second")
   ggsave(plot, file = paste(outdir, "/throughput_by_prefill_plot.pdf", sep = ""))
 }
 
 plot_throughput_by_dist <- function(data, outdir) {
-  plot <- ggplot(subset(data, threads = 8), aes(x = as.factor(dist), y = mean, group = name, color = name)) +
-    geom_bar(stat = "identity") +
+  plot <- ggplot(data, aes(x = threads, y = mean, group = name, color = name, fill = name)) +
+    geom_line() +
     geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd),
       width = .2,
       position = position_dodge(0.05)
     ) +
-    facet_wrap(~prefill) +
+    scale_color_brewer(palette="Set1") +
+    facet_grid(rows = vars(dist)) +
     labs(x = "p", y = "10^6 Ops/s", title = "Operations per second")
   ggsave(plot, file = paste(outdir, "/throughput_by_dist_plot.pdf", sep = ""))
 }
 
 
 plot_scenario <- function(data, dir) {
-  plot_rank_histogram(data$rank, dir)
-  plot_delay_histogram(data$delay, dir)
-  plot_top_delay_bar(data$top_delay, dir)
-  plot_throughput_by_thread(data$throughput, dir)
+   # plot_rank_histogram(data$rank, dir)
+   # plot_delay_histogram(data$delay, dir)
+   plot_top_delay_bar(data$top_delay, dir)
+   # plot_throughput_by_thread(data$throughput, dir)
 }
 
 read_scenario <- function(scenario) {
@@ -159,7 +164,7 @@ read_scenario <- function(scenario) {
   }
   rank_data <- do.call(rbind, rank_list)
   delay_data <- do.call(rbind, delay_list)
-  top_delay_list <- do.call(rbind, top_delay_list)
+  top_delay_data <- do.call(rbind, top_delay_list)
   throughput_data <- do.call(rbind, throughput_list)
   print(throughput_data)
   list("rank" = rank_data, "delay" = delay_data, "top_delay" = top_delay_data, "throughput" = throughput_data)
