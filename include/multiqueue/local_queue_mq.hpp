@@ -1,15 +1,15 @@
 /**
 ******************************************************************************
-* @file:   ins_del_buffer_mq.hpp
+* @file:   local_queue_mq.hpp
 *
 * @author: Marvin Williams
-* @date:   2021/02/23 10:27
+* @date:   2021/03/02 16:27
 * @brief:
 *******************************************************************************
 **/
 #pragma once
-#ifndef INS_DEL_BUFFER_MQ_HPP_INCLUDED
-#define INS_DEL_BUFFER_MQ_HPP_INCLUDED
+#ifndef LOCAL_QUEUE_MQ_HPP_INCLUDED
+#define LOCAL_QUEUE_MQ_HPP_INCLUDED
 
 #include <iostream>
 
@@ -36,7 +36,7 @@ namespace rsm {
 static constexpr unsigned int CACHE_LINESIZE = 64;
 
 template <typename ValueType>
-struct InsDelBufferConfiguration {
+struct LocalQueueConfiguration {
     using key_type = typename ValueType::first_type;
     using mapped_type = typename ValueType::second_type;
     // With `p` threads, use `C*p` queues
@@ -47,8 +47,6 @@ struct InsDelBufferConfiguration {
     static constexpr size_t InsertionBufferSize = 16;
     // Deletion buffer size
     static constexpr size_t DeletionBufferSize = 16;
-    // The sentinel
-    static constexpr key_type Sentinel = std::numeric_limits<key_type>::max();
     // The sifting strategy to use
     using SiftStrategy = local_nonaddressable::full_down_strategy;
     // The allocator to use in the underlying sequential priority queue
@@ -56,16 +54,16 @@ struct InsDelBufferConfiguration {
 };
 
 template <typename Key, typename T, typename Comparator = std::less<Key>,
-          template <typename> typename Configuration = InsDelBufferConfiguration,
+          template <typename> typename Configuration = LocalQueueConfiguration,
           typename Allocator = std::allocator<Key>>
-class ins_del_buffer_mq {
+class local_queue_mq {
    public:
     using key_type = Key;
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
     using key_comparator = Comparator;
     class value_comparator : private key_comparator {
-        friend ins_del_buffer_mq;
+        friend local_queue_mq;
         explicit value_comparator(key_comparator const &comp) : key_comparator{comp} {
         }
 
@@ -79,7 +77,6 @@ class ins_del_buffer_mq {
    private:
     using config_type = Configuration<value_type>;
     static constexpr unsigned int C = config_type::C;
-    static constexpr key_type Sentinel = config_type::Sentinel;
     static constexpr size_t InsertionBufferSize = config_type::InsertionBufferSize;
     static constexpr size_t DeletionBufferSize = config_type::DeletionBufferSize;
 
@@ -186,15 +183,24 @@ class ins_del_buffer_mq {
         return dist(get_rng());
     }
 
+    inline size_t random_local_queue_index() const {
+        std::uniform_int_distribution<std::size_t> dist{0, C - 1};
+        return dist(get_rng());
+    }
+
    public:
-    explicit ins_del_buffer_mq(unsigned int const num_threads)
+    explicit local_queue_mq(unsigned int const num_threads)
         : heap_list_(num_threads * C), num_queues_{static_cast<unsigned int>(heap_list_.size())}, comp_{} {
         assert(num_threads >= 1);
     }
 
-    explicit ins_del_buffer_mq(unsigned int const num_threads, allocator_type const &alloc)
+    explicit local_queue_mq(unsigned int const num_threads, allocator_type const &alloc)
         : heap_list_(num_threads * C, alloc), num_queues_{static_cast<unsigned int>(heap_list_.size())}, comp_{} {
         assert(num_threads >= 1);
+    }
+
+    handle_type get_handle(unsigned int id) const noexcept {
+      return handle_type{id};
     }
 
     void push(value_type const &value) {
@@ -215,12 +221,21 @@ class ins_del_buffer_mq {
     /*     heap_list_[index].unlock(); */
     /* } */
 
-    bool extract_top(value_type &retval) {
+    bool extract_top(value_type &retval, handle_type const &handle) {
+        size_t start_index = random_local_queue_index();
         size_t first_index;
+        for (unsigned int i = 0; i < C; ++i) {
+            first_index = C * handle.id_ + ((start_index + i) % C);
+            if (heap_list_[first_index].try_lock()) {
+                break;
+            }
+            if (i == 3) {
+                do {
+                    first_index = random_queue_index();
+                } while (!heap_list_[first_index].try_lock());
+            }
+        }
         bool first_empty = false;
-        do {
-            first_index = random_queue_index();
-        } while (!heap_list_[first_index].try_lock());
         if (heap_list_[first_index].deletion_buffer.empty()) {
             heap_list_[first_index].refill_deletion_buffer();
         }
@@ -268,4 +283,4 @@ class ins_del_buffer_mq {
 }  // namespace rsm
 }  // namespace multiqueue
 
-#endif  //! INS_DEL_BUFFER_MQ_HPP_INCLUDED
+#endif  //! LOCAL_QUEUE_MQ_HPP_INCLUDED

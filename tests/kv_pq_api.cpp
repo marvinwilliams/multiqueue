@@ -94,7 +94,7 @@ TEST_CASE("kv_pq move-only", "[kv_pq][move-only]") {
     q.push({no_default_no_copy_type{1}, no_default_no_copy_type{1}});
     q.push({no_default_no_copy_type{2}, no_default_no_copy_type{2}});
     {
-        // top is a dangling reference after a call to q.pop() or q.extract_top()
+        // top is a dangling reference after a call to q.pop()
         [[maybe_unused]] auto const &top = q.top();
         REQUIRE(top.first.i == 0);
     }

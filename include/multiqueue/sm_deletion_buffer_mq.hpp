@@ -178,7 +178,8 @@ class sm_deletion_buffer_mq {
             lock_all_exclusive();
             std::uint32_t count = 0;
             while (count < BufferSize && !heap.empty()) {
-                heap.extract_top(buffer[count]);
+                buffer[count] = heap.top();
+                heap.pop();
                 ++count;
             }
             buffer_end = count;
@@ -241,79 +242,79 @@ class sm_deletion_buffer_mq {
         //  << "end pushing" << std::endl;
     }
 
-    bool extract_top_(value_type &retval) {
-        std::size_t first_index;
-        std::size_t first_buffer_pos;
-        //  << "Start extracting" << std::endl;
-        for (unsigned int count = 0; count < 2; ++count) {
-            do {
-                first_index = random_queue_index();
-            } while (!heap_list_[first_index].try_lock_buffer_shared());
-            //  << "Found first index" << std::endl;
-            first_buffer_pos = heap_list_[first_index].buffer_pos.fetch_add(1, std::memory_order_relaxed);
-            // Refill the buffer if we are the first one who encounter an empty puffer
-            if (first_buffer_pos == heap_list_[first_index].buffer_end) {
-                //  << "Refilling first" << std::endl;
-                heap_list_[first_index].refill_buffer();
-                //  << "Refilling done" << std::endl;
-                first_buffer_pos = 0;
-            }
-            if (first_buffer_pos < heap_list_[first_index].buffer_end) {
-                //  << "Buffer nonempty" << std::endl;
-                if (count == 1) {
-                    retval = std::move(heap_list_[first_index].buffer[first_buffer_pos]);
-                    //  << "Returning first element" << std::endl;
-                    heap_list_[first_index].unlock_buffer_shared();
-                    //  << "Returned element" << std::endl;
-                    return true;
-                }
-                // hold the lock for comparison
-                break;
-            } else {
-                // Queue empty
-                //  << "Visited Queue empty" << std::endl;
-                heap_list_[first_index].unlock_buffer_shared();
-                //  << "Unlocked empty queue" << std::endl;
-            }
-            if (count == 1) {
-                //  << "Seen two empty queues" << std::endl;
-                return false;
-            }
-        }
-        // When we get here, we hold the shared lock for the first heap, which has a nonempty buffer
-        std::size_t second_index;
-        std::size_t second_buffer_pos;
-        do {
-            second_index = random_queue_index();
-        } while (second_index == first_index || !heap_list_[second_index].try_lock_buffer_shared());
-        //  << "Found second index" << std::endl;
-        second_buffer_pos = heap_list_[second_index].buffer_pos.fetch_add(1, std::memory_order_relaxed);
-        // Refill the buffer if we are the first one who encounter an empty puffer
-        if (second_buffer_pos == heap_list_[second_index].buffer_end) {
-            //  << "Refilling second" << std::endl;
-            heap_list_[second_index].refill_buffer();
-            //  << "Refilling done" << std::endl;
-            second_buffer_pos = 0;
-        }
-        if (second_buffer_pos < heap_list_[second_index].buffer_end &&
-            //  << "Buffer nonempty" << std::endl;
-            comp_(heap_list_[second_index].buffer[second_buffer_pos].first,
-                  heap_list_[first_index].buffer[first_buffer_pos].first)) {
-            //  << "Second is smaller" << std::endl;
-            heap_list_[first_index].unlock_buffer_shared();
-            retval = std::move(heap_list_[second_index].buffer[second_buffer_pos]);
-            //  << "Unlocking second" << std::endl;
-            heap_list_[second_index].unlock_buffer_shared();
-        } else {
-            //  << "First is smaller" << std::endl;
-            heap_list_[second_index].unlock_buffer_shared();
-            retval = std::move(heap_list_[first_index].buffer[first_buffer_pos]);
-            //  << "Unlocking first" << std::endl;
-            heap_list_[first_index].unlock_buffer_shared();
-        }
-        //  << "Unlocked last, returning" << std::endl;
-        return true;
-    }
+    /* bool extract_top(value_type &retval) { */
+    /*     std::size_t first_index; */
+    /*     std::size_t first_buffer_pos; */
+    /*     //  << "Start extracting" << std::endl; */
+    /*     for (unsigned int count = 0; count < 2; ++count) { */
+    /*         do { */
+    /*             first_index = random_queue_index(); */
+    /*         } while (!heap_list_[first_index].try_lock_buffer_shared()); */
+    /*         //  << "Found first index" << std::endl; */
+    /*         first_buffer_pos = heap_list_[first_index].buffer_pos.fetch_add(1, std::memory_order_relaxed); */
+    /*         // Refill the buffer if we are the first one who encounter an empty puffer */
+    /*         if (first_buffer_pos == heap_list_[first_index].buffer_end) { */
+    /*             //  << "Refilling first" << std::endl; */
+    /*             heap_list_[first_index].refill_buffer(); */
+    /*             //  << "Refilling done" << std::endl; */
+    /*             first_buffer_pos = 0; */
+    /*         } */
+    /*         if (first_buffer_pos < heap_list_[first_index].buffer_end) { */
+    /*             //  << "Buffer nonempty" << std::endl; */
+    /*             if (count == 1) { */
+    /*                 retval = std::move(heap_list_[first_index].buffer[first_buffer_pos]); */
+    /*                 //  << "Returning first element" << std::endl; */
+    /*                 heap_list_[first_index].unlock_buffer_shared(); */
+    /*                 //  << "Returned element" << std::endl; */
+    /*                 return true; */
+    /*             } */
+    /*             // hold the lock for comparison */
+    /*             break; */
+    /*         } else { */
+    /*             // Queue empty */
+    /*             //  << "Visited Queue empty" << std::endl; */
+    /*             heap_list_[first_index].unlock_buffer_shared(); */
+    /*             //  << "Unlocked empty queue" << std::endl; */
+    /*         } */
+    /*         if (count == 1) { */
+    /*             //  << "Seen two empty queues" << std::endl; */
+    /*             return false; */
+    /*         } */
+    /*     } */
+    /*     // When we get here, we hold the shared lock for the first heap, which has a nonempty buffer */
+    /*     std::size_t second_index; */
+    /*     std::size_t second_buffer_pos; */
+    /*     do { */
+    /*         second_index = random_queue_index(); */
+    /*     } while (second_index == first_index || !heap_list_[second_index].try_lock_buffer_shared()); */
+    /*     //  << "Found second index" << std::endl; */
+    /*     second_buffer_pos = heap_list_[second_index].buffer_pos.fetch_add(1, std::memory_order_relaxed); */
+    /*     // Refill the buffer if we are the first one who encounter an empty puffer */
+    /*     if (second_buffer_pos == heap_list_[second_index].buffer_end) { */
+    /*         //  << "Refilling second" << std::endl; */
+    /*         heap_list_[second_index].refill_buffer(); */
+    /*         //  << "Refilling done" << std::endl; */
+    /*         second_buffer_pos = 0; */
+    /*     } */
+    /*     if (second_buffer_pos < heap_list_[second_index].buffer_end && */
+    /*         //  << "Buffer nonempty" << std::endl; */
+    /*         comp_(heap_list_[second_index].buffer[second_buffer_pos].first, */
+    /*               heap_list_[first_index].buffer[first_buffer_pos].first)) { */
+    /*         //  << "Second is smaller" << std::endl; */
+    /*         heap_list_[first_index].unlock_buffer_shared(); */
+    /*         retval = std::move(heap_list_[second_index].buffer[second_buffer_pos]); */
+    /*         //  << "Unlocking second" << std::endl; */
+    /*         heap_list_[second_index].unlock_buffer_shared(); */
+    /*     } else { */
+    /*         //  << "First is smaller" << std::endl; */
+    /*         heap_list_[second_index].unlock_buffer_shared(); */
+    /*         retval = std::move(heap_list_[first_index].buffer[first_buffer_pos]); */
+    /*         //  << "Unlocking first" << std::endl; */
+    /*         heap_list_[first_index].unlock_buffer_shared(); */
+    /*     } */
+    /*     //  << "Unlocked last, returning" << std::endl; */
+    /*     return true; */
+    /* } */
 
     bool extract_top(value_type &retval) {
         //  << "Extracting" << std::endl;

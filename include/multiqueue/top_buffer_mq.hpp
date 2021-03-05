@@ -113,7 +113,8 @@ class top_buffer_mq {
         if (heap_list_[index].heap.empty()) {
             heap_list_[index].top.first = Sentinel;
         } else {
-            heap_list_[index].heap.extract_top(heap_list_[index].top);
+            heap_list_[index].top = heap_list_[index].heap.top();
+            heap_list_[index].heap.pop();
         }
     }
 

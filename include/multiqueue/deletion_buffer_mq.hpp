@@ -88,7 +88,8 @@ class deletion_buffer_mq {
         inline void refill_buffer() {
             uint32_t count = 0;
             while (count < BufferSize && !heap.empty()) {
-                heap.extract_top(buffer[count]);
+                buffer[count] = heap.top();
+                heap.pop();
                 ++count;
             }
             buffer_pos = 0;

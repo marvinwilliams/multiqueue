@@ -17,11 +17,13 @@
 #include <utility>      // move, forward
 #include <vector>
 
+#include "multiqueue/util/ring_buffer.hpp"
+
 namespace multiqueue {
 namespace local_nonaddressable {
 
 template <typename T, typename Key, typename KeyExtractor, typename Comparator, unsigned int Degree,
-          unsigned int NodeSize, typename Allocator = std::allocator<T>>
+          std::size_t NodeSize, typename Allocator = std::allocator<T>>
 class merge_heap {
    public:
     using value_type = T;
@@ -30,11 +32,7 @@ class merge_heap {
     using key_comparator = Comparator;
     using allocator_type = Allocator;
 
-   private:
-    struct Node {
-        std::array<value_type, NodeSize> data;
-        unsigned int start_pos;
-    };
+    using Node = std::array<value_type, NodeSize>;
 
    public:
     using container_type = std::vector<Node>;
@@ -48,6 +46,7 @@ class merge_heap {
     static constexpr unsigned int degree = Degree;
     static constexpr bool is_nothrow_comparable =
         std::is_nothrow_invocable_v<decltype(&key_comparator::operator()), key_type const &>;
+    static constexpr std::size_t mask = NodeSize - 1;
 
     static_assert(std::is_invocable_r_v<bool, key_comparator const &, key_type const &, key_type const &>,
                   "Keys must be comparable using the signature `bool Comparator(Key const&, Key const&) const &`");
@@ -56,12 +55,14 @@ class merge_heap {
         "Keys must be extractable from values using the signature `Key const& KeyExtractor(Value const&) const &`");
     static_assert(std::is_default_constructible_v<key_extractor>, "`KeyExtractor` must be default-constructible");
     static_assert(Degree >= 1u, "Degree must be at least one");
+    static_assert(NodeSize > 0 && (NodeSize & (NodeSize - 1)) == 0,
+                  "NodeSize must be greater than 0 and a power of two");
 
    private:
     struct heap_data : private key_comparator, private key_extractor {
        public:
+        util::ring_buffer<value_type, NodeSize> top_node;
         container_type container;
-        unsigned int top_size = 0;
 
        public:
         explicit heap_data() noexcept(std::is_nothrow_default_constructible_v<key_comparator>)
@@ -92,20 +93,15 @@ class merge_heap {
 
    private:
     static constexpr size_type parent_index(size_type const index) noexcept {
-        return (index - 1u) / Degree;
+        return (index / Degree) - 1u;
     }
 
     static constexpr size_type first_child_index(size_type const index) noexcept {
-        return index * Degree + 1u;
+        return (index + 1u) * Degree;
     }
 
     constexpr bool compare(key_type const &lhs, key_type const &rhs) const noexcept(is_nothrow_comparable) {
         return data_.to_comparator()(lhs, rhs);
-    }
-
-    constexpr std::size_t last_value_index(std::size_t const node_index) const noexcept {
-        return (data_.container[node_index].start_pos + (node_index == 0 ? data_.top_size - 1 : NodeSize - 1)) %
-            NodeSize;
     }
 
     constexpr key_type const &extract_key(value_type const &value) const noexcept {
@@ -114,13 +110,13 @@ class merge_heap {
 
     constexpr bool compare_first(std::size_t const lhs_index, std::size_t const rhs_index) const
         noexcept(is_nothrow_comparable) {
-        return data_.to_comparator()(extract_key(data_.container[lhs_index][data_.container[lhs_index].start_pos]),
-                                     extract_key(data_.container[rhs_index][data_.container[rhs_index].start_pos]));
+        return compare(extract_key(data_.container[lhs_index].front()),
+                       extract_key(data_.container[rhs_index].front()));
     }
+
     constexpr bool compare_last(std::size_t const lhs_index, std::size_t const rhs_index) const
         noexcept(is_nothrow_comparable) {
-        return data_.to_comparator()(extract_key(data_.container[lhs_index][last_value_index(lhs_index)]),
-                                     extract_key(data_.container[rhs_index][last_value_index(rhs_index)]));
+        return compare(extract_key(data_.container[lhs_index].back()), extract_key(data_.container[rhs_index].back()));
     }
 
     // Find the index of the smallest `num_children` children of the node at
@@ -163,9 +159,36 @@ class merge_heap {
 
     // Merges lhs and rhs into out and move the remaining values into the bigger (by compare_last)
     size_type merge(size_type lhs, size_type rhs, size_type out) {
-
+        std::size_t l_index = 0;
+        std::size_t r_index = 0;
+        for (std::size_t i = 0; i < NodeSize; ++i) {
+            if (compare(data_.container[lhs][l_index].first, data_.container[rhs][r_index].first)) {
+                data_.container[out][i] = std::move(data_.container[lhs][l_index]);
+                ++l_index;
+            } else {
+                data_.container[out][i] = std::move(data_.container[rhs][r_index]);
+                ++r_index;
+            }
+        }
+        std::size_t index = 0;
+        if (l_index < NodeSize && r_index < NodeSize) {
+            if (compare_last(lhs, rhs)) {
+                std::swap(lhs, rhs);
+                std::swap(l_index, r_index);
+            }
+            while (r_index < NodeSize) {
+                if (l_index == NodeSize ||
+                    compare(data_.container[rhs][r_index].first, data_.container[lhs][l_index].first)) {
+                    data_.container[lhs][index] = std::move(data_.container[rhs][r_index]);
+                    ++l_index;
+                } else {
+                    data_.container[lhs][index] = std::move(data_.container[lhs][l_index]);
+                    ++l_index;
+                }
+                ++index;
+            }
+        }
     }
-
 
 #ifndef NDEBUG
     bool is_heap() const {
@@ -238,7 +261,6 @@ class merge_heap {
         --top_size;
         ++data_.container[0].start_pos;
         if (top_size == 0) {
-          
         }
         assert(is_heap());
     }

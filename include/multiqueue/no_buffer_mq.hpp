@@ -14,8 +14,8 @@
 
 #include "multiqueue/sequential/heap/full_down_strategy.hpp"
 #include "multiqueue/sequential/heap/heap.hpp"
-#include "multiqueue/util/range_iterator.hpp"
 #include "multiqueue/util/extractors.hpp"
+#include "multiqueue/util/range_iterator.hpp"
 
 #include <array>
 #include <atomic>
@@ -172,13 +172,15 @@ class no_buffer_mq {
             if (found) {
                 unlock(first_index);
             }
-            heap_list_[second_index].heap.extract_top(retval);
+            retval = heap_list_[second_index].heap.top();
+            heap_list_[second_index].heap.pop();
             unlock(second_index);
             found = true;
         } else {
             unlock(second_index);
             if (found) {
-                heap_list_[first_index].heap.extract_top(retval);
+                retval = heap_list_[first_index].heap.top();
+                heap_list_[first_index].heap.pop();
                 unlock(first_index);
             }
         }

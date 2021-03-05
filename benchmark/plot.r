@@ -3,7 +3,7 @@ library(dplyr)
 library(reshape2)
 library(stringr)
 
-experiment_dir <- "./experiments_i10pc133"
+experiment_dir <- "./experiments_i10pc132"
 
 read_histogram <- function(file, name) {
   data <- read.csv(file = file, header = F, col.names = c("rank", "frequency"), sep = " ")
@@ -108,6 +108,41 @@ plot_throughput_by_thread <- function(data, outdir) {
   ggsave(plot, file = paste(outdir, "/throughput_plot.pdf", sep = ""))
 }
 
+plot_throughput_by_buffer_size <- function(data, outdir) {
+  data$ibuffer_size <- as.factor(str_extract(data$name, "(?<=_)\\d+(?=_)"))
+  data$ibuffer_size <- ordered(data$ibuffer_size, levels=c("2", "8", "16", "64"))
+  data$dbuffer_size <- factor(str_extract(data$name, "\\d+$"))
+  data$dbuffer_size <- ordered(data$dbuffer_size, levels=c("2", "8", "16", "64"))
+  plot <- ggplot(data, aes(x = threads, y = mean, group = interaction(ibuffer_size, dbuffer_size), color = dbuffer_size)) +
+    geom_line() +
+    geom_point() +
+    # scale_shape_manual(values = rep(1:5, length.out = 24)) +
+    scale_color_brewer(palette="Set1") +
+    geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd),
+      width = .2,
+      position = position_dodge(0.05)
+    ) +
+    facet_wrap(~ ibuffer_size) +
+    labs(x = "p", y = "10^6 Ops/s", title = "Operations per second")
+  ggsave(plot, file = paste(outdir, "/throughput_buffer_size_plot.pdf", sep = ""))
+}
+
+plot_throughput_by_c <- function(data, outdir) {
+  data$c <- as.factor(str_extract(data$name, "\\d+$"))
+  data$c <- ordered(data$c, levels=c("2", "4", "8", "16", "32"))
+  plot <- ggplot(data, aes(x = threads, y = mean, group = c, color = c)) +
+    geom_line() +
+    geom_point() +
+    # scale_shape_manual(values = rep(1:5, length.out = 24)) +
+    scale_color_brewer(palette="Set1") +
+    geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd),
+      width = .2,
+      position = position_dodge(0.05)
+    ) +
+    labs(x = "p", y = "10^6 Ops/s", title = "Operations per second")
+  ggsave(plot, file = paste(outdir, "/throughput_by_c_plot.pdf", sep = ""))
+}
+
 plot_throughput_by_prefill <- function(data, outdir) {
   print(subset(data, threads == 8))
   plot <- ggplot(subset(data, threads == 8), aes(x = prefill, y = mean, group = name, color = name)) +
@@ -177,3 +212,9 @@ plot_throughput_by_prefill(data$throughput, paste(experiment_dir, "prefill", sep
 data <- read_scenario("distribution")
 plot_scenario(data, paste(experiment_dir, "distribution", sep = "/"))
 plot_throughput_by_dist(data$throughput, paste(experiment_dir, "distribution", sep = "/"))
+
+# data <- read_scenario("buffer")
+# plot_throughput_by_buffer_size(data$throughput, paste(experiment_dir, "buffer", sep = "/"))
+
+# data <- read_scenario("c")
+# plot_throughput_by_c(data$throughput, paste(experiment_dir, "c", sep = "/"))
