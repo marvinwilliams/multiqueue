@@ -1,4 +1,4 @@
-image: $CI_REGISTRY/marvinwilliams/multiqueue-ci
+image: $CI_REGISTRY/marvinwilliams/multiqueue-ci/build_container
 
 stages:
   - prepare

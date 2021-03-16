@@ -86,14 +86,14 @@ class deletion_buffer_mq {
         };
 
         inline void refill_buffer() {
-            uint32_t count = 0;
+          std::uint32_t count = 0;
             while (count < BufferSize && !heap.empty()) {
                 buffer[count] = heap.top();
                 heap.pop();
                 ++count;
             }
             buffer_pos = 0;
-            buffer_end = static_cast<decltype(buffer_end)>(count);
+            buffer_end = count & ((1 << 16) - 1u);
         }
     };
 

@@ -74,6 +74,15 @@ class local_queue_mq {
         }
     };
 
+    struct handle_type {
+      friend local_queue_mq;
+       private:
+        unsigned int id_;
+       private:
+        explicit handle_type(unsigned int id) : id_{id} {
+        }
+    };
+
    private:
     using config_type = Configuration<value_type>;
     static constexpr unsigned int C = config_type::C;
