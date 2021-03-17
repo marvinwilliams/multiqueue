@@ -5,7 +5,7 @@
 TEST_CASE("buffer", "[buffer]") {
   multiqueue::util::buffer<std::uint32_t, 16> buffer;
   REQUIRE(buffer.empty());
-  REQUIRE(buffer.size == 0u);
+  REQUIRE(buffer.size() == 0u);
   buffer.push_back(1);
   buffer.push_back(3);
   buffer.push_back(2);
@@ -19,7 +19,7 @@ TEST_CASE("buffer", "[buffer]") {
   REQUIRE(buffer[2] == 4);
   buffer.push_back(5);
   buffer.insert_at(0, 0);
-  REQUIRE(buffer.size == 5);
+  REQUIRE(buffer.size() == 5);
   REQUIRE(buffer[0] == 0);
   REQUIRE(buffer[1] == 1);
   REQUIRE(buffer[2] == 3);
@@ -38,10 +38,10 @@ TEST_CASE("buffer", "[buffer]") {
   for (unsigned int i = 0; i < (16 - 6); ++i) {
     buffer.push_back(i);
   }
-  REQUIRE(buffer.size == 16);
+  REQUIRE(buffer.size() == 16);
   buffer.pop_back();
-  REQUIRE(buffer.size == 15);
+  REQUIRE(buffer.size() == 15);
   buffer.clear();
   REQUIRE(buffer.empty());
-  REQUIRE(buffer.size == 0);
+  REQUIRE(buffer.size() == 0);
 }

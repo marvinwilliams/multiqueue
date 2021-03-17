@@ -20,64 +20,135 @@ namespace util {
 
 template <typename T, std::size_t N>
 struct buffer {
-    static_assert(N > 0, "N must be greater than 0");
-    std::array<T, N> data;
-    std::size_t size = 0;
+    static_assert(N > 0u, "N must be greater than 0");
+
+    using value_type = T;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+    using reference = value_type&;
+    using const_reference = value_type const&;
+    using pointer = value_type*;
+    using const_pointer = value_type const*;
+    using iterator = typename std::array<T, N>::iterator;
+    using const_iterator = typename std::array<T, N>::const_iterator;
+    using reverse_iterator = typename std::array<T, N>::reverse_iterator;
+    using const_reverse_iterator = typename std::array<T, N>::const_reverse_iterator;
+
+   private:
+    std::array<T, N> data_;
+    size_type size_ = 0u;
+
+   public:
+    inline size_type size() const noexcept {
+        return size_;
+    }
 
     inline bool empty() const noexcept {
-        return size == 0;
+        return size_ == 0u;
+    }
+
+    inline void set_size(size_type const size) noexcept {
+        size_ = size;
     }
 
     void push_back(T const& t) {
-        assert(size < N);
-        data[size] = t;
-        ++size;
+        assert(size_ < N);
+        data_[size_] = t;
+        ++size_;
     }
 
-    void insert_at(std::size_t pos, T const& t) {
-        assert(size < N);
-        assert(pos <= size);
-        for (std::size_t i = 0; i < size - pos; ++i) {
-            data[size - i] = std::move(data[size - (i + 1)]);
+    void insert_at(size_type pos, T const& t) {
+        assert(size_ < N);
+        assert(pos <= size_);
+        for (size_type i = 0u; i < size_ - pos; ++i) {
+            data_[size_ - i] = std::move(data_[size_ - (i + 1)]);
         }
-        data[pos] = t;
-        ++size;
+        data_[pos] = t;
+        ++size_;
     }
 
     inline void pop_back() {
         assert(!empty());
-        --size;
+        --size_;
     }
 
     inline void clear() {
-        size = 0u;
+        size_ = 0u;
     }
 
-    T const& operator[](std::size_t pos) const noexcept {
-        assert(pos < size);
-        return data[pos];
+    T const& operator[](size_type pos) const noexcept {
+        assert(pos < size_);
+        return data_[pos];
     }
 
-    T& operator[](std::size_t pos) noexcept {
-        return data[pos];
+    T& operator[](size_type pos) noexcept {
+        return data_[pos];
     }
 
     T const& front() const noexcept {
         assert(!empty());
-        return data[0u];
+        return data_[0u];
     }
 
     T& front() noexcept {
-        return data[0u];
+        return data_[0u];
     }
 
     T const& back() const noexcept {
         assert(!empty());
-        return data[size - 1u];
+        return data_[size_ - 1u];
     }
 
     T& back() noexcept {
-        return data[size - 1u];
+        return data_[size_ - 1u];
+    }
+
+    constexpr iterator begin() noexcept {
+        return data_.begin();
+    }
+
+    constexpr const const_iterator begin() const noexcept {
+        return data_.begin();
+    }
+
+    constexpr const const_iterator cbegin() const noexcept {
+        return data_.cbegin();
+    }
+
+    constexpr iterator end() noexcept {
+        return data_.begin() + size_;
+    }
+
+    constexpr const const_iterator end() const noexcept {
+        return data_.begin() + size_;
+    }
+
+    constexpr const const_iterator cend() const noexcept {
+        return data_.cbegin() + size_;
+    }
+
+    constexpr reverse_iterator rbegin() noexcept {
+        return data_.rbegin();
+    }
+
+    constexpr const const_reverse_iterator rbegin() const noexcept {
+        return data_.rbegin();
+    }
+
+    constexpr const const_reverse_iterator crbegin() const noexcept {
+        return data_.crbegin();
+    }
+
+    constexpr reverse_iterator rend() noexcept {
+        return data_.rend();
+    }
+
+    constexpr const const_reverse_iterator rend() const noexcept {
+        return data_.rend();
+    }
+
+    constexpr const const_reverse_iterator crend() const noexcept {
+        return data_.crend();
     }
 };
 

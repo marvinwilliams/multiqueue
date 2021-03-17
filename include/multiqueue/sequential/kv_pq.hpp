@@ -43,8 +43,8 @@ class kv_pq {
 
        public:
         constexpr bool operator()(value_type const &lhs, value_type const &rhs) const {
-            return key_comparator::operator()(util::get_nth<value_type>::operator()(lhs),
-                                              util::get_nth<value_type>::operator()(rhs));
+            return key_comparator::operator()(util::get_nth<value_type>{}(lhs),
+                                              util::get_nth<value_type>{}(rhs));
         }
     };
 

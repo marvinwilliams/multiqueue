@@ -70,6 +70,7 @@ add_mq_consistency_test(dbmq PQ_DBMQ)
 add_mq_consistency_test(smdmq PQ_SMDMQ)
 add_mq_consistency_test(idmq PQ_IDMQ)
 add_mq_consistency_test(lqmq PQ_LQMQ)
+add_mq_consistency_test(mmq PQ_MMQ)
 
 add_executable(verify_consistency verify_consistency.cpp)
 target_link_libraries(verify_consistency PRIVATE basic_test)

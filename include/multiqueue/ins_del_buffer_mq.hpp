@@ -19,6 +19,7 @@
 #include "multiqueue/util/extractors.hpp"
 #include "multiqueue/util/ring_buffer.hpp"
 
+#include <queue>
 #include <array>
 #include <atomic>
 #include <cassert>
@@ -68,8 +69,8 @@ class ins_del_buffer_mq {
 
        public:
         constexpr bool operator()(value_type const &lhs, value_type const &rhs) const {
-            return key_comparator::operator()(util::get_nth<value_type>::operator()(lhs),
-                                              util::get_nth<value_type>::operator()(rhs));
+            return key_comparator::operator()(util::get_nth<value_type>{}(lhs),
+                                              util::get_nth<value_type>{}(rhs));
         }
     };
 
@@ -105,7 +106,7 @@ class ins_del_buffer_mq {
         }
 
         inline void flush_insertion_buffer() {
-            for (std::size_t i = 0u; i < insertion_buffer.size; ++i) {
+            for (std::size_t i = 0u; i < insertion_buffer.size(); ++i) {
                 heap.insert(std::move(insertion_buffer[i]));
             }
             insertion_buffer.clear();
@@ -139,7 +140,7 @@ class ins_del_buffer_mq {
                     /* std::cerr << "Insert in del buffer\n"; */
                     if (deletion_buffer.size() == DeletionBufferSize) {
                         /* std::cerr << "del buffer full\n"; */
-                        if (insertion_buffer.size == InsertionBufferSize) {
+                        if (insertion_buffer.size() == InsertionBufferSize) {
                             /* std::cerr << "ins buffer full, flushing..\n"; */
                             flush_insertion_buffer();
                             heap.insert(std::move(deletion_buffer.back()));
@@ -152,7 +153,7 @@ class ins_del_buffer_mq {
                     return;
                 }
             }
-            if (insertion_buffer.size == InsertionBufferSize) {
+            if (insertion_buffer.size() == InsertionBufferSize) {
                 /* std::cerr << "Insertion buffer full, flushing...\n"; */
                 flush_insertion_buffer();
                 heap.insert(value);

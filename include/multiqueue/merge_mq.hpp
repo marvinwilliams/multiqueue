@@ -3,23 +3,22 @@
 * @file:   merge_mq.hpp
 *
 * @author: Marvin Williams
-* @date:   2021/03/02 16:18
-* @brief:  
+* @date:   2021/03/16 17:38
+* @brief:
 *******************************************************************************
 **/
-
 #pragma once
 #ifndef MERGE_MQ_HPP_INCLUDED
 #define MERGE_MQ_HPP_INCLUDED
 
+#include <algorithm>
 #include <iostream>
 
-#include "multiqueue/sequential/heap/full_down_strategy.hpp"
-#include "multiqueue/sequential/heap/heap.hpp"
+#include "multiqueue/sequential/heap/merge_heap.hpp"
+#include "multiqueue/util/buffer.hpp"
 #include "multiqueue/util/extractors.hpp"
-#include "multiqueue/util/range_iterator.hpp"
+#include "multiqueue/util/ring_buffer.hpp"
 
-#include <cassert>
 #include <array>
 #include <atomic>
 #include <cassert>
@@ -41,73 +40,61 @@ struct MergeConfiguration {
     using mapped_type = typename ValueType::second_type;
     // With `p` threads, use `C*p` queues
     static constexpr unsigned int C = 4;
-    // The underlying sequential priority queue to use
-    static constexpr unsigned int HeapDegree = 4;
-    // The underlying sequential priority queue to use
-    static constexpr unsigned int MergeSize = 4;
+    // The node size of the merge heap
+    static constexpr unsigned int NodeSize = 8;
     // Insertion buffer size
-    static constexpr size_t InsertionBufferSize = 16;
+    static constexpr size_t InsertionBufferSize = 8;
     // Deletion buffer size
     static constexpr size_t DeletionBufferSize = 16;
-    // The sifting strategy to use
-    using SiftStrategy = local_nonaddressable::full_down_strategy;
     // The allocator to use in the underlying sequential priority queue
     using HeapAllocator = std::allocator<ValueType>;
 };
 
 template <typename Key, typename T, typename Comparator = std::less<Key>,
-          template <typename> typename Configuration = InsDelBufferConfiguration,
-          typename Allocator = std::allocator<Key>>
-class ins_del_buffer_mq {
+          template <typename> typename Configuration = MergeConfiguration, typename Allocator = std::allocator<Key>>
+class merge_mq {
    public:
     using key_type = Key;
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
     using key_comparator = Comparator;
+    class value_comparator : private key_comparator {
+        friend merge_mq;
+        explicit value_comparator(key_comparator const &comp) : key_comparator{comp} {
+        }
+
+       public:
+        constexpr bool operator()(value_type const &lhs, value_type const &rhs) const {
+            return key_comparator::operator()(util::get_nth<value_type>{}(lhs), util::get_nth<value_type>{}(rhs));
+        }
+    };
 
    private:
     using config_type = Configuration<value_type>;
     static constexpr unsigned int C = config_type::C;
     static constexpr size_t InsertionBufferSize = config_type::InsertionBufferSize;
     static constexpr size_t DeletionBufferSize = config_type::DeletionBufferSize;
+    static constexpr size_t NodeSize = config_type::NodeSize;
 
-    using heap_type = local_nonaddressable::heap<value_type, key_type, util::get_nth<value_type>, key_comparator,
-                                                 config_type::HeapDegree, typename config_type::SiftStrategy,
-                                                 typename config_type::HeapAllocator>;
+    static_assert(InsertionBufferSize % NodeSize == 0, "Insertion buffer size must be a multiple of the NodeSize");
+    static_assert(DeletionBufferSize >= InsertionBufferSize + NodeSize,
+                  "Deletion buffer size must be at least insertion buffer size plus node size");
+
+    using heap_type = local_nonaddressable::merge_heap<value_type, key_type, util::get_nth<value_type>, key_comparator,
+                                                       NodeSize, typename config_type::HeapAllocator>;
 
     struct alignas(CACHE_LINESIZE) guarded_heap {
         using allocator_type = typename heap_type::allocator_type;
         std::atomic_bool in_use = false;
+        util::buffer<value_type, InsertionBufferSize> insertion_buffer;
+        util::ring_buffer<value_type, DeletionBufferSize> deletion_buffer;
         heap_type heap;
-        std::array<value_type, DeletionBufferSize> deletion_buffer{};
-        std::array<value_type, InsertionBufferSize> insertion_buffer{};
-        std::uint32_t insertion_buffer_start : 8;
-        std::uint32_t insertion_buffer_end : 8;
-        std::uint32_t deletion_buffer_start : 8;
-        std::uint32_t deletion_buffer_end : 8;
 
         explicit guarded_heap() = default;
         explicit guarded_heap(allocator_type const &alloc) : heap{alloc} {
         }
 
-        inline bool deletion_buffer_empty() const noexcept {
-            return deletion_buffer_end == deletion_buffer_start;
-        };
-
-        inline bool deletion_buffer_full() const noexcept {
-            return (deletion_buffer_end + 1) % DeletionBufferSize == deletion_buffer_start;
-        };
-
-        inline bool insertion_buffer_empty() const noexcept {
-            return insertion_buffer_end == 0;
-        };
-
-        inline bool insertion_buffer_full() const noexcept {
-            return insertion_buffer_end == InsertionBufferSize;
-        }
-
         inline bool try_lock() noexcept {
-            // TODO: MEASURE
             bool expect_in_use = false;
             return in_use.compare_exchange_strong(expect_in_use, true, std::memory_order_acquire,
                                                   std::memory_order_relaxed);
@@ -117,61 +104,74 @@ class ins_del_buffer_mq {
             in_use.store(false, std::memory_order_release);
         }
 
-        inline void flush_insert_buffer() {
-            for (insertion_buffer_start = 0; insertion_buffer_start < insertion_buffer_end; ++insertion_buffer_start) {
-                heap.insert(std::move(insertion_buffer[insertion_buffer_start]));
+        inline void flush_insertion_buffer(value_comparator const &comp) {
+            assert(insertion_buffer.size() == InsertionBufferSize);
+            std::sort(insertion_buffer.begin(), insertion_buffer.end(), comp);
+            for (std::size_t i = 0u; i < insertion_buffer.size(); i += NodeSize) {
+                heap.insert(insertion_buffer.begin() + (i * NodeSize), insertion_buffer.begin() + ((i + 1) * NodeSize));
             }
-            insertion_buffer_end = 0;
+            insertion_buffer.clear();
         }
 
-        inline void refill_deletion_buffer() {
-            assert(deletion_buffer_empty());
-            flush_insert_buffer();
-            deletion_buffer_end = 0;
-            while (deletion_buffer_end < DeletionBufferSize - 1 && !heap.empty()) {
-                heap.extract_top(deletion_buffer[deletion_buffer_end++]);
+        inline void refill_deletion_buffer(value_comparator const &comp) {
+            assert(deletion_buffer.empty());
+            if (insertion_buffer.size() == InsertionBufferSize) {
+                flush_insertion_buffer(comp);
+                while (deletion_buffer.size() != DeletionBufferSize && !heap.empty()) {
+                    std::copy(heap.top_node().begin(), heap.top_node().end(), std::back_inserter(deletion_buffer));
+                    heap.pop_node();
+                }
+            } else if (heap.empty()) {
+                std::sort(insertion_buffer.begin(), insertion_buffer.end(), comp);
+                std::copy(insertion_buffer.begin(), insertion_buffer.end(), std::back_inserter(deletion_buffer));
+                insertion_buffer.clear();
+            } else {
+                auto it = std::partition(insertion_buffer.begin(), insertion_buffer.end(),
+                                         [&](auto const &v) { return comp(heap.top_node().back(), v); });
+                auto heap_it = heap.top_node().begin();
+                while (it != insertion_buffer.end()) {
+                    auto min_it = std::min_element(it, insertion_buffer.end(), comp);
+                    while (comp(*heap_it, *min_it)) {
+                        deletion_buffer.push_back(*heap_it++);
+                    }
+                    deletion_buffer.push_back(*min_it);
+                    if (min_it + 1u != insertion_buffer.end()) {
+                        *min_it = std::move(insertion_buffer.back());
+                    }
+                    insertion_buffer.pop_back();
+                }
+                std::copy(heap_it, heap.top_node().end(), std::back_inserter(deletion_buffer));
+                heap.pop_node();
             }
-            deletion_buffer_start = 0;
         }
 
         // We try to insert the new value into the deletion buffer, if it is smaller than the largest element in the
-        // deletion buffer. If the deletion buffer is full, we therefore need to evict the largest element. This element
-        // then gets inserted into the insertion buffer to avoid accessing the heap. If the insertion buffer is full, we
-        // flush it. If the new value is too large for the deletion buffer, it is inserted into the insertion buffer
-        // which might get flushed in the process.
-        void push(value_type const &value, key_comparator const &comp) {
-            if (!deletion_buffer_empty()) {
-                auto insert_start = (deletion_buffer_end + DeletionBufferSize - 1) % DeletionBufferSize;
-                if (comp(value.first, deletion_buffer[insert_start].first)) {
-                    if (deletion_buffer_full()) {
-                        if (insertion_buffer_full()) {
-                            flush_insert_buffer();
-                            heap.insert(deletion_buffer[insert_start]);
-                        } else {
-                            insertion_buffer[insertion_buffer_end++] = std::move(deletion_buffer[insert_start]);
+        // deletion buffer. If the deletion buffer is full, we therefore need to evict the largest element. This
+        // element then gets inserted into the insertion buffer to avoid accessing the heap. If the insertion buffer
+        // is full, we flush it. If the new value is too large for the deletion buffer, it is inserted into the
+        // insertion buffer which might get flushed in the process.
+        void push(value_type const &value, value_comparator const &comp) {
+            if (!deletion_buffer.empty()) {
+                std::size_t pos = deletion_buffer.size();
+                while (pos > 0 && comp(value, deletion_buffer[pos - 1u])) {
+                    --pos;
+                }
+                if (pos < deletion_buffer.size()) {
+                    if (deletion_buffer.size() == DeletionBufferSize) {
+                        if (insertion_buffer.size() == InsertionBufferSize) {
+                            flush_insertion_buffer(comp);
                         }
-                    } else {
-                        deletion_buffer[deletion_buffer_end] = std::move(deletion_buffer[insert_start]);
-                        deletion_buffer_end = (deletion_buffer_end + 1) % DeletionBufferSize;
+                        insertion_buffer.push_back(std::move(deletion_buffer.back()));
+                        deletion_buffer.pop_back();
                     }
-                    auto next_insert_start = (insert_start + DeletionBufferSize - 1) % DeletionBufferSize;
-                    while (insert_start != deletion_buffer_start &&
-                           comp(value.first, deletion_buffer[next_insert_start].first)) {
-                      /* std::cout << insert_start << " " << deletion_buffer_start << " " << insertion_buffer_start << std::endl; */
-                        deletion_buffer[insert_start] = std::move(deletion_buffer[next_insert_start]);
-                        insert_start = next_insert_start;
-                        next_insert_start = (insert_start + DeletionBufferSize - 1) % DeletionBufferSize;
-                    }
-                    deletion_buffer[insert_start] = value;
+                    deletion_buffer.insert_at(pos, value);
                     return;
                 }
             }
-            if (insertion_buffer_full()) {
-                flush_insert_buffer();
-                heap.insert(value);
-            } else {
-                insertion_buffer[insertion_buffer_end++] = value;
+            if (insertion_buffer.size() == InsertionBufferSize) {
+                flush_insertion_buffer(comp);
             }
+            insertion_buffer.push_back(value);
         }
     };
 
@@ -195,12 +195,12 @@ class ins_del_buffer_mq {
     }
 
    public:
-    explicit ins_del_buffer_mq(unsigned int const num_threads)
+    explicit merge_mq(unsigned int const num_threads)
         : heap_list_(num_threads * C), num_queues_{static_cast<unsigned int>(heap_list_.size())}, comp_{} {
         assert(num_threads >= 1);
     }
 
-    explicit ins_del_buffer_mq(unsigned int const num_threads, allocator_type const &alloc)
+    explicit merge_mq(unsigned int const num_threads, allocator_type const &alloc)
         : heap_list_(num_threads * C, alloc), num_queues_{static_cast<unsigned int>(heap_list_.size())}, comp_{} {
         assert(num_threads >= 1);
     }
@@ -210,18 +210,9 @@ class ins_del_buffer_mq {
         do {
             index = random_queue_index();
         } while (!heap_list_[index].try_lock());
-        heap_list_[index].push(value, comp_);
+        heap_list_[index].push(value, value_comparator{comp_});
         heap_list_[index].unlock();
     }
-
-    /* void push(value_type &&value) { */
-    /*     size_t index; */
-    /*     do { */
-    /*         index = random_queue_index(); */
-    /*     } while (!heap_list_[index].try_lock()); */
-    /*     heap_list_[index].push(std::move(value)); */
-    /*     heap_list_[index].unlock(); */
-    /* } */
 
     bool extract_top(value_type &retval) {
         size_t first_index;
@@ -229,10 +220,10 @@ class ins_del_buffer_mq {
         do {
             first_index = random_queue_index();
         } while (!heap_list_[first_index].try_lock());
-        if (heap_list_[first_index].deletion_buffer_empty()) {
-            heap_list_[first_index].refill_deletion_buffer();
+        if (heap_list_[first_index].deletion_buffer.empty()) {
+            heap_list_[first_index].refill_deletion_buffer(value_comparator{comp_});
         }
-        if (heap_list_[first_index].deletion_buffer_empty()) {
+        if (heap_list_[first_index].deletion_buffer.empty()) {
             heap_list_[first_index].unlock();
             first_empty = true;
         }
@@ -241,35 +232,32 @@ class ins_del_buffer_mq {
         do {
             second_index = random_queue_index();
         } while (!heap_list_[second_index].try_lock());
-        if (heap_list_[second_index].deletion_buffer_empty()) {
-            heap_list_[second_index].refill_deletion_buffer();
+        if (heap_list_[second_index].deletion_buffer.empty()) {
+            heap_list_[second_index].refill_deletion_buffer(value_comparator{comp_});
         }
-        if (heap_list_[second_index].deletion_buffer_empty()) {
+        if (heap_list_[second_index].deletion_buffer.empty()) {
             heap_list_[second_index].unlock();
             if (first_empty) {
                 return false;
             }
-            retval = std::move(heap_list_[first_index].deletion_buffer[heap_list_[first_index].deletion_buffer_start]);
-            heap_list_[first_index].deletion_buffer_start =
-                (heap_list_[first_index].deletion_buffer_start + 1) % DeletionBufferSize;
+            retval = std::move(heap_list_[first_index].deletion_buffer.front());
+            heap_list_[first_index].deletion_buffer.pop_front();
             heap_list_[first_index].unlock();
             return true;
         }
         if (first_empty ||
-            comp_(heap_list_[second_index].deletion_buffer[heap_list_[second_index].deletion_buffer_start].first,
-                  heap_list_[first_index].deletion_buffer[heap_list_[first_index].deletion_buffer_start].first)) {
-            heap_list_[first_index].unlock();
-            retval =
-                std::move(heap_list_[second_index].deletion_buffer[heap_list_[second_index].deletion_buffer_start]);
-            heap_list_[second_index].deletion_buffer_start =
-                (heap_list_[second_index].deletion_buffer_start + 1) % DeletionBufferSize;
+            comp_(heap_list_[second_index].deletion_buffer.front().first,
+                  heap_list_[first_index].deletion_buffer.front().first)) {
+            if (!first_empty) {
+                heap_list_[first_index].unlock();
+            }
+            retval = std::move(heap_list_[second_index].deletion_buffer.front());
+            heap_list_[second_index].deletion_buffer.pop_front();
             heap_list_[second_index].unlock();
         } else {
             heap_list_[second_index].unlock();
-            retval =
-                std::move(heap_list_[first_index].deletion_buffer[heap_list_[first_index].deletion_buffer_start]);
-            heap_list_[first_index].deletion_buffer_start =
-                (heap_list_[first_index].deletion_buffer_start + 1) % DeletionBufferSize;
+            retval = std::move(heap_list_[first_index].deletion_buffer.front());
+            heap_list_[first_index].deletion_buffer.pop_front();
             heap_list_[first_index].unlock();
         }
         return true;
@@ -279,4 +267,4 @@ class ins_del_buffer_mq {
 }  // namespace rsm
 }  // namespace multiqueue
 
-#endif  //!MERGE_MQ_HPP_INCLUDED
+#endif  //! MERGE_MQ_HPP_INCLUDED
