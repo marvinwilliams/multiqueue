@@ -171,6 +171,13 @@ class heap {
         return data_.to_comparator();
     }
 
+    inline void init_touch(std::size_t size) {
+      assert(data_.container.empty());
+      data_.container.resize(size);
+      // clear does not free allocated memory
+      data_.container.clear();
+    }
+
     inline iterator begin() const noexcept {
         return data_.container.cbegin();
     }

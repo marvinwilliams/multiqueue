@@ -139,7 +139,7 @@ struct Task {
 
         unsigned int stage = 0u;
 
-#ifdef PQ_LQMQ
+#if defined PQ_LQMQ || defined PQ_NAMQ
         auto handle = pq.get_handle(context.get_id());
 #endif
 
@@ -180,7 +180,7 @@ struct Task {
                 pq.push({key, value});
                 insertions.push_back(insertion_log{now.time_since_epoch().count(), key});
             } else {
-#ifdef PQ_LQMQ
+#if defined PQ_LQMQ || defined PQ_NAMQ
                 bool success = pq.extract_top(retval, handle);
 #else
                 bool success = pq.extract_top(retval);

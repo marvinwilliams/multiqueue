@@ -9,6 +9,9 @@
 #include <new>
 #include <thread>
 #include <type_traits>
+#ifdef PQ_NAMQ
+#include <numa.h>
+#endif
 
 #include "cxxopts.hpp"
 #include "inserter.hpp"
@@ -115,8 +118,11 @@ struct Task {
 
         unsigned int stage = 0u;
 
-#ifdef PQ_LQMQ
+#if defined PQ_LQMQ || defined PQ_NAMQ
         auto handle = pq.get_handle(context.get_id());
+#ifdef PQ_NAMQ
+        pq.init_touch(handle, 1'000'000);
+#endif
 #endif
 
         if (settings.prefill_size > 0u) {
@@ -146,7 +152,7 @@ struct Task {
                 pq.push({key, key});
                 ++insertions;
             } else {
-#ifdef PQ_LQMQ
+#if defined PQ_LQMQ || defined PQ_NAMQ
                 if (pq.extract_top(retval, handle)) {
 #else
                 if (pq.extract_top(retval)) {
@@ -170,7 +176,6 @@ struct Task {
         threading::thread_config config;
         config.cpu_set.reset();
         config.cpu_set.set(i);
-        config.policy = threading::scheduling::Fifo{1};
         return config;
     }
 };
@@ -245,7 +250,14 @@ int main(int argc, char* argv[]) {
     }
 
     using Queue = util::QueueSelector<key_type, value_type>::pq_t;
+#if defined PQ_NAMQ
+    // The array with the buffers and heaps is allocated in interleaved fashion
+    numa_set_interleave_mask(numa_all_nodes_ptr);
+#endif
     Queue pq{settings.num_threads};
+#ifdef PQ_NAMQ
+    numa_set_interleave_mask(numa_no_nodes_ptr);
+#endif
 
     start_flag.store(false, std::memory_order_relaxed);
     stop_flag.store(false, std::memory_order_relaxed);

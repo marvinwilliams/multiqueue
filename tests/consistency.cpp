@@ -77,7 +77,7 @@ struct Task {
 
         unsigned int stage = 0u;
 
-#ifdef PQ_LQMQ
+#if defined PQ_LQMQ || defined PQ_NAMQ
         auto handle = pq.get_handle(context.get_id());
 #endif
 
@@ -113,7 +113,7 @@ struct Task {
                 __asm__ __volatile__("" ::: "memory");
                 pq.push({key, value});
                 insertions.push_back(log_entry{now.time_since_epoch().count(), key, value});
-#ifdef PQ_LQMQ
+#if defined PQ_LQMQ || defined PQ_NAMQ
             } else if (std::pair<key_type, value_type> retval; pq.extract_top(retval, handle)) {
 #else
             } else if (std::pair<key_type, value_type> retval; pq.extract_top(retval)) {

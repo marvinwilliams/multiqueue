@@ -41,6 +41,8 @@
 #include "multiqueue/local_queue_mq.hpp"
 #elif defined PQ_MMQ
 #include "multiqueue/merge_mq.hpp"
+#elif defined PQ_NAMQ
+#include "multiqueue/numa_aware_mq.hpp"
 #else
 #error No supported priority queue defined!
 #endif
@@ -80,7 +82,7 @@ struct MConfig : multiqueue::rsm::MergeConfiguration<ValueType> {
 #endif
 
 template <typename KeyType, typename ValueType>
-struct QueueSelector {
+struct BaseQueueSelector {
 #if defined PQ_KLSM
     using pq_t = multiqueue::wrapper::klsm<kpq::k_lsm<KeyType, ValueType, 256>>;
 #elif defined PQ_DLSM
@@ -99,11 +101,16 @@ struct QueueSelector {
     using pq_t = multiqueue::rsm::local_queue_mq<KeyType, ValueType, std::less<KeyType>>;
 #elif defined PQ_MMQ
     using pq_t = multiqueue::rsm::merge_mq<KeyType, ValueType, std::less<KeyType>, MConfig>;
+#elif defined PQ_NAMQ
+    using pq_t = multiqueue::rsm::numa_aware_mq<KeyType, ValueType, std::less<KeyType>>;
 #endif
 };
 
+template <typename KeyType, typename ValueType>
+struct QueueSelector : BaseQueueSelector<KeyType, ValueType> {};
+
 template <>
-struct QueueSelector<std::uint32_t, std::uint32_t> {
+struct QueueSelector<std::uint32_t, std::uint32_t> : BaseQueueSelector<std::uint32_t, std::uint32_t> {
 #if defined PQ_CAPQ || defined PQ_CAPQ1
     using pq_t = multiqueue::wrapper::capq<true, true, true>;
 #elif defined PQ_CAPQ2
@@ -116,24 +123,6 @@ struct QueueSelector<std::uint32_t, std::uint32_t> {
     using pq_t = multiqueue::wrapper::linden;
 #elif defined PQ_SPRAYLIST
     using pq_t = multiqueue::wrapper::spraylist;
-#elif defined PQ_KLSM
-    using pq_t = multiqueue::wrapper::klsm<kpq::k_lsm<std::uint32_t, std::uint32_t, 256>>;
-#elif defined PQ_DLSM
-    using pq_t = multiqueue::wrapper::klsm<kpq::dist_lsm<std::uint32_t, std::uint32_t, 256>>;
-#elif defined PQ_NBMQ
-    using pq_t = multiqueue::rsm::no_buffer_mq<std::uint32_t, std::uint32_t>;
-#elif defined PQ_TBMQ
-    using pq_t = multiqueue::rsm::top_buffer_mq<std::uint32_t, std::uint32_t>;
-#elif defined PQ_DBMQ
-    using pq_t = multiqueue::rsm::deletion_buffer_mq<std::uint32_t, std::uint32_t>;
-#elif defined PQ_SMDMQ
-    using pq_t = multiqueue::rsm::sm_deletion_buffer_mq<std::uint32_t, std::uint32_t>;
-#elif defined PQ_IDMQ
-    using pq_t = multiqueue::rsm::ins_del_buffer_mq<std::uint32_t, std::uint32_t, std::less<std::uint32_t>, IDBConfig>;
-#elif defined PQ_LQMQ
-    using pq_t = multiqueue::rsm::local_queue_mq<std::uint32_t, std::uint32_t, std::less<std::uint32_t>>;
-#elif defined PQ_MMQ
-    using pq_t = multiqueue::rsm::merge_mq<std::uint32_t, std::uint32_t, std::less<std::uint32_t>>;
 #endif
 };
 
