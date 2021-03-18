@@ -17,7 +17,6 @@
 #include "multiqueue/sequential/heap/heap.hpp"
 #include "multiqueue/util/buffer.hpp"
 #include "multiqueue/util/extractors.hpp"
-#include "multiqueue/util/range_iterator.hpp"
 #include "multiqueue/util/ring_buffer.hpp"
 
 #include <array>

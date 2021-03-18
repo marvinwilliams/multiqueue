@@ -4,7 +4,7 @@ set -euo pipefail
 
 scenario_dir=${1}
 
-buffer_sizes=(2 8 16 64)
+buffer_sizes=(2 8 16 64 128 1024)
 
 for ins in "${buffer_sizes[@]}"; do
 	for del in "${buffer_sizes[@]}"; do

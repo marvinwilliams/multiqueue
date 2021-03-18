@@ -19,7 +19,6 @@
 #include "multiqueue/util/extractors.hpp"
 #include "multiqueue/util/ring_buffer.hpp"
 
-#include <queue>
 #include <array>
 #include <atomic>
 #include <cassert>
