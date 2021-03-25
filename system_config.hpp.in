@@ -1,9 +1,10 @@
 #include <cstddef>
-#cmakedefine M_L1_CACHE_LINESIZE @multiqueue_L1_CACHE_LINESIZE @
-
-#if (M_L1_CACHE_LINESIZE > 0)
-static constexpr std::size_t L1_CACHE_LINESIZE = M_L1_CACHE_LINESIZE;
-#else
-static constexpr std::size_t L1_CACHE_LINESIZE = 64;
+#cmakedefine L1_CACHE_LINESIZE @L1_CACHE_LINESIZE@
+#ifndef L1_CACHE_LINESIZE
+#define L1_CACHE_LINESIZE 64
 #endif
-static_assert(L1_CACHE_LINESIZE >= alignof(std::max_align_t), "L1 cache linesize must be greater than alignof(std::max_align_t)");
+
+#cmakedefine PAGESIZE @PAGESIZE@
+#ifndef PAGESIZE
+#define PAGESIZE 4096
+#endif

@@ -1,14 +1,20 @@
-/******************************************************************************
- * File:             default_iterator.hpp
- *
- * Author:           Marvin Williams
- * Created:          12/07/20
- * Description:      This header defines a default iterator that does not change
- *                   any semantics of the supported operations and typedefs.
- *                   This iterator can be used to wrap pointer types.
- *****************************************************************************/
+/**
+******************************************************************************
+* @file:   default_iterator.hpp
+*
+* @author: Marvin Williams
+* @date:   2021/03/25 16:47
+* @brief:
+*******************************************************************************
+**/
+#pragma once
+#ifndef UTIL_DEFAULT_ITERATOR_HPP_INCLUDED
+#define UTIL_DEFAULT_ITERATOR_HPP_INCLUDED
 
 #include <iterator>
+
+namespace multiqueue {
+namespace util {
 
 // The tag is solely used to instantiate different Iterators with the same
 // `Iter` type.
@@ -79,3 +85,8 @@ class default_iterator {
         return current_[n];
     }
 };
+
+}  // namespace util
+}  // namespace multiqueue
+
+#endif  //! UTIL_DEFAULT_ITERATOR_HPP_INCLUDED

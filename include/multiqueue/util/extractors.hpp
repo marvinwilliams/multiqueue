@@ -1,5 +1,15 @@
-#ifndef EXTRACTORS_HPP_NYJSHAJH
-#define EXTRACTORS_HPP_NYJSHAJH
+/**
+******************************************************************************
+* @file:   extractors.hpp
+*
+* @author: Marvin Williams
+* @date:   2021/03/25 16:48
+* @brief:
+*******************************************************************************
+**/
+#pragma once
+#ifndef UTIL_EXTRACTORS_HPP_INCLUDED
+#define UTIL_EXTRACTORS_HPP_INCLUDED
 
 #include <utility>
 
@@ -29,4 +39,4 @@ struct get_nth {
 }  // namespace util
 }  // namespace multiqueue
 
-#endif  // !EXTRACTORS_HPP_NYJSHAJH
+#endif  //! UTIL_EXTRACTORS_HPP_INCLUDED

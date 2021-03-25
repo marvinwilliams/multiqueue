@@ -37,6 +37,10 @@ TEMPLATE_TEST_CASE_SIG("pq heap representation can have different degrees",
     for (int n = 999; n >= 0; --n) {
       pq.push(n);
     }
+}
+
+TEST_CASE("pq use std::greater as comparator", "[pq][correctness][comparator]") {
+    using pq_t = multiqueue::sequential::pq<int, std::greater<int>>;
 
     for (int i = 0; i < 1000; ++i) {
       REQUIRE(pq.top() == i);

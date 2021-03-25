@@ -1,5 +1,15 @@
-#ifndef RANGE_ITERATOR_GSPFYYID
-#define RANGE_ITERATOR_GSPFYYID
+/**
+******************************************************************************
+* @file:   range_iterator.hpp
+*
+* @author: Marvin Williams
+* @date:   2021/03/25 16:50
+* @brief:
+*******************************************************************************
+**/
+#pragma once
+#ifndef UTIL_RANGE_ITERATOR_HPP_INCLUDED
+#define UTIL_RANGE_ITERATOR_HPP_INCLUDED
 
 #include <iterator>
 #include <limits>
@@ -175,4 +185,4 @@ class predicate_iterator {
 }  // namespace util
 }  // namespace multiqueue
 
-#endif  // !RANGE_ITERATOR_GSPFYYID
+#endif  //! UTIL_RANGE_ITERATOR_HPP_INCLUDED

@@ -8,10 +8,13 @@
 *******************************************************************************
 **/
 #pragma once
-#include <algorithm>
 #ifndef MERGE_HEAP_HPP_INCLUDED
 #define MERGE_HEAP_HPP_INCLUDED
 
+#include "multiqueue/util/extractors.hpp"
+#include "multiqueue/util/inplace_merge.hpp"
+
+#include <algorithm>
 #include <cassert>
 #include <iterator>
 #include <memory>       // allocator
@@ -19,10 +22,8 @@
 #include <utility>      // move, forward
 #include <vector>
 
-#include "multiqueue/util/inplace_merge.hpp"
-
 namespace multiqueue {
-namespace local_nonaddressable {
+namespace sequential {
 
 template <typename T, typename Key, typename KeyExtractor, typename Comparator, std::size_t NodeSize,
           typename Allocator = std::allocator<T>>
@@ -34,10 +35,10 @@ class merge_heap {
     using key_comparator = Comparator;
     using allocator_type = Allocator;
 
-    using Node = std::array<value_type, NodeSize>;
+    using node_type = std::array<value_type, NodeSize>;
 
    public:
-    using container_type = std::vector<Node>;
+    using container_type = std::vector<node_type>;
     using reference = value_type &;
     using const_reference = value_type const &;
     using iterator = typename container_type::const_iterator;
@@ -92,12 +93,12 @@ class merge_heap {
 
    private:
     static constexpr size_type parent_index(size_type const index) noexcept {
-        assert(index > 0u);
-        return (index - 1u) >> 1u;
+        assert(index > 0);
+        return (index - 1) >> 1;
     }
 
     static constexpr size_type first_child_index(size_type const index) noexcept {
-        return (index << 1u) + 1u;
+        return (index << 1) + 1;
     }
 
     constexpr key_type const &extract_key(value_type const &value) const noexcept {
@@ -140,7 +141,7 @@ class merge_heap {
         if (!std::is_sorted(data_.container.front().begin(), data_.container.front().end(), value_comparator)) {
             return false;
         }
-        for (size_type i = 0u; i < data_.container.size(); ++i) {
+        for (size_type i = 0; i < data_.container.size(); ++i) {
             for (auto j = first_child_index(i); j < first_child_index(i) + 2u; ++j) {
                 if (j >= data_.container.size()) {
                     return true;
@@ -176,6 +177,13 @@ class merge_heap {
         return data_.to_comparator();
     }
 
+    inline void init_touch(std::size_t size) {
+        assert(data_.container.empty());
+        data_.container.resize(size / NodeSize);
+        // clear does not free allocated memory
+        data_.container.clear();
+    }
+
     [[nodiscard]] inline bool empty() const noexcept {
         return data_.container.empty();
     }
@@ -189,7 +197,12 @@ class merge_heap {
         return data_.container.front().front();
     }
 
-    inline Node const &top_node() const {
+    inline node_type const &top_node() const {
+        assert(!empty());
+        return data_.container.front();
+    }
+
+    inline node_type &top_node() {
         assert(!empty());
         return data_.container.front();
     }
@@ -201,11 +214,11 @@ class merge_heap {
     void pop_node() {
         assert(!empty());
         auto value_comparator = [this](const_reference lhs, const_reference rhs) { return value_compare(lhs, rhs); };
-        std::size_t index = 0u;
+        std::size_t index = 0;
         std::size_t const first_incomplete_parent = parent_index(data_.container.size());
         while (index < first_incomplete_parent) {
             auto min_child = first_child_index(index);
-            auto max_child = min_child + 1u;
+            auto max_child = min_child + 1;
             assert(max_child < data_.container.size());
             if (compare_last(max_child, min_child)) {
                 std::swap(min_child, max_child);
@@ -215,13 +228,13 @@ class merge_heap {
             index = min_child;
         }
         // If we have a child, we cannot have two, so we can just move the node into the hole.
-        if (first_child_index(index) + 1u == data_.container.size()) {
+        if (first_child_index(index) + 1 == data_.container.size()) {
             data_.container[index] = std::move(data_.container.back());
-        } else if (index + 1u < data_.container.size()) {
+        } else if (index + 1 < data_.container.size()) {
             auto reverse_value_comparator = [this](const_reference lhs, const_reference rhs) {
                 return value_compare(rhs, lhs);
             };
-            while (index > 0u) {
+            while (index > 0) {
                 auto const parent = parent_index(index);
                 assert(parent < index);
                 if (!value_compare(data_.container.back().front(), data_.container[parent].back())) {
@@ -251,7 +264,7 @@ class merge_heap {
         };
         std::size_t index = data_.container.size();
         data_.container.push_back({});
-        while (index > 0u) {
+        while (index > 0) {
             auto const parent = parent_index(index);
             assert(parent < index);
             if (!value_compare(*first, data_.container[parent].back())) {
@@ -270,7 +283,16 @@ class merge_heap {
     }
 };
 
-}  // namespace local_nonaddressable
+template <typename T, typename Comparator = std::less<T>, std::size_t NodeSize = 64,
+          typename Allocator = std::allocator<T>>
+using value_merge_heap = merge_heap<T, T, util::identity<T>, Comparator, NodeSize, Allocator>;
+
+template <typename Key, typename T, typename Comparator = std::less<Key>, std::size_t NodeSize = 64,
+          typename Allocator = std::allocator<std::pair<Key, T>>>
+using key_value_merge_heap =
+    merge_heap<std::pair<Key, T>, Key, util::get_nth<std::pair<Key, T>, 0>, Comparator, NodeSize, Allocator>;
+
+}  // namespace sequential
 }  // namespace multiqueue
 
 #endif  //! MERGE_HEAP_HPP_INCLUDED

@@ -56,8 +56,8 @@ TEST_CASE("std::priority_queue", "[benchmark][std]") {
 }
 
 TEMPLATE_TEST_CASE_SIG("Degree", "[benchmark][heap][degree]", ((unsigned int Degree), Degree), 2, 4, 8, 16) {
-    using heap_t = multiqueue::local_nonaddressable::heap<int, int, multiqueue::util::identity<int>, std::less<int>,
-                                                          Degree, multiqueue::local_nonaddressable::full_up_strategy>;
+    using heap_t = multiqueue::sequential::heap<int, int, multiqueue::util::identity<int>, std::less<int>,
+                                                          Degree, multiqueue::sequential::full_up_strategy, std::allocator<int>>;
 
     auto heap = heap_t{};
 
@@ -99,8 +99,8 @@ TEMPLATE_TEST_CASE_SIG("Degree", "[benchmark][heap][degree]", ((unsigned int Deg
 }
 
 TEST_CASE("Full Up Strategy", "[benchmark][heap][strategy]") {
-    using heap_t = multiqueue::local_nonaddressable::heap<int, int, multiqueue::util::identity<int>, std::less<int>, 4,
-                                                          multiqueue::local_nonaddressable::full_down_strategy>;
+    using heap_t = multiqueue::sequential::heap<int, int, multiqueue::util::identity<int>, std::less<int>, 4,
+                                                          multiqueue::sequential::full_down_strategy, std::allocator<int>>;
 
     auto heap = heap_t{};
 

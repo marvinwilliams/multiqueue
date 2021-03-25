@@ -1,13 +1,15 @@
-/******************************************************************************
- * File:             conditional_value.hpp
- *
- * Author:           Marvin Williams
- * Created:          12/16/20
- * Description:      A conditional value can be used as base class to enable EBO
- *****************************************************************************/
-
-#ifndef CONDITIONAL_VALUE_HPP_E7OA3QWH
-#define CONDITIONAL_VALUE_HPP_E7OA3QWH
+/**
+******************************************************************************
+* @file:   conditional_value.hpp
+*
+* @author: Marvin Williams
+* @date:   2021/03/25 16:46
+* @brief:
+*******************************************************************************
+**/
+#pragma once
+#ifndef UTIL_CONDITION_VALUE_HPP_INCLUDED
+#define UTIL_CONDITION_VALUE_HPP_INCLUDED
 
 #include <utility>
 
@@ -78,4 +80,4 @@ inline void swap(conditional_value<hold_value, T> &lhs,
 }  // namespace util
 }  // namespace multiqueue
 
-#endif /* end of include guard: CONDITIONAL_VALUE_HPP_E7OA3QWH */
+#endif  //! UTIL_CONDITION_VALUE_HPP_INCLUDED

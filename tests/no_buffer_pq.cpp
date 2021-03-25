@@ -15,7 +15,7 @@ namespace multiqueue {
 namespace rsm {}  // namespace rsm
 }  // namespace multiqueue
 
-using multiqueue_t = multiqueue::rsm::no_buffer_mq<int, int>;
+using multiqueue_t = multiqueue::no_buffer_mq<int, int>;
 
 static constexpr size_t elements_per_thread = 1000u;
 

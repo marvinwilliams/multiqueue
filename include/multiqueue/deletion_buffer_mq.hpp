@@ -11,10 +11,11 @@
 #ifndef DELETION_BUFFER_MQ_HPP_INCLUDED
 #define DELETION_BUFFER_MQ_HPP_INCLUDED
 
-#include "multiqueue/sequential/heap/full_down_strategy.hpp"
+#include "multiqueue/default_configuration.hpp"
 #include "multiqueue/sequential/heap/heap.hpp"
 #include "multiqueue/util/extractors.hpp"
-#include "multiqueue/util/range_iterator.hpp"
+#include "multiqueue/util/ring_buffer.hpp"
+#include "system_config.hpp"
 
 #include <array>
 #include <atomic>
@@ -26,32 +27,9 @@
 #include <vector>
 
 namespace multiqueue {
-namespace rsm {
 
-// TODO: CMake defined
-static constexpr unsigned int CACHE_LINESIZE = 64;
-
-template <typename ValueType>
-struct DeletionBufferConfiguration {
-    using key_type = typename ValueType::first_type;
-    using mapped_type = typename ValueType::second_type;
-    // With `p` threads, use `C*p` queues
-    static constexpr unsigned int C = 4;
-    // The underlying sequential priority queue to use
-    static constexpr unsigned int HeapDegree = 4;
-    // Buffer size
-    static constexpr size_t BufferSize = 16;
-    // The sentinel
-    static constexpr key_type Sentinel = std::numeric_limits<key_type>::max();
-    // The sifting strategy to use
-    using SiftStrategy = local_nonaddressable::full_down_strategy;
-    // The allocator to use in the underlying sequential priority queue
-    using HeapAllocator = std::allocator<ValueType>;
-};
-
-template <typename Key, typename T, typename Comparator = std::less<Key>,
-          template <typename> typename Configuration = DeletionBufferConfiguration,
-          typename Allocator = std::allocator<Key>>
+template <typename Key, typename T, typename Comparator = std::less<Key>, typename Configuration = DefaultConfiguration,
+          typename HeapConfiguration = sequential::DefaultHeapConfiguration, typename Allocator = std::allocator<Key>>
 class deletion_buffer_mq {
    public:
     using key_type = Key;
@@ -60,40 +38,41 @@ class deletion_buffer_mq {
     using key_comparator = Comparator;
 
    private:
-    using config_type = Configuration<value_type>;
-    static constexpr unsigned int C = config_type::C;
-    static constexpr key_type Sentinel = config_type::Sentinel;
-    static constexpr size_t BufferSize = config_type::BufferSize;
+    static constexpr unsigned int C = Configuration::C;
+    static constexpr std::size_t DeletionBufferSize = Configuration::DeletionBufferSize;
 
-    using heap_type = local_nonaddressable::heap<value_type, key_type, util::get_nth<value_type>, key_comparator,
-                                                 config_type::HeapDegree, typename config_type::SiftStrategy,
-                                                 typename config_type::HeapAllocator>;
+    using heap_type = sequential::key_value_heap<key_type, mapped_type, key_comparator, HeapConfiguration,
+                                                 typename Configuration::template HeapAllocator<value_type>>;
 
-    struct alignas(CACHE_LINESIZE) guarded_heap {
+    struct alignas(L1_CACHE_LINESIZE) guarded_heap {
         using allocator_type = typename heap_type::allocator_type;
-        mutable std::atomic_bool in_use = false;
+        std::atomic_bool in_use = false;
         heap_type heap;
-        std::array<value_type, BufferSize> buffer{};
-        std::uint32_t buffer_pos : 16;
-        std::uint32_t buffer_end : 16;
+        util::ring_buffer<value_type, DeletionBufferSize> deletion_buffer;
+
+        inline bool try_lock() noexcept {
+            bool expect_in_use = false;
+            return in_use.compare_exchange_strong(expect_in_use, true, std::memory_order_acquire,
+                                                                    std::memory_order_relaxed);
+        }
+
+        inline void unlock() noexcept {
+            in_use.store(false, std::memory_order_release);
+        }
 
         explicit guarded_heap() = default;
         explicit guarded_heap(allocator_type const &alloc) : heap{alloc} {
         }
 
-        inline bool buffer_empty() const noexcept {
-            return buffer_pos == buffer_end;
-        };
-
         inline void refill_buffer() {
-          std::uint32_t count = 0;
-            while (count < BufferSize && !heap.empty()) {
-                buffer[count] = heap.top();
+            assert(deletion_buffer.empty());
+            for (std::size_t i = 0u; i < DeletionBufferSize; ++i) {
+                if (heap.empty()) {
+                    break;
+                }
+                deletion_buffer.push_back(heap.top());
                 heap.pop();
-                ++count;
             }
-            buffer_pos = 0;
-            buffer_end = count & ((1 << 16) - 1u);
         }
     };
 
@@ -106,25 +85,10 @@ class deletion_buffer_mq {
     key_comparator comp_;
 
    private:
-    inline std::mt19937 &get_rng() const {
-        static thread_local std::mt19937 gen;
-        return gen;
-    }
-
     inline size_t random_queue_index() const {
+        static thread_local std::mt19937 gen;
         std::uniform_int_distribution<std::size_t> dist{0, num_queues_ - 1};
-        return dist(get_rng());
-    }
-
-    inline bool try_lock(std::size_t const index) const noexcept {
-        // TODO: MEASURE
-        bool expect_in_use = false;
-        return heap_list_[index].in_use.compare_exchange_strong(expect_in_use, true, std::memory_order_acquire,
-                                                                std::memory_order_relaxed);
-    }
-
-    inline void unlock(std::size_t const index) const noexcept {
-        heap_list_[index].in_use.store(false, std::memory_order_release);
+        return dist(gen);
     }
 
    public:
@@ -142,77 +106,70 @@ class deletion_buffer_mq {
         size_t index;
         do {
             index = random_queue_index();
-        } while (!try_lock(index));
+        } while (!heap_list_[index].try_lock());
         heap_list_[index].heap.insert(value);
-        unlock(index);
+        heap_list_[index].unlock();
     }
 
     void push(value_type &&value) {
         size_t index;
         do {
             index = random_queue_index();
-        } while (!try_lock(index));
+        } while (!heap_list_[index].try_lock());
         heap_list_[index].heap.insert(std::move(value));
-        unlock(index);
+        heap_list_[index].unlock();
     }
 
     bool extract_top(value_type &retval) {
         size_t first_index;
-        for (unsigned int count = 0; count < 2; ++count) {
-            do {
-                first_index = random_queue_index();
-            } while (!try_lock(first_index));
-            if (heap_list_[first_index].buffer_empty()) {
-                heap_list_[first_index].refill_buffer();
-            }
-            if (!heap_list_[first_index].buffer_empty()) {
-                if (count == 1) {
-                    retval = std::move(heap_list_[first_index].buffer[heap_list_[first_index].buffer_pos++]);
-                    if (heap_list_[first_index].buffer_pos == BufferSize || heap_list_[first_index].buffer_empty()) {
-                        heap_list_[first_index].refill_buffer();
-                    }
-                    unlock(first_index);
-                    return true;
-                }
-                // hold the lock for comparison
-                break;
-            } else {
-                unlock(first_index);
-            }
-            if (count == 1) {
-                return false;
-            }
+        bool first_empty = false;
+        do {
+            first_index = random_queue_index();
+        } while (!heap_list_[first_index].try_lock());
+        if (heap_list_[first_index].deletion_buffer.empty()) {
+            heap_list_[first_index].refill_buffer();
+        }
+        if (heap_list_[first_index].deletion_buffer.empty()) {
+            heap_list_[first_index].unlock();
+            first_empty = true;
         }
         // When we get here, we hold the lock for the first heap, which has a nonempty buffer
         size_t second_index;
         do {
             second_index = random_queue_index();
-        } while (!try_lock(second_index));
-        if (heap_list_[second_index].buffer_empty()) {
+        } while (!heap_list_[second_index].try_lock());
+        if (heap_list_[second_index].deletion_buffer.empty()) {
             heap_list_[second_index].refill_buffer();
         }
-        if (!heap_list_[second_index].buffer_empty() &&
-            comp_(heap_list_[second_index].buffer[heap_list_[second_index].buffer_pos].first,
-                  heap_list_[first_index].buffer[heap_list_[first_index].buffer_pos].first)) {
-            unlock(first_index);
-            retval = std::move(heap_list_[second_index].buffer[heap_list_[second_index].buffer_pos++]);
-            if (heap_list_[second_index].buffer_pos == BufferSize || heap_list_[second_index].buffer_empty()) {
-                heap_list_[second_index].refill_buffer();
+        if (heap_list_[second_index].deletion_buffer.empty()) {
+            heap_list_[second_index].unlock();
+            if (first_empty) {
+                return false;
             }
-            unlock(second_index);
+            retval = std::move(heap_list_[first_index].deletion_buffer.front());
+            heap_list_[first_index].deletion_buffer.pop_front();
+            heap_list_[first_index].unlock();
+            return true;
+        }
+        if (first_empty ||
+            comp_(heap_list_[second_index].deletion_buffer.front().first,
+                  heap_list_[first_index].deletion_buffer.front().first)) {
+            if (!first_empty) {
+                heap_list_[first_index].unlock();
+            }
+            retval = std::move(heap_list_[second_index].deletion_buffer.front());
+            heap_list_[second_index].deletion_buffer.pop_front();
+            heap_list_[second_index].unlock();
         } else {
-            unlock(second_index);
-            retval = std::move(heap_list_[first_index].buffer[heap_list_[first_index].buffer_pos++]);
-            if (heap_list_[first_index].buffer_pos == BufferSize || heap_list_[first_index].buffer_empty()) {
-                heap_list_[first_index].refill_buffer();
-            }
-            unlock(first_index);
+            heap_list_[second_index].unlock();
+            retval = std::move(heap_list_[first_index].deletion_buffer.front());
+            heap_list_[first_index].deletion_buffer.pop_front();
+            heap_list_[first_index].unlock();
         }
         return true;
     }
 };
 
-}  // namespace rsm
 }  // namespace multiqueue
 
 #endif  //! TOP_BUFFER_PQ_HPP_INCLUDED

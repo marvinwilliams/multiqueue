@@ -4,20 +4,19 @@
 *
 * @author: Marvin Williams
 * @date:   2021/03/18 21:08
-* @brief:  
+* @brief:
 *******************************************************************************
 **/
 #pragma once
 #ifndef NUMA_AWARE_MQ_HPP_INCLUDED
 #define NUMA_AWARE_MQ_HPP_INCLUDED
 
-#include <iostream>
-
-#include "multiqueue/sequential/heap/full_down_strategy.hpp"
+#include "multiqueue/default_configuration.hpp"
 #include "multiqueue/sequential/heap/heap.hpp"
 #include "multiqueue/util/buffer.hpp"
 #include "multiqueue/util/extractors.hpp"
 #include "multiqueue/util/ring_buffer.hpp"
+#include "system_config.hpp"
 
 #include <array>
 #include <atomic>
@@ -29,71 +28,36 @@
 #include <vector>
 
 namespace multiqueue {
-namespace rsm {
 
-// TODO: CMake defined
-static constexpr unsigned int CACHE_LINESIZE = 64;
-static constexpr unsigned int PAGE_SIZE = 4096;
-
-template <typename ValueType>
-struct NumaConfiguration {
-    using key_type = typename ValueType::first_type;
-    using mapped_type = typename ValueType::second_type;
-    // With `p` threads, use `C*p` queues
-    static constexpr unsigned int C = 4;
-    // The underlying sequential priority queue to use
-    static constexpr unsigned int HeapDegree = 4;
-    // Insertion buffer size
-    static constexpr size_t InsertionBufferSize = 16;
-    // Deletion buffer size
-    static constexpr size_t DeletionBufferSize = 16;
-    // The sifting strategy to use
-    using SiftStrategy = local_nonaddressable::full_down_strategy;
-    // The allocator to use in the underlying sequential priority queue
-    using HeapAllocator = std::allocator<ValueType>;
-};
-
-template <typename Key, typename T, typename Comparator = std::less<Key>,
-          template <typename> typename Configuration = NumaConfiguration,
-          typename Allocator = std::allocator<Key>>
+template <typename Key, typename T, typename Comparator = std::less<Key>, typename Configuration = DefaultConfiguration,
+          typename HeapConfiguration = sequential::DefaultHeapConfiguration, typename Allocator = std::allocator<Key>>
 class numa_aware_mq {
    public:
     using key_type = Key;
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
     using key_comparator = Comparator;
-    class value_comparator : private key_comparator {
-        friend numa_aware_mq;
-        explicit value_comparator(key_comparator const &comp) : key_comparator{comp} {
-        }
-
-       public:
-        constexpr bool operator()(value_type const &lhs, value_type const &rhs) const {
-            return key_comparator::operator()(util::get_nth<value_type>{}(lhs),
-                                              util::get_nth<value_type>{}(rhs));
-        }
-    };
 
     struct handle_type {
-      friend numa_aware_mq;
+        friend numa_aware_mq;
+
        private:
         unsigned int id_;
+
        private:
         explicit handle_type(unsigned int id) : id_{id} {
         }
     };
 
    private:
-    using config_type = Configuration<value_type>;
-    static constexpr unsigned int C = config_type::C;
-    static constexpr size_t InsertionBufferSize = config_type::InsertionBufferSize;
-    static constexpr size_t DeletionBufferSize = config_type::DeletionBufferSize;
+    static constexpr unsigned int C = Configuration::C;
+    static constexpr size_t InsertionBufferSize = Configuration::InsertionBufferSize;
+    static constexpr size_t DeletionBufferSize = Configuration::DeletionBufferSize;
 
-    using heap_type = local_nonaddressable::heap<value_type, key_type, util::get_nth<value_type>, key_comparator,
-                                                 config_type::HeapDegree, typename config_type::SiftStrategy,
-                                                 typename config_type::HeapAllocator>;
+    using heap_type = sequential::key_value_heap<key_type, mapped_type, key_comparator, HeapConfiguration,
+                                                 typename Configuration::template HeapAllocator<value_type>>;
 
-    struct alignas(PAGE_SIZE) guarded_heap {
+    struct alignas(PAGESIZE) guarded_heap {
         using allocator_type = typename heap_type::allocator_type;
         std::atomic_bool in_use = false;
         util::buffer<value_type, InsertionBufferSize> insertion_buffer;
@@ -140,17 +104,13 @@ class numa_aware_mq {
         // which might get flushed in the process.
         void push(value_type const &value, key_comparator const &comp) {
             if (!deletion_buffer.empty()) {
-                /* std::cerr << "Deletion buffer not empty\n"; */
                 std::size_t pos = deletion_buffer.size();
                 while (pos > 0 && comp(value.first, deletion_buffer[pos - 1u].first)) {
                     --pos;
                 }
                 if (pos < deletion_buffer.size()) {
-                    /* std::cerr << "Insert in del buffer\n"; */
                     if (deletion_buffer.size() == DeletionBufferSize) {
-                        /* std::cerr << "del buffer full\n"; */
                         if (insertion_buffer.size() == InsertionBufferSize) {
-                            /* std::cerr << "ins buffer full, flushing..\n"; */
                             flush_insertion_buffer();
                             heap.insert(std::move(deletion_buffer.back()));
                         } else {
@@ -163,11 +123,9 @@ class numa_aware_mq {
                 }
             }
             if (insertion_buffer.size() == InsertionBufferSize) {
-                /* std::cerr << "Insertion buffer full, flushing...\n"; */
                 flush_insertion_buffer();
                 heap.insert(value);
             } else {
-                /* std::cerr << "Insert into insertion buffer\n"; */
                 insertion_buffer.push_back(value);
             }
         }
@@ -209,7 +167,7 @@ class numa_aware_mq {
     }
 
     handle_type get_handle(unsigned int id) const noexcept {
-      return handle_type{id};
+        return handle_type{id};
     }
 
     void push(value_type const &value) {
@@ -288,14 +246,13 @@ class numa_aware_mq {
         return true;
     }
 
-    inline void init_touch(handle_type const& handle, std::size_t size) {
-      for (unsigned int i = 0; i < C; ++i) {
-        heap_list_[C * handle.id_ + i].heap.init_touch(size);
-      }
+    inline void init_touch(handle_type const &handle, std::size_t size) {
+        for (unsigned int i = 0; i < C; ++i) {
+            heap_list_[C * handle.id_ + i].heap.init_touch(size);
+        }
     }
 };
 
-}  // namespace rsm
 }  // namespace multiqueue
 
-#endif  //!NUMA_AWARE_MQ_HPP_INCLUDED
+#endif  //! NUMA_AWARE_MQ_HPP_INCLUDED

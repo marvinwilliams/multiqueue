@@ -18,7 +18,6 @@
 #include <vector>
 
 namespace multiqueue {
-namespace local_nonaddressable {
 
 template <typename T, typename Comparator = std::less<T>, typename Container = std::vector<T>>
 class NativeBinaryHeap {
@@ -165,7 +164,6 @@ inline void swap(NativeBinaryHeap<T, Comparator, Container>& lhs,
     lhs.swap(rhs);
 }
 
-}  // namespace local_nonaddressable
 }  // namespace multiqueue
 
 #endif /* end of include guard: NATIVE_BINARY_HEAP_HPP_UDBXUQC4 */

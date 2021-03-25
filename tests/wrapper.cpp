@@ -96,7 +96,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    using Queue = util::QueueSelector<key_type, value_type>::pq_t;
+    using Queue = util::QueueSelector<key_type, value_type>::queue_type;
     Queue pq(settings.num_threads);
     start_flag.store(false, std::memory_order_relaxed);
 

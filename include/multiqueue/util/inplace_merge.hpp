@@ -8,11 +8,11 @@
 *******************************************************************************
 **/
 #pragma once
-#include <iterator>
-#ifndef INPLACE_MERGE_HPP_INCLUDED
-#define INPLACE_MERGE_HPP_INCLUDED
+#ifndef UTIL_INPLACE_MERGE_HPP_INCLUDED
+#define UTIL_INPLACE_MERGE_HPP_INCLUDED
 
 #include <cstddef>
+#include <iterator>
 #include <utility>
 
 namespace multiqueue {
@@ -50,4 +50,4 @@ void inplace_merge(InputIt input, InOutIt in_out, OutputIt output, std::size_t n
 }  // namespace util
 }  // namespace multiqueue
 
-#endif  //! INPLACE_MERGE_HPP_INCLUDED
+#endif  //! UTIL_INPLACE_MERGE_HPP_INCLUDED

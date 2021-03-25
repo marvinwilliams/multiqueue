@@ -9,7 +9,7 @@
 #include <new>
 #include <thread>
 #include <type_traits>
-#ifdef PQ_NAMQ
+#if defined PQ_NAMQ || defined PQ_NAMMQ
 #include <numa.h>
 #endif
 
@@ -118,9 +118,9 @@ struct Task {
 
         unsigned int stage = 0u;
 
-#if defined PQ_LQMQ || defined PQ_NAMQ
+#if defined PQ_LQMQ || defined PQ_NAMQ || defined PQ_NAMMQ
         auto handle = pq.get_handle(context.get_id());
-#ifdef PQ_NAMQ
+#if defined PQ_NAMQ || defined PQ_NAMMQ
         pq.init_touch(handle, 1'000'000);
 #endif
 #endif
@@ -152,7 +152,7 @@ struct Task {
                 pq.push({key, key});
                 ++insertions;
             } else {
-#if defined PQ_LQMQ || defined PQ_NAMQ
+#if defined PQ_LQMQ || defined PQ_NAMQ || defined PQ_NAMMQ
                 if (pq.extract_top(retval, handle)) {
 #else
                 if (pq.extract_top(retval)) {
@@ -249,13 +249,15 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    using Queue = util::QueueSelector<key_type, value_type>::pq_t;
-#if defined PQ_NAMQ
+    using QueueSelector = util::QueueSelector<key_type, value_type>;
+    using Queue = QueueSelector::queue_type;
+    std::clog << "Using queue: " << util::queue_name() << " " << util::config_string() << '\n';
+#if defined PQ_NAMQ || defined PQ_NAMMQ
     // The array with the buffers and heaps is allocated in interleaved fashion
     numa_set_interleave_mask(numa_all_nodes_ptr);
 #endif
     Queue pq{settings.num_threads};
-#ifdef PQ_NAMQ
+#if defined PQ_NAMQ || defined PQ_NAMMQ
     numa_set_interleave_mask(numa_no_nodes_ptr);
 #endif
 

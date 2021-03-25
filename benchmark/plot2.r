@@ -18,20 +18,30 @@ read_throughput <- function(filename) {
 }
 
 read_histogramlist <- function(files, prefill, dist) {
+  if (length(files) == 0) {
+    data <- data.frame(matrix(ncol = 6, nrow = 0))
+    colnames(data) <- c("rank", "frequency", "name", "cummulated", "prefill", "dist")
+    return(data)
+  }
   hist_list <- list()
   i <- 1
   for (f in files) {
     data <- read_histogram(f, gsub(".txt", "", gsub(".*/", "", f)))
-    print(data)
     hist_list[[i]] <- data
     i <- i + 1
   }
   data <- do.call(rbind, hist_list)
   data$prefill <- prefill
   data$dist <- dist
+  return(data)
 }
 
 read_throughputlist <- function(files, prefill, dist) {
+  if (length(files) == 0) {
+    data <- data.frame(matrix(ncol = 6, nrow = 0))
+    colnames(data) <- c("threads", "mean", "sd", "name", "prefill", "dist")
+    return(data)
+  }
   throughput_list <- list()
   i <- 1
   for (f in files) {
@@ -46,20 +56,9 @@ read_throughputlist <- function(files, prefill, dist) {
   data <- do.call(rbind, throughput_list)
   data$prefill <- prefill
   data$dist <- dist
+  return(data)
 }
 
-read_scenario <- function(scenario) {
-  scenario_list <- list()
-  i <- 1
-  for (exp in list.dirs(path = paste(experiment_dir, scenario, sep = "/"), full.names = T, recursive = F)) {
-    config <- read.csv(file = paste(exp, "config", sep = "/"), header = T)
-    print(exp)
-    data <- read_histogramlist(list.files(path = exp, pattern = "txt$", full.names = T), config$prefill[1], config$dist[1])
-    scenario_list[[i]] <- data
-    i <- i + 1
-  }
-  do.call(rbind, scenario_list)
-}
 
 plot_rank_histogram <- function(data, outdir) {
   plot <- ggplot(data, aes(x = rank, y = cummulated, group = name, color = name)) +
@@ -81,9 +80,9 @@ plot_delay_histogram <- function(data, outdir) {
 
 plot_top_delay_bar <- function(data, outdir) {
   transformed <- data %>%
-    group_by(name) %>%
-    summarize(mean = weighted.mean(rank, frequency), max = max(rank))
-  transformed <- melt(transformed, id.vars = c("name", "prefill", "dist"), measure.vars = c("mean", "max"))
+    group_by(name, prefill, dist) %>%
+    summarize(mean = weighted.mean(rank, frequency), max = max(rank), .groups = "keep")
+  transformed <- melt(transformed, measure.vars = c("mean", "max"))
   plot <- ggplot(transformed, aes(x = as.factor(name), y = value, fill = name)) +
     labs(x = "Priority Queue", y = "Top Delay", title = "Top Delay") +
     geom_bar(stat = "identity") +
@@ -106,7 +105,8 @@ plot_throughput_by_thread <- function(data, outdir) {
 }
 
 plot_throughput_by_prefill <- function(data, outdir) {
-  plot <- ggplot(subset(data, threads = 8), aes(x = prefill, y = mean, group = name, color = name)) +
+  print(subset(data, threads == 8))
+  plot <- ggplot(subset(data, threads == 8), aes(x = prefill, y = mean, group = name, color = name)) +
     geom_line() +
     geom_point() +
     geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd),
@@ -132,16 +132,43 @@ plot_throughput_by_dist <- function(data, outdir) {
 
 
 plot_scenario <- function(data, dir) {
-  plot_rank_histogram(data, dir)
-  plot_delay_histogram(data, dir)
-  plot_top_delay_bar(data, dir)
-  plot_throughput_by_thread(data, dir)
+  plot_rank_histogram(data$rank, dir)
+  plot_delay_histogram(data$delay, dir)
+  plot_top_delay_bar(data$top_delay, dir)
+  plot_throughput_by_thread(data$throughput, dir)
+}
+
+read_scenario <- function(scenario) {
+  scenario_data <- list()
+  rank_list <- list()
+  delay_list <- list()
+  top_delay_list <- list()
+  throughput_list <- list()
+  i <- 1
+  for (exp in list.dirs(path = paste(experiment_dir, scenario, sep = "/"), full.names = T, recursive = F)) {
+    config <- read.csv(file = paste(exp, "config", sep = "/"), header = T, sep = " ")
+    rank_data <- read_histogramlist(list.files(path = paste(exp, "rank", sep = "/"), pattern = "txt$", full.names = T), config$prefill[1], config$dist[1])
+    rank_list[[i]] <- rank_data
+    delay_data <- read_histogramlist(list.files(path = paste(exp, "delay", sep = "/"), pattern = "txt$", full.names = T), config$prefill[1], config$dist[1])
+    delay_list[[i]] <- delay_data
+    top_delay_data <- read_histogramlist(list.files(path = paste(exp, "top_delay", sep = "/"), pattern = "txt$", full.names = T), config$prefill[1], config$dist[1])
+    top_delay_list[[i]] <- top_delay_data
+    throughput_data <- read_throughputlist(list.files(path = paste(exp, "throughput", sep = "/"), pattern = "txt$", full.names = T), config$prefill[1], config$dist[1])
+    throughput_list[[i]] <- throughput_data
+    i <- i + 1
+  }
+  rank_data <- do.call(rbind, rank_list)
+  delay_data <- do.call(rbind, delay_list)
+  top_delay_list <- do.call(rbind, top_delay_list)
+  throughput_data <- do.call(rbind, throughput_list)
+  print(throughput_data)
+  list("rank" = rank_data, "delay" = delay_data, "top_delay" = top_delay_data, "throughput" = throughput_data)
 }
 
 data <- read_scenario("prefill")
 plot_scenario(data, paste(experiment_dir, "prefill", sep = "/"))
-plot_throughput_by_prefill(data, paste(experiment_dir, "prefill", sep = "/"))
+plot_throughput_by_prefill(data$throughput, paste(experiment_dir, "prefill", sep = "/"))
 
 data <- read_scenario("distribution")
 plot_scenario(data, paste(experiment_dir, "distribution", sep = "/"))
-plot_throughput_by_dist(data, paste(experiment_dir, "distribution", sep = "/"))
+plot_throughput_by_dist(data$throughput, paste(experiment_dir, "distribution", sep = "/"))

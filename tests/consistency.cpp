@@ -77,7 +77,7 @@ struct Task {
 
         unsigned int stage = 0u;
 
-#if defined PQ_LQMQ || defined PQ_NAMQ
+#if defined PQ_LQMQ || defined PQ_NAMQ || defined PQ_NAMMQ
         auto handle = pq.get_handle(context.get_id());
 #endif
 
@@ -113,7 +113,7 @@ struct Task {
                 __asm__ __volatile__("" ::: "memory");
                 pq.push({key, value});
                 insertions.push_back(log_entry{now.time_since_epoch().count(), key, value});
-#if defined PQ_LQMQ || defined PQ_NAMQ
+#if defined PQ_LQMQ || defined PQ_NAMQ || defined PQ_NAMMQ
             } else if (std::pair<key_type, value_type> retval; pq.extract_top(retval, handle)) {
 #else
             } else if (std::pair<key_type, value_type> retval; pq.extract_top(retval)) {
@@ -174,7 +174,9 @@ int main(int argc, char* argv[]) {
         std::cerr << "Too many threads!" << std::endl;
         return 1;
     }
-    using Queue = util::QueueSelector<key_type, value_type>::pq_t;
+    using QueueSelector = util::QueueSelector<key_type, value_type>;
+    using Queue = QueueSelector::queue_type;
+    std::clog << "Using queue: " << util::queue_name() << " " << util::config_string() << '\n';
     Queue pq(settings.num_threads);
     start_flag.store(false, std::memory_order_relaxed);
 

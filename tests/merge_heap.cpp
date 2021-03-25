@@ -10,7 +10,7 @@
 #include "multiqueue/util/extractors.hpp"
 
 TEST_CASE("merge_heap simple", "[merge_heap]") {
-    multiqueue::local_nonaddressable::merge_heap<
+    multiqueue::sequential::merge_heap<
         std::uint32_t, std::uint32_t, multiqueue::util::identity<std::uint32_t>, std::less<std::uint32_t>, 8u>
         heap;
     std::array<std::uint32_t, 8> in = {1, 3, 5, 7, 8, 9, 10, 12};
@@ -23,7 +23,7 @@ TEST_CASE("merge_heap simple", "[merge_heap]") {
 }
 
 TEST_CASE("merge_heap push pop", "[merge_heap]") {
-    multiqueue::local_nonaddressable::merge_heap<
+    multiqueue::sequential::merge_heap<
         std::uint32_t, std::uint32_t, multiqueue::util::identity<std::uint32_t>, std::less<std::uint32_t>, 8u>
         heap;
 
@@ -108,7 +108,7 @@ TEST_CASE("merge_heap push pop", "[merge_heap]") {
 }
 
 TEST_CASE("merge_heap workloads", "[merge_heap]") {
-    multiqueue::local_nonaddressable::merge_heap<
+    multiqueue::sequential::merge_heap<
         std::uint32_t, std::uint32_t, multiqueue::util::identity<std::uint32_t>, std::less<std::uint32_t>, 8u>
         heap;
 

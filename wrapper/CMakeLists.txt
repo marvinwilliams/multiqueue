@@ -13,7 +13,7 @@ add_library(
 )
 target_link_libraries(capq_wrapper PUBLIC wrapper)
 target_compile_options(capq_wrapper PRIVATE -w -std=gnu++11)
-target_compile_definitions(capq_wrapper PRIVATE INTEL CACHE_LINE_SIZE=${CACHE_LINESIZE})
+target_compile_definitions(capq_wrapper PRIVATE INTEL CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
 target_include_directories(
   capq_wrapper PRIVATE
   ${EXTERNAL_DIR}/klsm/lib
@@ -31,7 +31,7 @@ add_library(
 )
 target_link_libraries(linden_wrapper PUBLIC wrapper)
 target_compile_options(linden_wrapper PRIVATE -w -std=gnu++11)
-target_compile_definitions(linden_wrapper PRIVATE INTEL CACHE_LINE_SIZE=${CACHE_LINESIZE})
+target_compile_definitions(linden_wrapper PRIVATE INTEL CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
 target_include_directories(
   linden_wrapper PRIVATE
   ${EXTERNAL_DIR}/klsm/lib
@@ -53,7 +53,7 @@ add_library(
 )
 target_link_libraries(spraylist_wrapper PUBLIC wrapper)
 target_compile_options(spraylist_wrapper PRIVATE -w -std=gnu++11)
-target_compile_definitions(spraylist_wrapper PRIVATE INTEL PRIVATE LOCKFREE PRIVATE CACHE_LINE_SIZE=${CACHE_LINESIZE})
+target_compile_definitions(spraylist_wrapper PRIVATE INTEL PRIVATE LOCKFREE PRIVATE CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
 target_include_directories(
   spraylist_wrapper PRIVATE
   ${EXTERNAL_DIR}/klsm/lib

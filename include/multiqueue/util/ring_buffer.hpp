@@ -8,8 +8,8 @@
 *******************************************************************************
 **/
 #pragma once
-#ifndef RING_BUFFER_HPP_INCLUDED
-#define RING_BUFFER_HPP_INCLUDED
+#ifndef UTIL_RING_BUFFER_HPP_INCLUDED
+#define UTIL_RING_BUFFER_HPP_INCLUDED
 
 #include <array>
 #include <cassert>
@@ -295,4 +295,4 @@ struct ring_buffer {
 }  // namespace util
 }  // namespace multiqueue
 
-#endif  //! RING_BUFFER_HPP_INCLUDED
+#endif  //! UTIL_RING_BUFFER_HPP_INCLUDED

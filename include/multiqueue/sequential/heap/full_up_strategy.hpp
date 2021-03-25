@@ -1,12 +1,24 @@
+/**
+******************************************************************************
+* @file:   full_up_strategy.hpp
+*
+* @author: Marvin Williams
+* @date:   2021/03/25 16:35
+* @brief:
+*******************************************************************************
+**/
 #pragma once
-#ifndef FULL_UP_STRATEGY_HPP_INCLUDED
-#define FULL_UP_STRATEGY_HPP_INCLUDED
+#ifndef SEQUENTIAL_HEAP_SIFT_STRATEGY_FULL_UP_HPP_INCLUDED
+#define SEQUENTIAL_HEAP_SIFT_STRATEGY_FULL_UP_HPP_INCLUDED
+
+#include <cassert>
 #include <utility>
 
 namespace multiqueue {
-namespace local_nonaddressable {
+namespace sequential {
+namespace sift_strategy {
 
-struct full_up_strategy {
+struct FullUp {
     // Sifts the hole at index `index` up until either the top of the heap is
     // reached or key `key` is not smaller than the parent of the returned
     // hole index.
@@ -64,7 +76,8 @@ struct full_up_strategy {
     }
 };
 
-}  // namespace local_nonaddressable
+}  // namespace sift_strategy
+}  // namespace sequential
 }  // namespace multiqueue
 
-#endif  //! FULL_UP_STRATEGY_HPP_INCLUDED
+#endif  //! SEQUENTIAL_HEAP_SIFT_STRATEGY_FULL_UP_HPP_INCLUDED

@@ -139,7 +139,7 @@ struct Task {
 
         unsigned int stage = 0u;
 
-#if defined PQ_LQMQ || defined PQ_NAMQ
+#if defined PQ_LQMQ || defined PQ_NAMQ || defined PQ_NAMMQ
         auto handle = pq.get_handle(context.get_id());
 #endif
 
@@ -180,7 +180,7 @@ struct Task {
                 pq.push({key, value});
                 insertions.push_back(insertion_log{now.time_since_epoch().count(), key});
             } else {
-#if defined PQ_LQMQ || defined PQ_NAMQ
+#if defined PQ_LQMQ || defined PQ_NAMQ || defined PQ_NAMMQ
                 bool success = pq.extract_top(retval, handle);
 #else
                 bool success = pq.extract_top(retval);
@@ -278,7 +278,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    using Queue = util::QueueSelector<key_type, value_type>::pq_t;
+    using QueueSelector = util::QueueSelector<key_type, value_type>;
+    using Queue = QueueSelector::queue_type;
+    std::clog << "Using queue: " << util::queue_name() << " " << util::config_string() << '\n';
     Queue pq{settings.num_threads};
 
     start_flag.store(false, std::memory_order_relaxed);

@@ -12,38 +12,23 @@
 #ifndef NO_BUFFER_MQ_HPP_INCLUDED
 #define NO_BUFFER_MQ_HPP_INCLUDED
 
-#include "multiqueue/sequential/heap/full_down_strategy.hpp"
+#include "multiqueue/default_configuration.hpp"
 #include "multiqueue/sequential/heap/heap.hpp"
 #include "multiqueue/util/extractors.hpp"
-#include "multiqueue/util/range_iterator.hpp"
+#include "system_config.hpp"
 
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <cstddef>
 #include <memory>
 #include <random>
 #include <vector>
 
 namespace multiqueue {
-namespace rsm {
 
-// TODO: CMake defined
-static constexpr unsigned int CACHE_LINESIZE = 64;
-
-template <typename T>
-struct NoBufferConfiguration {
-    // With `p` threads, use `C*p` queues
-    static constexpr unsigned int C = 4;
-    // The underlying sequential priority queue to use
-    static constexpr unsigned int HeapDegree = 4;
-    // The sifting strategy to use
-    using SiftStrategy = local_nonaddressable::full_down_strategy;
-    // The allocator to use in the underlying sequential priority queue
-    using HeapAllocator = std::allocator<T>;
-};
-
-template <typename Key, typename T, typename Comparator = std::less<Key>,
-          template <typename> typename Configuration = NoBufferConfiguration, typename Allocator = std::allocator<Key>>
+template <typename Key, typename T, typename Comparator = std::less<Key>, typename Configuration = DefaultConfiguration,
+          typename HeapConfiguration = sequential::DefaultHeapConfiguration, typename Allocator = std::allocator<Key>>
 class no_buffer_mq {
    public:
     using key_type = Key;
@@ -51,17 +36,26 @@ class no_buffer_mq {
     using value_type = std::pair<key_type, mapped_type>;
     using key_comparator = Comparator;
 
-    static constexpr auto C = static_cast<unsigned int>(Configuration<value_type>::C);
-
    private:
-    using heap_type = local_nonaddressable::heap<
-        value_type, key_type, util::get_nth<value_type>, key_comparator, Configuration<value_type>::HeapDegree,
-        typename Configuration<value_type>::SiftStrategy, typename Configuration<value_type>::HeapAllocator>;
+    static constexpr unsigned int C = Configuration::C;
 
-    struct alignas(CACHE_LINESIZE) guarded_heap {
+    using heap_type = sequential::key_value_heap<key_type, mapped_type, key_comparator, HeapConfiguration,
+                                                 typename Configuration::template HeapAllocator<value_type>>;
+
+    struct alignas(L1_CACHE_LINESIZE) guarded_heap {
         using allocator_type = typename heap_type::allocator_type;
-        mutable std::atomic_flag in_use = ATOMIC_FLAG_INIT;
+        std::atomic_bool in_use = false;
         heap_type heap;
+
+        inline bool try_lock() noexcept {
+            bool expect_in_use = false;
+            return in_use.compare_exchange_strong(expect_in_use, true, std::memory_order_acquire,
+                                                  std::memory_order_relaxed);
+        }
+
+        inline void unlock() noexcept {
+            in_use.store(false, std::memory_order_release);
+        }
 
         explicit guarded_heap() = default;
         explicit guarded_heap(allocator_type const &alloc) : heap{alloc} {
@@ -77,27 +71,10 @@ class no_buffer_mq {
     key_comparator comp_;
 
    private:
-    inline std::mt19937 &get_rng() const {
-        static thread_local std::mt19937 gen;
-        return gen;
-    }
-
     inline size_t random_queue_index() const {
-        std::uniform_int_distribution<std::size_t> dist{0, num_queues_ - 1};
-        return dist(get_rng());
-    }
-
-    inline bool try_lock(std::size_t const index) const noexcept {
-        // TODO: MEASURE
-        if (!heap_list_[index].in_use.test_and_set(std::memory_order_relaxed)) {
-            std::atomic_thread_fence(std::memory_order_acquire);
-            return true;
-        }
-        return false;
-    }
-
-    inline void unlock(std::size_t const index) const noexcept {
-        heap_list_[index].in_use.clear(std::memory_order_release);
+        static thread_local std::mt19937 gen;
+        std::uniform_int_distribution<std::size_t> dist{0u, num_queues_ - 1u};
+        return dist(gen);
     }
 
    public:
@@ -111,44 +88,22 @@ class no_buffer_mq {
         assert(num_threads >= 1);
     }
 
-    bool top(value_type &retval) const {
-        size_t index;
-        do {
-            index = random_queue_index();
-        } while (!try_lock(index));
-        bool found = false;
-        if (!heap_list_[index].heap.empty()) {
-            retval = heap_list_[index].heap.top();
-            found = true;
-        }
-        unlock(index);
-        do {
-            index = random_queue_index();
-        } while (!try_lock(index));
-        if (!heap_list_[index].heap.empty() && (!found || comp_(heap_list_[index].heap.top().first, retval.first))) {
-            retval = heap_list_[index].heap.top();
-            found = true;
-        }
-        unlock(index);
-        return found;
-    }
-
     void push(value_type const &value) {
         size_t index;
         do {
             index = random_queue_index();
-        } while (!try_lock(index));
+        } while (!heap_list_[index].try_lock());
         heap_list_[index].heap.insert(value);
-        unlock(index);
+        heap_list_[index].unlock();
     }
 
     void push(value_type &&value) {
         size_t index;
         do {
             index = random_queue_index();
-        } while (!try_lock(index));
+        } while (!heap_list_[index].try_lock());
         heap_list_[index].heap.insert(std::move(value));
-        unlock(index);
+        heap_list_[index].unlock();
     }
 
     bool extract_top(value_type &retval) {
@@ -156,39 +111,38 @@ class no_buffer_mq {
         bool found = false;
         do {
             first_index = random_queue_index();
-        } while (!try_lock(first_index));
+        } while (!heap_list_[first_index].try_lock());
         if (!heap_list_[first_index].heap.empty()) {
             retval.first = heap_list_[first_index].heap.top().first;
             found = true;
         } else {
-            unlock(first_index);
+            heap_list_[first_index].unlock();
         }
         size_t second_index;
         do {
             second_index = random_queue_index();
-        } while (!try_lock(second_index));
+        } while (!heap_list_[second_index].try_lock());
         if (!heap_list_[second_index].heap.empty() &&
             (!found || comp_(heap_list_[second_index].heap.top().first, retval.first))) {
             if (found) {
-                unlock(first_index);
+                heap_list_[first_index].unlock();
             }
             retval = heap_list_[second_index].heap.top();
             heap_list_[second_index].heap.pop();
-            unlock(second_index);
+            heap_list_[second_index].unlock();
             found = true;
         } else {
-            unlock(second_index);
+            heap_list_[second_index].unlock();
             if (found) {
                 retval = heap_list_[first_index].heap.top();
                 heap_list_[first_index].heap.pop();
-                unlock(first_index);
+                heap_list_[first_index].unlock();
             }
         }
         return found;
     }
 };
 
-}  // namespace rsm
 }  // namespace multiqueue
 
-#endif  //!
+#endif  //! NO_BUFFER_MQ_HPP_INCLUDED

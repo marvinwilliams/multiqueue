@@ -3,7 +3,7 @@
 set -euo pipefail
 
 hostname=$(cat /proc/sys/kernel/hostname)
-bin_dir="/data01/williams/bin_${hostname}"
+bin_dir="build_${hostname}/bin"
 reps=5
 timeout=3
 

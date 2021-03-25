@@ -1,10 +1,23 @@
-#ifndef ALLOCATOR_XEJHLIOT
-#define ALLOCATOR_XEJHLIOT
+/**
+******************************************************************************
+* @file:   allocator.hpp
+*
+* @author: Marvin Williams
+* @date:   2021/03/25 16:44
+* @brief:
+*******************************************************************************
+**/
+#pragma once
+#ifndef UTIL_ALLOCATOR_HPP_INCLUDED
+#define UTIL_ALLOCATOR_HPP_INCLUDED
 
 #include <cstddef>
 #include <iostream>
 #include <limits>
 #include <type_traits>
+
+namespace multiqueue {
+namespace util {
 
 template <typename T>
 class MultiqueueAllocator {
@@ -51,4 +64,7 @@ class MultiqueueAllocator {
     }
 };
 
-#endif  // !ALLOCATOR_XEJHLIOT
+}  // namespace util
+}  // namespace multiqueue
+
+#endif  //! UTIL_ALLOCATOR_HPP_INCLUDED

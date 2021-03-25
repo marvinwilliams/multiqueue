@@ -8,8 +8,8 @@
 *******************************************************************************
 **/
 #pragma once
-#ifndef BUFFER_HPP_INCLUDED
-#define BUFFER_HPP_INCLUDED
+#ifndef UTIL_BUFFER_HPP_INCLUDED
+#define UTIL_BUFFER_HPP_INCLUDED
 
 #include <array>
 #include <cassert>
@@ -20,7 +20,7 @@ namespace util {
 
 template <typename T, std::size_t N>
 struct buffer {
-    static_assert(N > 0u, "N must be greater than 0");
+    static_assert(N > 0, "N must be greater than 0");
 
     using value_type = T;
     using size_type = std::size_t;
@@ -36,7 +36,7 @@ struct buffer {
 
    private:
     std::array<T, N> data_;
-    size_type size_ = 0u;
+    size_type size_ = 0;
 
    public:
     inline size_type size() const noexcept {
@@ -44,7 +44,7 @@ struct buffer {
     }
 
     inline bool empty() const noexcept {
-        return size_ == 0u;
+        return size_ == 0;
     }
 
     inline void set_size(size_type const size) noexcept {
@@ -60,7 +60,7 @@ struct buffer {
     void insert_at(size_type pos, T const& t) {
         assert(size_ < N);
         assert(pos <= size_);
-        for (size_type i = 0u; i < size_ - pos; ++i) {
+        for (size_type i = 0; i < size_ - pos; ++i) {
             data_[size_ - i] = std::move(data_[size_ - (i + 1)]);
         }
         data_[pos] = t;
@@ -73,7 +73,7 @@ struct buffer {
     }
 
     inline void clear() {
-        size_ = 0u;
+        size_ = 0;
     }
 
     T const& operator[](size_type pos) const noexcept {
@@ -87,20 +87,20 @@ struct buffer {
 
     T const& front() const noexcept {
         assert(!empty());
-        return data_[0u];
+        return data_[0];
     }
 
     T& front() noexcept {
-        return data_[0u];
+        return data_[0];
     }
 
     T const& back() const noexcept {
         assert(!empty());
-        return data_[size_ - 1u];
+        return data_[size_ - 1];
     }
 
     T& back() noexcept {
-        return data_[size_ - 1u];
+        return data_[size_ - 1];
     }
 
     constexpr iterator begin() noexcept {
@@ -155,4 +155,4 @@ struct buffer {
 }  // namespace util
 }  // namespace multiqueue
 
-#endif  //! BUFFER_HPP_INCLUDED
+#endif  //! UTIL_BUFFER_HPP_INCLUDED

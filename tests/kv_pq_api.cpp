@@ -8,7 +8,7 @@
 #include <type_traits>
 #include <utility>
 
-using multiqueue::local_nonaddressable::kv_pq;
+using multiqueue::sequential::kv_pq;
 
 TEMPLATE_PRODUCT_TEST_CASE("kv_pq basic operations with different types", "[kv_pq][basic]", std::pair,
                            ((int, int), (int, std::string), (std::string, (std::pair<int, float>)))) {
