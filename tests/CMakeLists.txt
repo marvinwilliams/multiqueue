@@ -1,82 +1,133 @@
-include(Catch)
-
 add_library(basic_test INTERFACE)
-target_link_libraries(basic_test INTERFACE multiqueue multiqueue_warnings)
+target_link_libraries(basic_test INTERFACE multiqueue multiqueue_internal)
 target_compile_features(basic_test INTERFACE cxx_std_17)
 target_compile_options(basic_test INTERFACE "-UNDEBUG")
-target_include_directories(basic_test INTERFACE "${CMAKE_LIST_DIRECTORY}/utils")
+target_include_directories(basic_test INTERFACE "${CMAKE_LIST_DIRECTORY}")
 
-add_library(catch_test INTERFACE)
-target_link_libraries(catch_test INTERFACE basic_test)
-target_link_libraries_system(catch_test INTERFACE Catch2::Catch2)
+add_library(generic_test INTERFACE)
+target_link_libraries(generic_test INTERFACE threading basic_test)
+target_link_libraries_system(generic_test INTERFACE cxxopts)
+target_sources(generic_test INTERFACE generic.cpp)
 
-add_executable(unit_tests main.cpp pq_api.cpp pq_correctness.cpp kv_pq_api.cpp kv_pq_correctness.cpp no_buffer_pq.cpp ring_buffer.cpp buffer.cpp merge_heap.cpp)
-target_link_libraries(unit_tests PRIVATE catch_test multiqueue::multiqueue Threads::Threads)
+add_custom_target(all_generic_tests COMMENT "Build the generic test for all priority queues")
 
-if(BUILD_TESTING)
-  catch_discover_tests(unit_tests)
+function(add_wrapper_generic_test name define)
+  add_executable(wrapper_${name}_generic_test)
+  target_compile_definitions(wrapper_${name}_generic_test PRIVATE ${define})
+  target_link_libraries(wrapper_${name}_generic_test PRIVATE ${name}_wrapper generic_test)
+  add_dependencies(all_generic_tests wrapper_${name}_generic_test)
+endfunction()
+
+add_wrapper_generic_test(capq PQ_CAPQ)
+add_wrapper_generic_test(klsm PQ_KLSM)
+add_wrapper_generic_test(dlsm PQ_DLSM)
+add_wrapper_generic_test(linden PQ_LINDEN)
+add_wrapper_generic_test(spraylist PQ_SPRAYLIST)
+
+function(add_mq_generic_test name define)
+  set(target_name ${name}_generic_test)
+  add_executable(${target_name})
+  target_compile_definitions(${target_name} PRIVATE ${define})
+  target_link_libraries(${target_name} PRIVATE multiqueue::multiqueue generic_test)
+  add_dependencies(all_generic_tests ${target_name})
+endfunction()
+
+add_mq_generic_test(nobufferingmq PQ_MQ_NOBUFFERING)
+add_mq_generic_test(deletionbuffermq PQ_MQ_DELETIONBUFFER)
+add_mq_generic_test(insertionbuffermq PQ_MQ_INSERTIONBUFFER)
+add_mq_generic_test(fullbufferingmq PQ_MQ_FULLBUFFERING)
+add_mq_generic_test(mergingmq PQ_MQ_MERGING)
+add_mq_generic_test(numamq PQ_MQ_NUMA)
+add_mq_generic_test(numamergingmq PQ_MQ_NUMAMERGING)
+
+if (NUMA_FOUND)
+target_link_libraries(numamq_generic_test PRIVATE numa)
+target_link_libraries(numamergingmq_generic_test PRIVATE numa)
 endif()
 
-add_library(wrapper_test INTERFACE)
-target_link_libraries(wrapper_test INTERFACE threading basic_test)
-target_link_libraries_system(wrapper_test INTERFACE cxxopts)
-target_sources(wrapper_test INTERFACE wrapper.cpp)
-
-add_custom_target(all_wrapper_tests COMMENT "Build all wrapper tests")
-
-function(add_wrapper_test name define)
-  add_executable(${name}_wrapper_test)
-  target_compile_definitions(${name}_wrapper_test PRIVATE ${define})
-  target_link_libraries(${name}_wrapper_test PRIVATE ${name}_wrapper wrapper_test)
-  add_dependencies(all_wrapper_tests ${name}_wrapper_test)
+function(add_buffersize_generic_test ib db)
+  set(target_name fullbufferingmq_ib_${ib}_db_${db}_generic_test)
+  add_executable(${target_name})
+  target_compile_definitions(${target_name}
+    PRIVATE
+      PQ_MQ_FULLBUFFERING
+      MQ_CONFIG_DELETION_BUFFER_SIZE=${db}
+      MQ_CONFIG_INSERTION_BUFFER_SIZE=${ib}
+      )
+  target_link_libraries(${target_name} PRIVATE multiqueue::multiqueue generic_test)
 endfunction()
 
-add_wrapper_test(capq PQ_CAPQ)
-add_wrapper_test(klsm PQ_KLSM)
-add_wrapper_test(dlsm PQ_DLSM)
-add_wrapper_test(linden PQ_LINDEN)
-add_wrapper_test(spraylist PQ_SPRAYLIST)
+add_buffersize_generic_test(4 4)
+add_buffersize_generic_test(8 4)
+add_buffersize_generic_test(16 4)
+add_buffersize_generic_test(64 4)
+add_buffersize_generic_test(4 8)
+add_buffersize_generic_test(8 8)
+add_buffersize_generic_test(16 8)
+add_buffersize_generic_test(64 8)
+add_buffersize_generic_test(4 16)
+add_buffersize_generic_test(8 16)
+add_buffersize_generic_test(16 16)
+add_buffersize_generic_test(64 16)
+add_buffersize_generic_test(4 64)
+add_buffersize_generic_test(8 64)
+add_buffersize_generic_test(16 64)
+add_buffersize_generic_test(64 64)
 
-add_library(consistency_test INTERFACE)
-target_link_libraries(consistency_test INTERFACE threading basic_test)
-target_link_libraries_system(consistency_test INTERFACE cxxopts)
-target_sources(consistency_test INTERFACE consistency.cpp)
-
-add_custom_target(all_consistency_tests COMMENT "Build all consistency tests")
-
-function(add_wrapper_consistency_test name define)
-  add_executable(${name}_consistency_test)
-  target_compile_definitions(${name}_consistency_test PRIVATE ${define})
-  target_link_libraries(${name}_consistency_test PRIVATE ${name}_wrapper consistency_test)
-  add_dependencies(all_consistency_tests ${name}_consistency_test)
+function(add_stickiness_generic_test c k)
+  set(target_name fullbufferingmq_c_${c}_k_${k}_generic_test)
+  add_executable(${target_name})
+  target_compile_definitions(${target_name}
+    PRIVATE
+      PQ_MQ_FULLBUFFERING
+      MQ_CONFIG_C=${c}
+      MQ_CONFIG_STICKINESS=${stickiness}
+      )
+  target_link_libraries(${target_name} PRIVATE multiqueue::multiqueue generic_test)
 endfunction()
 
-function(add_mq_consistency_test name define)
-  add_executable(${name}_consistency_test)
-  target_compile_definitions(${name}_consistency_test PRIVATE ${define})
-  target_link_libraries(${name}_consistency_test PRIVATE multiqueue::multiqueue consistency_test)
-  add_dependencies(all_consistency_tests ${name}_consistency_test)
+add_stickiness_generic_test(4 2)
+add_stickiness_generic_test(4 4)
+add_stickiness_generic_test(4 8)
+add_stickiness_generic_test(4 16)
+add_stickiness_generic_test(4 64)
+add_stickiness_generic_test(8 2)
+add_stickiness_generic_test(8 4)
+add_stickiness_generic_test(8 8)
+add_stickiness_generic_test(8 16)
+add_stickiness_generic_test(8 64)
+add_stickiness_generic_test(16 2)
+add_stickiness_generic_test(16 4)
+add_stickiness_generic_test(16 8)
+add_stickiness_generic_test(16 16)
+add_stickiness_generic_test(16 64)
+
+function(add_nodesize_generic_test ns)
+  set(target_name numamq_ns_${ns}_generic_test)
+  add_executable(${target_name})
+  target_compile_definitions(${target_name}
+    PRIVATE
+      PQ_MQ_MERGING
+      MQ_CONFIG_NODE_SIZE=${ns}
+      )
+  target_link_libraries(${target_name} PRIVATE multiqueue::multiqueue generic_test)
 endfunction()
 
+add_nodesize_generic_test(4)
+add_nodesize_generic_test(8)
+add_nodesize_generic_test(64)
+add_nodesize_generic_test(128)
+add_nodesize_generic_test(512)
 
-add_wrapper_consistency_test(capq PQ_CAPQ)
-add_wrapper_consistency_test(klsm PQ_KLSM)
-add_wrapper_consistency_test(dlsm PQ_DLSM)
-add_wrapper_consistency_test(linden PQ_LINDEN)
-add_wrapper_consistency_test(spraylist PQ_SPRAYLIST)
-add_mq_consistency_test(nbmq PQ_NBMQ)
-add_mq_consistency_test(tbmq PQ_TBMQ)
-add_mq_consistency_test(dbmq PQ_DBMQ)
-add_mq_consistency_test(idmq PQ_IDMQ)
-add_mq_consistency_test(lqmq PQ_LQMQ)
-add_mq_consistency_test(mmq PQ_MMQ)
-add_mq_consistency_test(namq PQ_NAMQ)
-target_link_libraries(namq_consistency_test PRIVATE numa)
-add_mq_consistency_test(nammq PQ_NAMMQ)
-target_link_libraries(nammq_consistency_test PRIVATE numa)
+add_executable(evaluate_quality evaluate_quality.cpp)
+target_link_libraries(evaluate_quality PRIVATE multiqueue_warnings)
+target_link_libraries_system(evaluate_quality PRIVATE cxxopts tlx)
+target_compile_features(
+  evaluate_quality PRIVATE
+  cxx_std_17
+)
 
-add_executable(verify_consistency verify_consistency.cpp)
-target_link_libraries(verify_consistency PRIVATE basic_test)
+add_subdirectory(unit_tests)
 
 add_custom_target(all_tests COMMENT "Build all tests")
-add_dependencies(all_tests unit_tests all_wrapper_tests all_consistency_tests)
+add_dependencies(all_tests unit_tests all_generic_tests)

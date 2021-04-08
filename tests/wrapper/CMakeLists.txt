@@ -72,4 +72,13 @@ target_include_directories(
   ${EXTERNAL_DIR}/klsm/src/util
 )
 
-add_library(dlsm_wrapper ALIAS klsm_wrapper)
+add_library(
+  dlsm_wrapper STATIC
+  ${EXTERNAL_DIR}/klsm/src/util/thread_local_ptr.cpp
+)
+target_link_libraries(dlsm_wrapper INTERFACE wrapper)
+target_include_directories(
+  dlsm_wrapper SYSTEM INTERFACE
+  ${EXTERNAL_DIR}/klsm/src
+  ${EXTERNAL_DIR}/klsm/src/util
+)

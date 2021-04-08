@@ -71,8 +71,9 @@ class ThreadCoordinator {
             // No forward, since we don't want to move the args
             // We could forward in the last iteration, but it does not matter, since rvalue overloads are useless
             // for f
-            threading::thread_config config = Task::get_config(i);
-            threads_.emplace_back(config, Task::run, Context{*this, i, num_threads_}, args...);
+            Context ctx{*this, i, num_threads_};
+            threading::thread_config config = Task::get_config(ctx);
+            threads_.emplace_back(config, Task::run, ctx, args...);
         }
     }
 
@@ -85,9 +86,9 @@ class ThreadCoordinator {
     }
 
     void wait_until_notified() {
-      auto lock = std::unique_lock<std::mutex>{m_};
-      cv_.wait(lock, [this]() {return notified_;});
-      notified_ = false;
+        auto lock = std::unique_lock<std::mutex>{m_};
+        cv_.wait(lock, [this]() { return notified_; });
+        notified_ = false;
     }
 };
 

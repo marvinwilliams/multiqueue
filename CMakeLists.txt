@@ -25,6 +25,21 @@ option("${PROJECT_NAME}_BUILD_EXAMPLES" "Build examples" OFF)
 execute_process(COMMAND getconf LEVEL1_DCACHE_LINESIZE OUTPUT_VARIABLE L1_CACHE_LINESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
 execute_process(COMMAND getconf PAGESIZE OUTPUT_VARIABLE PAGESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
 
+FIND_PATH(NUMA_INCLUDE_DIR NAME numa.h
+  HINTS $ENV{HOME}/local/include /opt/local/include /usr/local/include /usr/include)
+
+FIND_LIBRARY(NUMA_LIBRARY NAME numa
+  HINTS $ENV{HOME}/local/lib64 $ENV{HOME}/local/lib /usr/local/lib64 /usr/local/lib /opt/local/lib64 /opt/local/lib /usr/lib64 /usr/lib
+)
+message(STATUS "Looking for numa")
+if (NUMA_INCLUDE_DIR AND NUMA_LIBRARY)
+  set(NUMA_FOUND TRUE)
+  message(STATUS "Looking for numa - found")
+else()
+  set(NUMA_FOUND FALSE)
+  message(STATUS "Looking for numa - not found")
+endif()
+
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 configure_file(
@@ -61,15 +76,19 @@ target_compile_features(
   cxx_std_17
 )
 
+if (NUMA_FOUND)
+  target_compile_definitions("${PROJECT_NAME}_compile_requirements" INTERFACE NUMA_SUPPORT)
+endif()
+
 target_link_libraries("${PROJECT_NAME}" INTERFACE "${PROJECT_NAME}_compile_requirements")
 
 # The namespace alias can be used as link target if this project is a
 # subproject.
 add_library("${PROJECT_NAME}::${PROJECT_NAME}" ALIAS "${PROJECT_NAME}")
 
-# Not added as link target to avoid propagation of warning
+# Not added as link target to avoid propagation of 
 # flags.  Is used only by internal targets that compile the library.
-add_library("${PROJECT_NAME}_warnings" INTERFACE)
+add_library("${PROJECT_NAME}_internal" INTERFACE)
 
 string(
   CONCAT WARNING_FLAGS
@@ -93,12 +112,11 @@ string(
 )
 
 target_compile_options(
-  "${PROJECT_NAME}_warnings" INTERFACE
+  "${PROJECT_NAME}_internal" INTERFACE
   $<BUILD_INTERFACE:${WARNING_FLAGS}>
 )
 
 set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/external")
-
 
 if(${PROJECT_NAME}_GENERATE_DOCS)
   find_package(Doxygen)
@@ -142,8 +160,8 @@ if(${PROJECT_NAME}_BUILD_TESTS OR ${PROJECT_NAME}_BUILD_BENCHMARKS)
       message(SEND_ERROR "Could not find tlx in ${EXTERNAL_DIR}")
     endif()
   endif()
-  add_subdirectory(wrapper)
-  add_subdirectory(utils)
+  add_subdirectory(tests/utils)
+  add_subdirectory(tests/wrapper)
 endif()
 
 if(${PROJECT_NAME}_BUILD_TESTS)
@@ -152,7 +170,7 @@ if(${PROJECT_NAME}_BUILD_TESTS)
 endif()
 
 if(${PROJECT_NAME}_BUILD_BENCHMARKS)
-  add_subdirectory(benchmark)
+  add_subdirectory(tests/benchmark)
 endif()
 
 if(${PROJECT_NAME}_BUILD_EXAMPLES)

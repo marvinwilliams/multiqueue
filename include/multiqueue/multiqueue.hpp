@@ -29,12 +29,15 @@
 #include <cstddef>
 #include <memory>
 #include <random>
+#include <sstream>
 #include <type_traits>
 
 namespace multiqueue {
 
+namespace {
+
 template <typename Key, typename T, typename Comparator, typename Configuration>
-struct QueueTypeFactory {
+struct InternalPriorityQueueFactory {
    private:
     template <bool isMerging>
     struct MergeSelector;
@@ -48,12 +51,12 @@ struct QueueTypeFactory {
         struct BufferSelector;
         template <>
         struct BufferSelector<false, false> {
-            struct QueueConfiguration {
+            struct PriorityQueueConfiguration {
                 using heap_type = internal_heap_type;
                 heap_type heap;
 
                 template <typename... Args>
-                QueueConfiguration(Args &&...args) : heap(std::forward<Args>(args)...) {
+                PriorityQueueConfiguration(Args &&...args) : heap(std::forward<Args>(args)...) {
                 }
 
                 inline typename heap_type::value_type const &top() {
@@ -80,13 +83,13 @@ struct QueueTypeFactory {
 
         template <>
         struct BufferSelector<true, false> {
-            struct QueueConfiguration {
+            struct PriorityQueueConfiguration {
                 using heap_type = internal_heap_type;
                 util::buffer<typename heap_type::value_type, Configuration::InsertionBufferSize> insertion_buffer;
                 heap_type heap;
 
                 template <typename... Args>
-                QueueConfiguration(Args &&...args) : heap(std::forward<Args>(args)...) {
+                PriorityQueueConfiguration(Args &&...args) : heap(std::forward<Args>(args)...) {
                 }
 
                 inline typename heap_type::value_type const &top() {
@@ -125,13 +128,13 @@ struct QueueTypeFactory {
 
         template <>
         struct BufferSelector<false, true> {
-            struct QueueConfiguration {
+            struct PriorityQueueConfiguration {
                 using heap_type = internal_heap_type<Key, T, Comparator>;
                 util::ring_buffer<typename heap_type::value_type, Configuration::DeletionBufferSize> deletion_buffer;
                 heap_type heap;
 
                 template <typename... Args>
-                QueueConfiguration(Args &&...args) : heap(std::forward<Args>(args)...) {
+                PriorityQueueConfiguration(Args &&...args) : heap(std::forward<Args>(args)...) {
                 }
 
                 inline typename heap_type::value_type const &top() {
@@ -181,14 +184,14 @@ struct QueueTypeFactory {
 
         template <>
         struct BufferSelector<true, true> {
-            struct QueueConfiguration {
+            struct PriorityQueueConfiguration {
                 using heap_type = internal_heap_type<Key, T, Comparator>;
                 util::buffer<typename heap_type::value_type, Configuration::InsertionBufferSize> insertion_buffer;
                 util::ring_buffer<typename heap_type::value_type, Configuration::DeletionBufferSize> deletion_buffer;
                 heap_type heap;
 
                 template <typename... Args>
-                QueueConfiguration(Args &&...args) : heap(std::forward<Args>(args)...) {
+                PriorityQueueConfiguration(Args &&...args) : heap(std::forward<Args>(args)...) {
                 }
 
                 inline typename heap_type::value_type const &top() {
@@ -254,13 +257,14 @@ struct QueueTypeFactory {
                 }
             };
         };
-        using QueueConfiguration = typename BufferSelector<Configuration::WithInsertionBuffer,
-                                                           Configuration::WithDeletionBuffer>::QueueConfiguration;
+        using PriorityQueueConfiguration =
+            typename BufferSelector<Configuration::WithInsertionBuffer,
+                                    Configuration::WithDeletionBuffer>::PriorityQueueConfiguration;
     };
 
     template <>
     struct MergeSelector<true> {
-        struct QueueConfiguration {
+        struct PriorityQueueConfiguration {
             using heap_type = sequential::key_value_merge_heap<Key, T, Comparator, Configuration::NodeSize,
                                                                typename Configuration::HeapAllocator>;
             util::buffer<typename heap_type::value_type, Configuration::NodeSize> insertion_buffer;
@@ -268,7 +272,7 @@ struct QueueTypeFactory {
             heap_type heap;
 
             template <typename... Args>
-            QueueConfiguration(Args &&...args) : heap(std::forward<Args>(args)...) {
+            PriorityQueueConfiguration(Args &&...args) : heap(std::forward<Args>(args)...) {
             }
 
             inline typename heap_type::value_type const &top() {
@@ -358,14 +362,17 @@ struct QueueTypeFactory {
             }
         };
     };
-    using QueueConfiguration = typename MergeSelector<Configuration::UseMergeHeap>::QueueConfiguration;
+    using PriorityQueueConfiguration = typename MergeSelector<Configuration::UseMergeHeap>::PriorityQueueConfiguration;
 
    public:
-    using type = QueueConfiguration;
+    using type = PriorityQueueConfiguration;
 };
 
 template <typename Key, typename T, typename Comparator, typename Configuration>
-using queue_type_factory_t = typename HeapConfigurationFactory<Key, T, Comparator, Configuration>::type;
+using internal_priority_queue_type_factory_t =
+    typename InternalPriorityQueueFactory<Key, T, Comparator, Configuration>::type;
+
+}  // namespace
 
 struct Handle {
     template <typename Key, typename T, typename Comparator, typename Configuration, typename Allocator>
@@ -402,14 +409,14 @@ template <typename Key, typename T, typename Comparator = std::less<Key>, typena
 class multiqueue : multiqueue_base<Key, T, Comparator> {
    private:
     static constexpr unsigned int C = Configuration::C;
-    using queue_type = queue_type_factory_t<Key, T, Comparator, Configuration>;
-    struct alignas(Configuration::NumaFriendly ? PAGE_SIZE : L1_CACHE_LINESIZE) QueueWrapper {
+    using internal_priority_queue_type = internal_priority_queue_type_factory_t<Key, T, Comparator, Configuration>;
+    struct alignas(Configuration::NumaFriendly ? PAGE_SIZE : L1_CACHE_LINESIZE) InternalPriorityQueueWrapper {
         using allocator_type = heap_configuration::heap_type::allocator_type;
         std::atomic_bool guard = false;
-        queue_type queue;
+        internal_priority_queue_type pq;
 
         template <typename... Args>
-        QueueWrapper(Args &&...args) : queue{std::forward<Args>(args)...} {
+        InternalPriorityQueueWrapper(Args &&...args) : pq{std::forward<Args>(args)...} {
         }
 
         inline bool try_lock() noexcept {
@@ -423,7 +430,7 @@ class multiqueue : multiqueue_base<Key, T, Comparator> {
         }
     };
 
-    struct ThreadLokalData {
+    struct ThreadLocalData {
         std::default_random_engine gen;
         unsigned int insert_count = 0;
         unsigned int extract_count = 0;
@@ -435,8 +442,8 @@ class multiqueue : multiqueue_base<Key, T, Comparator> {
     using allocator_type = Allocator;
 
    private:
-    std::vector<queue_type, allocator_type> queue_list_;
-    std::vector<ThreadLocalData> thread_data_;
+    std::vector<InternalPriorityQueueWrapper, allocator_type> pq_list_;
+    std::vector<ThreadLocalData, allocator_type> thread_data_;
     typename multiqueue::key_comparator comp_;
 
    private:
@@ -456,24 +463,24 @@ class multiqueue : multiqueue_base<Key, T, Comparator> {
 
    public:
     explicit multiqueue(unsigned int const num_threads, allocator_type const &alloc = allocator_type())
-        : queue_list_(alloc), comp_() {
+        : pq_list_(alloc), comp_() {
         assert(num_threads >= 1);
 #ifdef NUMA_SUPPORT
         if (Configuration::NumaFriendly) {
             numa_set_interleave_mask(numa_all_nodes_ptr);
-            queue_list.resize(num_threads * Configuration::C);
+            pq_list_.resize(num_threads * Configuration::C);
             numa_set_interleave_mask(numa_no_nodes_ptr);
-            for (std::size_t i = 0; i < queue_list.size(); ++i) {
-                numa_set_preferred(i / (queue_list.size() / (numa_max_node() + 1)));
-                queue_list_[i].queue.reserve_and_touch(Configuration::ReservePerQueue);
+            for (std::size_t i = 0; i < pq_list_.size(); ++i) {
+                numa_set_preferred(i / (pq_list_.size() / (numa_max_node() + 1)));
+                pq_list_[i].pq.reserve_and_touch(Configuration::ReservePerQueue);
                 numa_set_preferred(-1);
             }
         } else
 #else
         {
-            queue_list.resize(num_threads * Configuration::C);
-            for (std::size_t i = 0; i < queue_list.size(); ++i) {
-                queue_list_[i].queue.reserve(Configuration::ReservePerQueue);
+            pq_list_.resize(num_threads * Configuration::C);
+            for (std::size_t i = 0; i < pq_list_.size(); ++i) {
+                pq_list_[i].pq.reserve(Configuration::ReservePerQueue);
             }
         }
 #endif
@@ -481,24 +488,24 @@ class multiqueue : multiqueue_base<Key, T, Comparator> {
 
     explicit multiqueue(unsigned int const num_threads, typename multiqueue::key_comparator const &comp,
                         allocator_type const &alloc = allocator_type())
-        : queue_list_(alloc), comp_(comp) {
+        : pq_list_(alloc), comp_(comp) {
         assert(num_threads >= 1);
 #ifdef NUMA_SUPPORT
         if (Configuration::NumaFriendly) {
             numa_set_interleave_mask(numa_all_nodes_ptr);
-            queue_list.resize(num_threads * Configuration::C);
+            pq_list_.resize(num_threads * Configuration::C);
             numa_set_interleave_mask(numa_no_nodes_ptr);
-            for (std::size_t i = 0; i < queue_list.size(); ++i) {
-                numa_set_preferred(i / (queue_list.size() / (numa_max_node() + 1)));
-                queue_list_[i].queue.reserve_and_touch(Configuration::ReservePerQueue);
+            for (std::size_t i = 0; i < pq_list_.size(); ++i) {
+                numa_set_preferred(i / (pq_list_.size() / (numa_max_node() + 1)));
+                pq_list_[i].pq.reserve_and_touch(Configuration::ReservePerQueue);
                 numa_set_preferred(-1);
             }
         } else
 #else
         {
-            queue_list.resize(num_threads * Configuration::C);
-            for (std::size_t i = 0; i < queue_list.size(); ++i) {
-                queue_list_[i].queue.reserve(Configuration::ReservePerQueue);
+            pq_list_.resize(num_threads * Configuration::C);
+            for (std::size_t i = 0; i < pq_list_.size(); ++i) {
+                pq_list_[i].pq.reserve(Configuration::ReservePerQueue);
             }
         }
 #endif
@@ -513,13 +520,13 @@ class multiqueue : multiqueue_base<Key, T, Comparator> {
             refresh_insert_index(handle.id_);
         }
         size_type index = thread_data_[handle.id_].insert_index;
-        while (!queue_list_[index].try_lock()) {
+        while (!pq_list_[index].try_lock()) {
             refresh_insert_index(handle.id_);
             index = thread_data_[handle.id_].insert_index;
         }
         --thread_data_[handle.id_].insert_count;
-        queue_list_[index].queue.push(value);
-        queue_list_[index].unlock();
+        pq_list_[index].pq.push(value);
+        pq_list_[index].unlock();
     }
 
     bool extract_top(Handle const &handle, typename multiqueue::value_type &retval) {
@@ -529,11 +536,11 @@ class multiqueue : multiqueue_base<Key, T, Comparator> {
         size_type first_index = thread_data_[handle.id_].extract_index[0];
         size_type second_index = thread_data_[handle.id_].extract_index[1];
         do {
-            if (queue_list_[first_index].try_lock()) {
-                if (queue_list_[second_index].try_lock()) {
+            if (pq_list_[first_index].try_lock()) {
+                if (pq_list_[second_index].try_lock()) {
                     break;
                 }
-                queue_list_[first_index].unlock();
+                pq_list_[first_index].unlock();
             }
             refresh_extract_indices(handle.id_);
             first_index = thread_data_[handle.id_].extract_index[0];
@@ -541,31 +548,54 @@ class multiqueue : multiqueue_base<Key, T, Comparator> {
         } while (true);
         --thread_data_[handle.id_].extract_count;
         // When we get here, we hold the lock for both queues
-        bool first_empty = !queue_list_[first_index].queue.refresh_top();
+        bool first_empty = !pq_list_[first_index].pq.refresh_top();
         if (first_empty) {
-            queue_list_[first_index].unlock();
+            pq_list_[first_index].unlock();
         }
-        bool second_empty = !queue_list_[second_index].queue.refresh_top();
+        bool second_empty = !pq_list_[second_index].pq.refresh_top();
         if (second_empty) {
-            queue_list_[second_index].unlock();
+            pq_list_[second_index].unlock();
         }
         if (first_empty && second_empty) {
             refresh_extract_indices(handle.id_);
             return false;
         }
         if (!first_empty && !second_empty &&
-            comp_(queue_list_[second_index].queue.top().first, queue_list_[first_index].queue.top().first)) {
-            queue_list_[first_index].unlock();
+            comp_(pq_list_[second_index].pq.top().first, pq_list_[first_index].pq.top().first)) {
+            pq_list_[first_index].unlock();
             first_index = second_index;
         } else if (first_empty) {
             first_index = second_index;
         }
-        queue_list_[first_index].queue.extract_top(retval);
-        queue_list_[first_index].unlock();
+        pq_list_[first_index].pq.extract_top(retval);
+        pq_list_[first_index].unlock();
         if (first_emtpy || second_empty) {
             refresh_extract_indices(handle.id_);
         }
         return true;
+    }
+
+    static std::string description() {
+        std::stringstream ss;
+        ss << "multiqueue\n";
+        ss << "C: " << Configuration::C << '\n';
+        ss << "K: " << Configuration::K << '\n';
+        if (Configuration::UseMergeHeap) {
+            ss << "Using merge heap, node size: " << Configuration::NodeSize << '\n';
+        } else {
+            if (Configuration::WithDeletionBuffer) {
+                ss << "Using deletion buffer with size: " << Configuration::DeletionBufferSize << '\n';
+            }
+            if (Configuration::WithInsertionBuffer) {
+                ss << "Using insertion buffer with size: " << Configuration::InsertionBufferSize << '\n';
+            }
+            ss << "Heap degree: " << Configuration::HeapDegree << '\n;
+        }
+        if (Configuration::NumaFriendly) {
+            ss << "Numa friendly\n";
+        }
+        ss << "Preallocation for " << Configuration::ReservePerQueue << " elements per internal pq\n";
+        return ss.str();
     }
 };
 

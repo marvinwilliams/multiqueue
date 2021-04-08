@@ -1,10 +1,11 @@
-#ifndef LINDEN_HPP
-#define LINDEN_HPP
+#ifndef WRAPPER_LINDEN_HPP_INCLUDED
+#define WRAPPER_LINDEN_HPP_INCLUDED
 
 // Adapted from klsm
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <utility>
 
 namespace multiqueue {
@@ -25,6 +26,10 @@ class linden {
     void push(std::pair<uint32_t, uint32_t> const& value);
 
     bool extract_top(std::pair<uint32_t, uint32_t>& retval);
+
+    static std::string description() {
+        return "linden";
+    }
 };
 
 }  // namespace wrapper

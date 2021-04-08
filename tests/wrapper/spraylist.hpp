@@ -1,10 +1,11 @@
-#ifndef SPRAYLIST_HPP
-#define SPRAYLIST_HPP
+#ifndef WRAPPER_SPRAYLIST_HPP_INCLUDED
+#define WRAPPER_SPRAYLIST_HPP_INCLUDED
 
 // Adapted from klsm
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <utility>
 
 struct sl_intset;
@@ -25,6 +26,10 @@ class spraylist {
 
     void push(std::pair<uint32_t, uint32_t> const& value);
     bool extract_top(std::pair<uint32_t, uint32_t>& retval);
+
+    static std::string description() {
+        return "spraylist";
+    }
 };
 
 }  // namespace wrapper

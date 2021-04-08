@@ -3,6 +3,11 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <memory>
+#include <new>
+#include <optional>
+#include <random>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>

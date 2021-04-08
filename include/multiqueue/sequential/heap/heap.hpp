@@ -66,26 +66,36 @@ struct heap_base : private KeyExtractor, private Comparator {
     constexpr bool compare(key_type const &lhs, key_type const &rhs) const noexcept(is_compare_noexcept) {
         return to_comparator()(lhs, rhs);
     }
+
+    constexpr bool value_compare(value_type const &lhs, value_type const &rhs) const noexcept(is_compare_noexcept) {
+        return compare(extract_key(lhs), extract_key(rhs));
+    }
 };
 
 template <typename T, typename Key, typename KeyExtractor, typename Comparator, unsigned int Degree,
           typename SiftStrategy, typename Allocator>
-class heap : public heap_base<T, Key, KeyExtractor, Comparator> {
+class heap : private heap_base<T, Key, KeyExtractor, Comparator> {
     friend SiftStrategy;
+    using base_type = heap_base<T, Key, KeyExtractor, Comparator>;
 
    public:
+    using value_type = typename base_type::value_type;
+    using key_type = typename base_type::key_type;
+    using key_extractor = typename base_type::key_extractor;
+    using comp_type = typename base_type::comp_type;
+    using reference = typename base_type::reference;
+    using const_reference = typename base_type::const_reference;
+
     using allocator_type = Allocator;
     using container_type = std::vector<typename heap::value_type, allocator_type>;
-    using size_type = typename container_type::size_type;
     using iterator = typename container_type::const_iterator;
     using const_iterator = typename container_type::const_iterator;
     using difference_type = typename container_type::difference_type;
+    using size_type = std::size_t;
 
     static_assert(Degree >= 1, "Degree must be at least one");
 
    private:
-    using base_type = heap_base<T, Key, KeyExtractor, Comparator>;
-
     static constexpr auto degree_ = Degree;
     container_type data_;
 
@@ -101,7 +111,7 @@ class heap : public heap_base<T, Key, KeyExtractor, Comparator> {
     // Find the index of the smallest `num_children` children of the node at
     // index `index`
     constexpr size_type min_child_index(size_type index, size_type const num_children = Degree) const
-        noexcept(heap::is_key_extract_noexcept &&heap::is_compare_noexcept) {
+        noexcept(base_type::is_key_extract_noexcept &&base_type::is_compare_noexcept) {
         assert(index < size());
         index = first_child_index(index);
         if (num_children == 1) {
@@ -111,7 +121,7 @@ class heap : public heap_base<T, Key, KeyExtractor, Comparator> {
         assert(last <= size());
         auto result = index++;
         for (; index < last; ++index) {
-            if (compare(extract_key(data_[index]), extract_key(data_[result]))) {
+            if (value_compare(data_[index], data_[result])) {
                 result = index;
             }
         }
@@ -126,7 +136,7 @@ class heap : public heap_base<T, Key, KeyExtractor, Comparator> {
                 if (first_child + j >= size()) {
                     return true;
                 }
-                if (compare(extract_key(data_[first_child + j]), extract_key(data_[i]))) {
+                if (value_compare(data_[first_child + j], data_[i])) {
                     return false;
                 }
             }
@@ -138,16 +148,16 @@ class heap : public heap_base<T, Key, KeyExtractor, Comparator> {
     heap() = default;
 
     explicit heap(allocator_type const &alloc) noexcept(std::is_nothrow_default_constructible_v<base_type>)
-        : base_type(), data_{alloc} {
+        : base_type(), data_(alloc) {
     }
 
-    explicit heap(typename heap::comp_type const &comp, allocator_type const &alloc = allocator_type()) noexcept(
-        std::is_nothrow_constructible_v<base_type, typename heap::comp_type>)
+    explicit heap(comp_type const &comp, allocator_type const &alloc = allocator_type()) noexcept(
+        std::is_nothrow_constructible_v<base_type, comp_type>)
         : base_type(comp), data_(alloc) {
     }
 
-    constexpr typename heap::comp_type const &get_comparator() const noexcept {
-        return to_comparator();
+    constexpr comp_type const &get_comparator() const noexcept {
+        return base_type::to_comparator();
     }
 
     inline iterator begin() const noexcept {
@@ -174,7 +184,7 @@ class heap : public heap_base<T, Key, KeyExtractor, Comparator> {
         return data_.size();
     }
 
-    inline typename heap::const_reference top() const {
+    inline const_reference top() const {
         return data_.front();
     }
 
@@ -188,15 +198,15 @@ class heap : public heap_base<T, Key, KeyExtractor, Comparator> {
         assert(is_heap());
     }
 
-    void extract_top(typename heap::value_type &retval) {
+    void extract_top(value_type &retval) {
         assert(!data_.empty());
         retval = std::move(data_.front());
         pop();
     }
 
-    void insert(typename heap::value_type const &value) {
+    void insert(value_type const &value) {
         size_type parent;
-        if (!empty() && (parent = parent_index(size()), compare(extract_key(value), extract_key(data_[parent])))) {
+        if (!empty() && (parent = parent_index(size()), value_compare(value, data_[parent]))) {
             data_.push_back(std::move(data_[parent]));
             auto const index = SiftStrategy::sift_up_hole(*this, parent, extract_key(value));
             data_[index] = value;
@@ -206,9 +216,9 @@ class heap : public heap_base<T, Key, KeyExtractor, Comparator> {
         }
     }
 
-    void insert(typename heap::insert_type &&value) {
+    void insert(value_type &&value) {
         size_type parent;
-        if (!empty() && (parent = parent_index(size()), compare(extract_key(value), extract_key(data_[parent])))) {
+        if (!empty() && (parent = parent_index(size()), value_compare(value, data_[parent]))) {
             data_.push_back(std::move(data_[parent]));
             auto const index = SiftStrategy::sift_up_hole(*this, parent, extract_key(value));
             data_[index] = std::move(value);
@@ -223,7 +233,7 @@ class heap : public heap_base<T, Key, KeyExtractor, Comparator> {
     // behave the same as the key of the constructed value under the comparator
     // `Comparator`.
     template <typename... Args>
-    void emplace_known(typename heap::key_type const &key, Args &&...args) {
+    void emplace_known(key_type const &key, Args &&...args) {
         size_type parent;
         if (!empty() && (parent = parent_index(size()), compare(key, extract_key(data_[parent])))) {
             data_.push_back(std::move(data_[parent]));
