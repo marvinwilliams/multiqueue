@@ -23,7 +23,7 @@
 using key_type = std::uint32_t;
 using value_type = std::uint32_t;
 static_assert(std::is_unsigned_v<value_type>, "Value type must be unsigned");
-using PriorityQueue = typename util::PriorityQueueFactory<key_type, value_type>::type;
+using PriorityQueue = typename multiqueue::util::PriorityQueueFactory<key_type, value_type>::type;
 
 using namespace std::chrono_literals;
 
@@ -230,9 +230,10 @@ std::atomic_bool stop_flag;
 // Assume rdtsc is thread-safe and synchronized on each CPU
 // Assumption false
 
-template <InsertPolicy insert_policy, KeyDistribution key_distribution, typename PQ = PriorityQueue>
+template <InsertPolicy insert_policy, KeyDistribution key_distribution>
 struct Task {
-    static void run(thread_coordination::Context const& ctx, PriorityQueue& pq, Settings const& settings) {
+  template <typename PQ = PriorityQueue>
+    static void run(thread_coordination::Context ctx, PriorityQueue& pq, Settings const& settings) {
         std::vector<LogEntry> local_insertions;
         local_insertions.reserve(settings.prefill_size + 1'000'000);
         std::vector<LogEntry> local_deletions;
@@ -240,9 +241,11 @@ struct Task {
         std::vector<Timer::clock::rep> local_failed_deletions;
         local_failed_deletions.reserve(1'000'000);
 
-        if constexpr (util::PriorityQueueTraits<PQ>::has_thread_init) {
+        /* if constexpr (util::PriorityQueueTraits<PQ>::has_thread_init) { */
+#ifdef PQ_SPRAYLIST
             pq.init_thread(ctx.get_num_threads());
-        }
+#endif
+        /* } */
 
         unsigned int stage = 0;
 
@@ -266,7 +269,11 @@ struct Task {
                 // Compiler memory barrier (might flush registers, so has performance implications, see
                 // https://gcc.gnu.org/onlinedocs/gcc/Extended-Asm.html)
                 __asm__ __volatile__("" ::: "memory");
+#ifdef PQ_IS_WRAPPER
                 pq.push({key, value});
+#else
+                pq.push(handle, {key, value});
+#endif
                 local_insertions.push_back(LogEntry{tick, key, value});
             }
             ctx.synchronize(stage++, []() { std::clog << "done" << std::endl; });
@@ -286,7 +293,11 @@ struct Task {
                 value_type const value = to_value(ctx.get_id(), static_cast<value_type>(local_insertions.size()));
                 auto tick = Timer::ticks_since_epoch();
                 __asm__ __volatile__("" ::: "memory");
+#ifdef PQ_IS_WRAPPER
                 pq.push({key, value});
+#else
+                pq.push(handle, {key, value});
+#endif
                 local_insertions.push_back(LogEntry{tick, key, value});
             } else {
 #ifdef PQ_IS_WRAPPER
@@ -318,26 +329,26 @@ struct Task {
 };
 
 template <InsertPolicy insert_policy>
-void dispatch_key_generator(KeyDistribution key_distribution, thread_coordination::ThreadCoordinator const& coordinator,
-                            PriorityQueue& pq, Settings const& settings) {
+void dispatch_key_distribution(KeyDistribution key_distribution, thread_coordination::ThreadCoordinator& coordinator,
+                               PriorityQueue& pq, Settings const& settings) {
     switch (key_distribution) {
         case KeyDistribution::Uniform:
-            coordinator.run<Task<insert_policy, KeyDistribution::Uniform, PriorityQueue>>(std::ref(pq), settings);
+            coordinator.run<Task<insert_policy, KeyDistribution::Uniform>>(std::ref(pq), settings);
             break;
         case KeyDistribution::Ascending:
-            coordinator.run<Task<insert_policy, KeyDistribution::Ascending, PriorityQueue>>(std::ref(pq), settings);
+            coordinator.run<Task<insert_policy, KeyDistribution::Ascending>>(std::ref(pq), settings);
             break;
         case KeyDistribution::Descending:
-            coordinator.run<Task<insert_policy, KeyDistribution::Descending, PriorityQueue>>(std::ref(pq), settings);
+            coordinator.run<Task<insert_policy, KeyDistribution::Descending>>(std::ref(pq), settings);
             break;
         case KeyDistribution::Dijkstra:
-            coordinator.run<Task<insert_policy, KeyDistribution::Dijkstra, PriorityQueue>>(std::ref(pq), settings);
+            coordinator.run<Task<insert_policy, KeyDistribution::Dijkstra>>(std::ref(pq), settings);
             break;
     }
 }
 
 void dispatch_inserter(InsertPolicy insert_policy, KeyDistribution key_distribution,
-                       thread_coordination::ThreadCoordinator const& coordinator, PriorityQueue& pq,
+                       thread_coordination::ThreadCoordinator& coordinator, PriorityQueue& pq,
                        Settings const& settings) {
     switch (insert_policy) {
         case InsertPolicy::Uniform:
@@ -432,7 +443,7 @@ int main(int argc, char* argv[]) {
     }
     std::clog << "Settings: \n\t"
               << "Prefill size: " << settings.prefill_size << "\n\t"
-              << "Test duration: " << settings.test_duration.count() << "ms\n\t"
+              << "Test duration: " << settings.test_duration.count() << " ms\n\t"
               << "Threads: " << settings.num_threads << "\n\t"
               << "Insert policy: " << policy_names[static_cast<std::size_t>(insert_policy)] << "\n\t"
               << "Key distribution: " << distribution_names[static_cast<std::size_t>(key_distribution)] << "\n\t"

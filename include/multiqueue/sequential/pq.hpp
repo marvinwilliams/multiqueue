@@ -11,6 +11,7 @@
 #ifndef SEQUENTIAL_PQ_HPP_INCLUDED
 #define SEQUENTIAL_PQ_HPP_INCLUDED
 
+#include "multiqueue/sequential/heap/full_down_strategy.hpp"
 #include "multiqueue/sequential/heap/heap.hpp"
 #include "multiqueue/util/extractors.hpp"
 
@@ -23,17 +24,18 @@
 namespace multiqueue {
 namespace sequential {
 
-template <typename T, typename Comparator = std::less<T>, typename HeapConfiguration = DefaultHeapConfiguration>
+template <typename T, typename Comparator = std::less<T>, unsigned int HeapDegree = 4,
+          typename SiftStrategy = sift_strategy::FullDown, typename Allocator = std::allocator<T>>
 class pq {
    private:
-    using heap_type = value_heap<T, Comparator, HeapConfiguration>;
+    using heap_type = value_heap<T, Comparator, HeapDegree, SiftStrategy, Allocator>;
 
    public:
     using key_type = T;
     using value_type = T;
     using key_comparator = Comparator;
     using value_comparator = Comparator;
-    using allocator_type = typename heap_type::allocator_type;
+    using allocator_type = Allocator;
     using reference = typename heap_type::reference;
     using const_reference = typename heap_type::const_reference;
     using iterator = typename heap_type::iterator;
@@ -123,11 +125,6 @@ class pq {
 
     constexpr void push(value_type value) {
         heap_.insert(std::move(value));
-    }
-
-    template <typename... Args>
-    constexpr void emplace(Args &&...args) {
-        heap_.emplace(std::forward<Args>(args)...);
     }
 };
 

@@ -12,11 +12,11 @@
 #include <random>
 #include <vector>
 
-TEMPLATE_TEST_CASE_SIG("pq heap representation can have different degrees",
-                       "[pq][correctness][degree]",
+TEMPLATE_TEST_CASE_SIG("pq heap representation can have different degrees", "[pq][correctness][degree]",
                        ((unsigned int Degree), Degree), 1, 2, 3, 4, 99) {
-  using pq_t = multiqueue::local_nonaddressable::pq<int, std::less<int>,
-                                                    std::vector<int>, Degree>;
+    using pq_t = multiqueue::sequential::pq<int, std::less<int>, Degree>;
+
+    auto pq = pq_t{};
 
   INFO("Degree " << Degree);
   auto pq = pq_t{};
@@ -65,10 +65,8 @@ TEST_CASE("pq use std::greater as comparator", "[pq][correctness][comparator]") 
   }
 }
 
-TEST_CASE("pq use std::greater as comparator",
-          "[pq][correctness][comparator]") {
-  using pq_t = multiqueue::local_nonaddressable::pq<int, std::greater<int>,
-                                                    std::vector<int>, 4>;
+TEST_CASE("pq full_up_strategy", "[pq][correctness][strategy]") {
+    using pq_t = multiqueue::sequential::pq<int, std::greater<int>, 4, multiqueue::sequential::sift_strategy::FullUp>;
 
   auto pq = pq_t{};
 

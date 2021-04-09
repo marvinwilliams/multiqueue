@@ -1,5 +1,5 @@
-#ifndef WRAPPER_CAPQ_HPP
-#define WRAPPER_CAPQ_HPP
+#ifndef WRAPPER_CAPQ_HPP_INCLUDED
+#define WRAPPER_CAPQ_HPP_INCLUDED
 
 // Adapted from klsm
 

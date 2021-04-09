@@ -67,22 +67,6 @@ TEST_CASE("pq iterators", "[pq][iterator]") {
     REQUIRE(std::count(q.begin(), q.end(), i) == v[static_cast<size_t>(i)]);
 }
 
-TEST_CASE("pq emplace", "[pq][emplace]") {
-    auto comp = [](std::pair<int, std::string> const &lhs, std::pair<int, std::string> const &rhs) {
-        return lhs.first < rhs.first;
-    };
-    auto q = pq<std::pair<int, std::string>, decltype(comp)>(comp);
-    q.emplace(1, "one");
-    q.emplace(2, "two");
-    auto t = q.top();
-    REQUIRE(t.first == 1);
-    REQUIRE(t.second == "one");
-    q.pop();
-    t = q.top();
-    REQUIRE(t.first == 2);
-    REQUIRE(t.second == "two");
-}
-
 TEST_CASE("pq move-only", "[pq][move-only]") {
     auto q = pq<no_default_no_copy_type>();
     q.push(no_default_no_copy_type{0});
@@ -95,8 +79,8 @@ TEST_CASE("pq move-only", "[pq][move-only]") {
     no_default_no_copy_type extracted{0};
     q.extract_top(extracted);
     REQUIRE(extracted.i == 1);
-    q.emplace(2);
-    q.emplace(3);
+    q.push(no_default_no_copy_type{2});
+    q.push(no_default_no_copy_type{3});
     auto q2 = std::move(q);
     REQUIRE(q2.top().i == 2);
 }

@@ -77,6 +77,9 @@ template <typename T, typename Key, typename KeyExtractor, typename Comparator, 
 class heap : private heap_base<T, Key, KeyExtractor, Comparator> {
     friend SiftStrategy;
     using base_type = heap_base<T, Key, KeyExtractor, Comparator>;
+    using base_type::extract_key;
+    using base_type::compare;
+    using base_type::value_compare;
 
    public:
     using value_type = typename base_type::value_type;
@@ -132,7 +135,7 @@ class heap : private heap_base<T, Key, KeyExtractor, Comparator> {
     bool is_heap() const {
         for (size_type i = 0; i < size(); i++) {
             auto const first_child = first_child_index(i);
-            for (auto j = 0; j < Degree; ++j) {
+            for (std::size_t j = 0; j < Degree; ++j) {
                 if (first_child + j >= size()) {
                     return true;
                 }

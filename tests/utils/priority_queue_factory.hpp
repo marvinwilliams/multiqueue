@@ -11,12 +11,20 @@
 #ifndef TESTS_UTILS_PRIORITY_QUEUE_FACTORY_HPP_INCLUDED
 #define TESTS_UTILS_PRIORITY_QUEUE_FACTORY_HPP_INCLUDED
 
-#include "multiqueue/configurations.hpp"
+#if defined PQ_CAPQ
 #include "wrapper/capq.hpp"
+#elif defined PQ_DLSM
 #include "wrapper/dlsm.hpp"
+#elif defined PQ_KLSM
 #include "wrapper/klsm.hpp"
+#elif defined PQ_LINDEN
 #include "wrapper/linden.hpp"
+#elif defined PQ_SPRAYLIST
 #include "wrapper/spraylist.hpp"
+#else
+#include "multiqueue/configurations.hpp"
+#include "multiqueue/multiqueue.hpp"
+#endif
 
 #include <cstdint>
 #include <functional>
@@ -24,6 +32,7 @@
 #include <string>
 #include <type_traits>
 
+namespace multiqueue {
 namespace util {
 
 #if defined PQ_KLSM || defined PQ_DLSM || defined PQ_CAPQ || defined PQ_CAPQ1 || defined PQ_CAPQ2 || \
@@ -37,21 +46,21 @@ struct PriorityQueueFactory {};
 template <>
 struct PriorityQueueFactory<std::uint32_t, std::uint32_t> {
 #if defined PQ_KLSM
-    using type = multiqueue::wrapper::klsm<std::uint32_t, std::uint32_t>;
+    using type = wrapper::klsm<std::uint32_t, std::uint32_t>;
 #elif defined PQ_DLSM
-    using type = multiqueue::wrapper::dlsm<std::uint32_t, std::uint32_t>;
+    using type = wrapper::dlsm<std::uint32_t, std::uint32_t>;
 #elif defined PQ_CAPQ || defined PQ_CAPQ1
-    using type = multiqueue::wrapper::capq<true, true, true>;
+    using type = wrapper::capq<true, true, true>;
 #elif defined PQ_CAPQ2
-    using type = multiqueue::wrapper::capq<true, false, true>;
+    using type = wrapper::capq<true, false, true>;
 #elif defined PQ_CAPQ3
-    using type = multiqueue::wrapper::capq<false, true, true>;
+    using type = wrapper::capq<false, true, true>;
 #elif defined PQ_CAPQ4
-    using type = multiqueue::wrapper::capq<false, false, true>;
+    using type = wrapper::capq<false, false, true>;
 #elif defined PQ_LINDEN
-    using type = multiqueue::wrapper::linden;
+    using type = wrapper::linden;
 #elif defined PQ_SPRAYLIST
-    using type = multiqueue::wrapper::spraylist;
+    using type = wrapper::spraylist;
 #endif
 };
 
@@ -62,19 +71,19 @@ struct PriorityQueueFactory<std::uint32_t, std::uint32_t> {
 #endif
 
 #if defined PQ_MQ_NOBUFFERING
-using BaseConfig = ::multiqueue::configuration::NoBuffer;
+using BaseConfig = configuration::NoBuffering;
 #elif defined PQ_MQ_DELETIONBUFFER
-using BaseConfig = ::multiqueue::configuration::DeletionBuffer;
+using BaseConfig = configuration::DeletionBuffer;
 #elif defined PQ_MQ_INSERTIONBUFFER
-using BaseConfig = ::multiqueue::configuration::InsertionBuffer;
+using BaseConfig = configuration::InsertionBuffer;
 #elif defined PQ_MQ_FULLBUFFERING
-using BaseConfig = ::multiqueue::configuration::FullBuffering;
+using BaseConfig = configuration::FullBuffering;
 #elif defined PQ_MQ_MERGING
-using BaseConfig = ::multiqueue::configuration::Merging;
+using BaseConfig = configuration::Merging;
 #elif defined PQ_MQ_NUMA
-using BaseConfig = ::multiqueue::configuration::Numa;
+using BaseConfig = configuration::Numa;
 #elif defined PQ_MQ_NUMAMERGING
-using BaseConfig = ::multiqueue::configuration::NumaMerging;
+using BaseConfig = configuration::NumaMerging;
 #endif
 
 struct Config : BaseConfig {
@@ -100,7 +109,7 @@ struct Config : BaseConfig {
 
 template <typename KeyType, typename ValueType>
 struct PriorityQueueFactory {
-    using type = ::multiqueue::multiqueue<KeyType, ValueType, std::less<KeyType>, Config>;
+    using type = multiqueue<KeyType, ValueType, std::less<KeyType>, Config>;
 };
 
 #endif
@@ -126,5 +135,6 @@ struct PriorityQueueTraits {
 };
 
 }  // namespace util
+}  // namespace multiqueue
 
 #endif  //! TESTS_UTILS_PRIORITY_QUEUE_FACTORY_HPP_INCLUDED

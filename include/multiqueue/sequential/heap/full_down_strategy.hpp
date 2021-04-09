@@ -40,6 +40,9 @@ struct FullDown {
     template <typename Heap>
     static typename Heap::size_type remove(Heap &heap, typename Heap::size_type index) {
         assert(heap.size() > 0 && index < heap.size());
+        if (heap.size() == 1) {
+          return 0;
+        }
         // The node that will be the parent of the next inserted node
         typename Heap::size_type const last_parent = heap.parent_index(heap.size() - 1);
         // This loop exits too early if we descent into the last parent node with [1, degree] children
@@ -55,9 +58,7 @@ struct FullDown {
             auto const child = heap.min_child_index(index, heap.size() - heap.first_child_index(last_parent));
             assert(child < heap.size());
             heap.data_[index] = std::move(heap.data_[child]);
-            if (child + 1 < heap.size()) {
-                return sift_up_hole(heap, child, heap.extract_key(heap.data_.back()));
-            }
+            return child;
         }
         return sift_up_hole(heap, index, heap.extract_key(heap.data_.back()));
     }

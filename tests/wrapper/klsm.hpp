@@ -1,5 +1,5 @@
-#ifndef WRAPPER_KLSM_HPP
-#define WRAPPER_KLSM_HPP
+#ifndef WRAPPER_KLSM_HPP_INCLUDED
+#define WRAPPER_KLSM_HPP_INCLUDED
 
 // Adapted from klsm
 

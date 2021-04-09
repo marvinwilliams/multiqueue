@@ -30,6 +30,9 @@ template <typename T, typename Key, typename KeyExtractor, typename Comparator, 
           typename Allocator = std::allocator<T>>
 class merge_heap : private heap_base<T, Key, KeyExtractor, Comparator> {
     using base_type = heap_base<T, Key, KeyExtractor, Comparator>;
+    using base_type::extract_key;
+    using base_type::compare;
+    using base_type::value_compare;
 
    public:
     using value_type = typename base_type::value_type;

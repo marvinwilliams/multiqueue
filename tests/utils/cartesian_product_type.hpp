@@ -66,9 +66,16 @@ struct Executor<Functor, std::tuple<Args...>> {
     }
 };
 
+template <typename...Args>
+struct is_valid : std::true_type{};
+
+template<typename T>
+struct is_valid<T, int> : std::false_type{};
+
+
 template <template <typename...> typename Functor, typename ProductList, std::size_t... Is>
 bool execute_with_nth_result_tuple(std::index_sequence<Is...>, std::size_t n) {
-    return ((Is == n ? (Executor<Functor, std::tuple_element_t<Is, ProductList>>::execute(), true) : false) || ...);
+    return ((Is == n ? (Executor<Functor, std::tuple_element_t<Is, ProductList>>::execute()}, true) : false) || ...);
 }
 template <template <typename...> typename Functor, typename ProductList, std::size_t... Is>
 void execute_for_each_result_tuple(std::index_sequence<Is...>) {
@@ -78,12 +85,12 @@ void execute_for_each_result_tuple(std::index_sequence<Is...>) {
 }  // namespace
 
 template <typename... Tuples>
-using carsetian_product_t =
+using cartesian_product_t =
     typename cartesian_product_from_tuple_list<std::tuple<Tuples...>,
                                                std::make_index_sequence<(1 * ... * std::tuple_size_v<Tuples>)>>::type;
 
-template <template <typename...> typename Functor, typename... Tuples>
-bool execute_by_index(std::array<std::size_t, sizeof...(Tuples)> const& indices) {
+template <template <typename...> typename Functor, , typename... Tuples, typename...Args>
+bool execute_by_index(std::array<std::size_t, sizeof...(Tuples)> const& indices, Args...args) {
     if constexpr (sizeof...(Tuples) > 0) {
         static constexpr std::size_t N = (1 * ... * std::tuple_size_v<Tuples>);
         using ProductList =

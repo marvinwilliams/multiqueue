@@ -10,19 +10,18 @@
 #include <random>
 #include <vector>
 
-TEMPLATE_TEST_CASE_SIG("kv_pq heap representation can have different degrees",
-                       "[kv_pq][correctness][degree]",
+TEMPLATE_TEST_CASE_SIG("kv_pq heap representation can have different degrees", "[kv_pq][correctness][degree]",
                        ((unsigned int Degree), Degree), 1, 2, 3, 4, 99) {
-  using pq_t = multiqueue::local_nonaddressable::kv_pq<int, int, std::less<int>,
-                                                    std::vector<std::pair<int, int>>, Degree>;
-  INFO("Degree " << Degree);
-  auto pq = pq_t{};
+    using pq_t = multiqueue::sequential::kv_pq<int, int, std::less<int>, Degree>;
 
-  SECTION("push increasing numbers and pop them") {
-    for (int n = 0; n < 1000; ++n) {
-      pq.push({n, 0});
-      REQUIRE(pq.top().first == 0);
-    }
+    INFO("Degree " << Degree);
+    auto pq = pq_t{};
+
+    SECTION("push increasing numbers and pop them") {
+        for (int n = 0; n < 1000; ++n) {
+            pq.push({n, 0});
+            REQUIRE(pq.top().first == 0);
+        }
 
     for (int i = 0; i < 1000; ++i) {
       REQUIRE(pq.top().first == i);

@@ -17,6 +17,16 @@ constexpr bool operator<(no_default_no_copy_type const &lhs,
   return lhs.i < rhs.i;
 }
 
+constexpr bool operator==(no_default_no_copy_type const &lhs,
+                         no_default_no_copy_type const &rhs) noexcept {
+  return lhs.i == rhs.i;
+}
+
+constexpr bool operator!=(no_default_no_copy_type const &lhs,
+                         no_default_no_copy_type const &rhs) noexcept {
+  return lhs.i != rhs.i;
+}
+
 template <typename T> struct mod_10_compare {
   bool operator()(T const &lhs, T const &rhs) const {
     return (lhs % 10) < (rhs % 10);
@@ -30,5 +40,6 @@ template <typename T> struct counting_compare {
   }
   inline static unsigned int counter = 0;
 };
+
 
 #endif /* end of include guard: DEFINITIONS_HPP_1XVO9BK7 */
