@@ -3,8 +3,6 @@
 #include <fstream>
 #include <iostream>
 #include <numeric>
-#include <set>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -27,13 +25,6 @@ std::ostream& operator<<(std::ostream& out, log_entry const& line) {
         << " Inserting thread: " << line.other_thread_id << " Value: " << line.value;
     return out;
 }
-
-struct pair_hash {
-    template <typename First, typename Second>
-    std::size_t operator()(std::pair<First, Second> const& pair) const noexcept {
-        return std::hash<First>{}(pair.first) ^ std::hash<Second>{}(pair.second);
-    }
-};
 
 int main() {
     std::vector<std::vector<log_entry>> insertions;

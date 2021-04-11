@@ -8,7 +8,6 @@
 #include <limits>
 #include <memory>
 #include <new>
-#include <optional>
 #include <random>
 #include <thread>
 #include <type_traits>
@@ -53,7 +52,7 @@ class Timer {
 
 struct Settings {
     std::size_t prefill_size = 1'000'000;
-    std::chrono::milliseconds test_duration = 1s;
+    std::chrono::milliseconds test_duration = 3s;
     unsigned int num_threads = 4;
     value_type key_min = std::numeric_limits<value_type>::min();
     value_type key_max = std::numeric_limits<value_type>::max();
@@ -232,7 +231,6 @@ std::atomic_bool stop_flag;
 
 template <InsertPolicy insert_policy, KeyDistribution key_distribution>
 struct Task {
-  template <typename PQ = PriorityQueue>
     static void run(thread_coordination::Context ctx, PriorityQueue& pq, Settings const& settings) {
         std::vector<LogEntry> local_insertions;
         local_insertions.reserve(settings.prefill_size + 1'000'000);
@@ -243,7 +241,7 @@ struct Task {
 
         /* if constexpr (util::PriorityQueueTraits<PQ>::has_thread_init) { */
 #ifdef PQ_SPRAYLIST
-            pq.init_thread(ctx.get_num_threads());
+        pq.init_thread(ctx.get_num_threads());
 #endif
         /* } */
 
@@ -382,7 +380,7 @@ int main(int argc, char* argv[]) {
       ("j,threads", "Specify the number of threads "
        "(default: 4)", cxxopts::value<unsigned int>(), "NUMBER")
       ("t,time", "Specify the test timeout in ms "
-       "(default: 1000)", cxxopts::value<unsigned int>(), "NUMBER")
+       "(default: 3000)", cxxopts::value<unsigned int>(), "NUMBER")
       ("d,key-distribution", "Specify the key distribution as one of \"uniform\", \"dijkstra\", \"ascending\", \"descending\" "
        "(default: uniform)", cxxopts::value<std::string>(), "ARG")
       ("h,help", "Print this help");
@@ -437,10 +435,14 @@ int main(int argc, char* argv[]) {
         std::cerr << e.what() << std::endl;
         return 1;
     }
+
     if (settings.num_threads > (1 << bits_for_thread_id) - 1) {
         std::cerr << "Too many threads!" << std::endl;
         return 1;
     }
+#ifndef NDEBUG
+    std::clog << "Using debug build!\n\n";
+#endif
     std::clog << "Settings: \n\t"
               << "Prefill size: " << settings.prefill_size << "\n\t"
               << "Test duration: " << settings.test_duration.count() << " ms\n\t"
@@ -455,6 +457,7 @@ int main(int argc, char* argv[]) {
     PriorityQueue pq{settings.num_threads};
 
     start_flag.store(false, std::memory_order_relaxed);
+    stop_flag.store(false, std::memory_order_relaxed);
     insertions.resize(settings.num_threads);
     deletions.resize(settings.num_threads);
     failed_deletions.resize(settings.num_threads);
@@ -469,13 +472,14 @@ int main(int argc, char* argv[]) {
     std::cout << settings.num_threads << '\n';
     for (unsigned int t = 0; t < settings.num_threads; ++t) {
         for (auto const& [tick, key, value] : insertions[t]) {
-            std::cout << "i " << t << ' ' << tick << ' ' << key << ' ' << value << '\n';
+            std::cout << "i " << t << ' ' << tick << ' ' << key << ' ' << get_thread_id(value) << ' '
+                      << get_elem_id(value) << '\n';
         }
     }
 
     for (unsigned int t = 0; t < settings.num_threads; ++t) {
         for (auto const& [tick, key, value] : deletions[t]) {
-            std::cout << "d " << t << ' ' << tick << ' ' << key << ' ' << value << ' ' << get_thread_id(value) << ' '
+            std::cout << "d " << t << ' ' << tick << ' ' << key << ' ' << get_thread_id(value) << ' '
                       << get_elem_id(value) << '\n';
         }
     }

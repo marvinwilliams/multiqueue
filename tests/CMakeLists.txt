@@ -1,8 +1,7 @@
 add_library(basic_test INTERFACE)
 target_link_libraries(basic_test INTERFACE multiqueue multiqueue_internal)
 target_compile_features(basic_test INTERFACE cxx_std_17)
-target_compile_options(basic_test INTERFACE "-UNDEBUG")
-target_include_directories(basic_test INTERFACE "${CMAKE_LIST_DIRECTORY}")
+target_include_directories(basic_test INTERFACE "${CMAKE_CURRENT_LIST_DIR}")
 
 add_library(generic_test INTERFACE)
 target_link_libraries(generic_test INTERFACE threading basic_test)
@@ -81,7 +80,7 @@ function(add_stickiness_generic_test c k)
     PRIVATE
       PQ_MQ_FULLBUFFERING
       MQ_CONFIG_C=${c}
-      MQ_CONFIG_STICKINESS=${stickiness}
+      MQ_CONFIG_STICKINESS=${k}
       )
   target_link_libraries(${target_name} PRIVATE multiqueue::multiqueue generic_test)
 endfunction()
@@ -103,7 +102,7 @@ add_stickiness_generic_test(16 16)
 add_stickiness_generic_test(16 64)
 
 function(add_nodesize_generic_test ns)
-  set(target_name numamq_ns_${ns}_generic_test)
+  set(target_name mergingmq_ns_${ns}_generic_test)
   add_executable(${target_name})
   target_compile_definitions(${target_name}
     PRIVATE
@@ -120,7 +119,7 @@ add_nodesize_generic_test(128)
 add_nodesize_generic_test(512)
 
 add_executable(evaluate_quality evaluate_quality.cpp)
-target_link_libraries(evaluate_quality PRIVATE multiqueue_warnings)
+target_link_libraries(evaluate_quality PRIVATE multiqueue_internal)
 target_link_libraries_system(evaluate_quality PRIVATE cxxopts tlx)
 target_compile_features(
   evaluate_quality PRIVATE

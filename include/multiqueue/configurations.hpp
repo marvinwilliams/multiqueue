@@ -65,7 +65,7 @@ struct FullBuffering : Default {
 };
 
 struct Merging : Default {
-    static constexpr bool UseMergeHeap = false;
+    static constexpr bool UseMergeHeap = true;
 };
 
 struct Numa : Default {
@@ -73,7 +73,7 @@ struct Numa : Default {
 };
 
 struct NumaMerging : Default {
-    static constexpr bool UseMergeHeap = false;
+    static constexpr bool UseMergeHeap = true;
     static constexpr bool NumaFriendly = true;
 };
 

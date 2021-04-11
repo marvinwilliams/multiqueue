@@ -176,7 +176,7 @@ struct PriorityQueueConfiguration<false, false, true, Key, T, Comparator, Config
         if (deletion_buffer.empty() || !heap.get_comparator()(value.first, deletion_buffer.back().first)) {
             heap.insert(value);
         } else {
-            if (deletion_buffer.size() == Configuration::DeletionBufferSize) {
+            if (deletion_buffer.full()) {
                 heap.insert(std::move(deletion_buffer.back()));
                 deletion_buffer.pop_back();
             }
@@ -237,8 +237,8 @@ struct PriorityQueueConfiguration<false, true, true, Key, T, Comparator, Configu
 
     void push(typename heap_type::value_type const &value) {
         if (!deletion_buffer.empty() && heap.get_comparator()(value.first, deletion_buffer.back().first)) {
-            if (deletion_buffer.size() == Configuration::DeletionBufferSize) {
-                if (insertion_buffer.size() == Configuration::InsertionBufferSize) {
+            if (deletion_buffer.full()) {
+                if (insertion_buffer.full()) {
                     flush_insertion_buffer();
                     heap.insert(std::move(deletion_buffer.back()));
                 } else {
@@ -252,12 +252,12 @@ struct PriorityQueueConfiguration<false, true, true, Key, T, Comparator, Configu
             deletion_buffer.insert_at(pos, value);
             return;
         }
-        if (insertion_buffer.size() == Configuration::InsertionBufferSize) {
+        if (insertion_buffer.full()) {
             flush_insertion_buffer();
-            heap.insert(std::move(deletion_buffer.back()));
+            heap.insert(value);
             return;
         } else {
-            insertion_buffer.push_back(std::move(deletion_buffer.back()));
+            insertion_buffer.push_back(value);
         }
     }
 
@@ -292,8 +292,9 @@ struct PriorityQueueConfiguration<true, true, true, Key, T, Comparator, Configur
     }
 
     inline void flush_insertion_buffer() {
-        assert(insertion_buffer.size() == Configuration::InsertionBufferSize);
-        std::sort(insertion_buffer.begin(), insertion_buffer.end(), heap.get_comparator());
+        assert(insertion_buffer.full());
+        std::sort(insertion_buffer.begin(), insertion_buffer.end(),
+                  [&](auto const &lhs, auto const &rhs) { return heap.get_comparator()(lhs.first, rhs.first); });
         for (std::size_t i = 0; i < insertion_buffer.size(); i += Configuration::NodeSize) {
             heap.insert(insertion_buffer.begin() + (i * Configuration::NodeSize),
                         insertion_buffer.begin() + ((i + 1) * Configuration::NodeSize));
@@ -305,30 +306,33 @@ struct PriorityQueueConfiguration<true, true, true, Key, T, Comparator, Configur
         if (!deletion_buffer.empty()) {
             return true;
         }
-        if (insertion_buffer.size() == Configuration::InsertionBufferSize) {
+        if (insertion_buffer.full()) {
             flush_insertion_buffer();
         }
         if (!heap.empty()) {
             if (!insertion_buffer.empty()) {
                 auto insert_it = std::partition(insertion_buffer.begin(), insertion_buffer.end(), [&](auto const &v) {
-                    return heap.get_comparator()(heap.top_node().back(), v);
+                    return heap.get_comparator()(heap.top_node().back().first, v.first);
                 });
-                std::sort(insert_it, insertion_buffer.end(), heap.get_comparator());
+                std::sort(insert_it, insertion_buffer.end(), [&](auto const &lhs, auto const &rhs) {
+                    return heap.get_comparator()(rhs.first, lhs.first);
+                });
                 auto heap_it = heap.top_node().begin();
                 for (auto current = insert_it; current != insertion_buffer.end(); ++current) {
-                    while (heap.get_comparator()(*heap_it, *current)) {
+                    while (heap.get_comparator()(heap_it->first, current->first)) {
                         deletion_buffer.push_back(std::move(*heap_it++));
                     }
                     deletion_buffer.push_back(std::move(*current));
                 }
-                insertion_buffer.set_size(insert_it - insertion_buffer.begin());
+                insertion_buffer.set_size(static_cast<std::size_t>(insert_it - insertion_buffer.begin()));
                 std::move(heap_it, heap.top_node().end(), std::back_inserter(deletion_buffer));
             } else {
-                std::move(heap.top_node.begin(), heap.top_node().end(), std::back_inserter(deletion_buffer));
+                std::move(heap.top_node().begin(), heap.top_node().end(), std::back_inserter(deletion_buffer));
             }
             heap.pop_node();
         } else if (!insertion_buffer.empty()) {
-            std::sort(insertion_buffer.begin(), insertion_buffer.end(), heap.get_comparator());
+            std::sort(insertion_buffer.begin(), insertion_buffer.end(),
+                      [&](auto const &lhs, auto const &rhs) { return heap.get_comparator()(lhs.first, rhs.first); });
             std::move(insertion_buffer.begin(), insertion_buffer.end(), std::back_inserter(deletion_buffer));
             insertion_buffer.clear();
         }
@@ -343,13 +347,11 @@ struct PriorityQueueConfiguration<true, true, true, Key, T, Comparator, Configur
 
     void push(typename heap_type::value_type const &value) {
         if (!deletion_buffer.empty() && heap.get_comparator()(value.first, deletion_buffer.back().first)) {
-            if (deletion_buffer.size() == Configuration::DeletionBufferSize) {
-                if (insertion_buffer.size() == Configuration::InsertionBufferSize) {
+            if (deletion_buffer.full()) {
+                if (insertion_buffer.full()) {
                     flush_insertion_buffer();
-                    heap.insert(std::move(deletion_buffer.back()));
-                } else {
-                    insertion_buffer.push_back(std::move(deletion_buffer.back()));
                 }
+                insertion_buffer.push_back(std::move(deletion_buffer.back()));
                 deletion_buffer.pop_back();
             }
             std::size_t pos = deletion_buffer.size();
@@ -358,13 +360,10 @@ struct PriorityQueueConfiguration<true, true, true, Key, T, Comparator, Configur
             deletion_buffer.insert_at(pos, value);
             return;
         }
-        if (insertion_buffer.size() == Configuration::InsertionBufferSize) {
+        if (insertion_buffer.full()) {
             flush_insertion_buffer();
-            heap.insert(std::move(deletion_buffer.back()));
-            return;
-        } else {
-            insertion_buffer.push_back(std::move(deletion_buffer.back()));
         }
+        insertion_buffer.push_back(value);
     }
 
     void pop() {
@@ -680,6 +679,9 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
         }
         if (Configuration::NumaFriendly) {
             ss << "Numa friendly\n";
+#ifndef NUMA_SUPPORT
+            ss << "No libnuma support!\n";
+#endif
         }
         ss << "Preallocation for " << Configuration::ReservePerQueue << " elements per internal pq\n";
         return ss.str();

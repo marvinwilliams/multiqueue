@@ -135,6 +135,8 @@ class ring_buffer_iterator {
 template <typename T, std::size_t N>
 struct ring_buffer {
     static_assert(N > 0u && (N & (N - 1u)) == 0u, "N must be greater than 0 and a power of two");
+    static constexpr std::size_t Capacity = N;
+
     using value_type = T;
     using size_type = std::size_t;
     using difference_type = std::ptrdiff_t;
@@ -158,6 +160,10 @@ struct ring_buffer {
    public:
     inline bool empty() const noexcept {
         return begin_ == end_ && !full_;
+    }
+
+    inline bool full() const noexcept {
+        return full_;
     }
 
     inline std::size_t size() const noexcept {

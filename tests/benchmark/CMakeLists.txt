@@ -1,11 +1,12 @@
 add_library(basic_benchmark INTERFACE)
-target_link_libraries(basic_benchmark INTERFACE multiqueue multiqueue_warnings)
+target_link_libraries(basic_benchmark INTERFACE multiqueue multiqueue_internal)
 target_compile_features(basic_benchmark INTERFACE cxx_std_17)
 target_compile_options(basic_benchmark INTERFACE $<$<CONFIG:Release>:-march=native>)
 if(CMAKE_COMPILER_IS_GNUCXX)
   target_link_options(basic_benchmark INTERFACE $<$<CONFIG:Release>:-flto>)
 endif()
-target_include_directories(basic_benchmark INTERFACE "${CMAKE_LIST_DIRECTORY}/..")
+target_include_directories(basic_benchmark INTERFACE "${CMAKE_CURRENT_LIST_DIR}/..")
+target_include_directories(basic_benchmark INTERFACE "${CMAKE_CURRENT_LIST_DIR}")
 
 add_executable(micro_benchmarks main.cpp heap.cpp)
 target_link_libraries(micro_benchmarks PRIVATE multiqueue::multiqueue basic_benchmark)
@@ -89,7 +90,7 @@ function(add_stickiness_throughput_benchmark c k)
     PRIVATE
       PQ_MQ_FULLBUFFERING
       MQ_CONFIG_C=${c}
-      MQ_CONFIG_STICKINESS=${stickiness}
+      MQ_CONFIG_STICKINESS=${k}
       )
   target_link_libraries(${target_name} PRIVATE multiqueue::multiqueue throughput_benchmark)
 endfunction()
@@ -111,7 +112,7 @@ add_stickiness_throughput_benchmark(16 16)
 add_stickiness_throughput_benchmark(16 64)
 
 function(add_nodesize_throughput_benchmark ns)
-  set(target_name numamq_ns_${ns}_throughput_benchmark)
+  set(target_name mergingmq_ns_${ns}_throughput_benchmark)
   add_executable(${target_name})
   target_compile_definitions(${target_name}
     PRIVATE

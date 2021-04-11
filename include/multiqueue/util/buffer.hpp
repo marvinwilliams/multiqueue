@@ -21,6 +21,7 @@ namespace util {
 template <typename T, std::size_t N>
 struct buffer {
     static_assert(N > 0, "N must be greater than 0");
+    static constexpr std::size_t Capacity = N;
 
     using value_type = T;
     using size_type = std::size_t;
@@ -39,12 +40,16 @@ struct buffer {
     size_type size_ = 0;
 
    public:
-    inline size_type size() const noexcept {
-        return size_;
-    }
-
     inline bool empty() const noexcept {
         return size_ == 0;
+    }
+
+    inline bool full() const noexcept {
+        return size_ == N;
+    }
+
+    inline size_type size() const noexcept {
+        return size_;
     }
 
     inline void set_size(size_type const size) noexcept {
