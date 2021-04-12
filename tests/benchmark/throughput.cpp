@@ -426,7 +426,7 @@ int main(int argc, char* argv[]) {
     coordinator.join();
     std::cout << "Insertions: " << global_insertions << "\nDeletions: " << global_deletions
               << "\nFailed deletions: " << global_failed_deletions << "\nOps/s: " << std::fixed << std::setprecision(1)
-              << (1000.0 * static_cast<double>(global_insertions + global_deletions + global_failed_deletions)) /
+              << (1000.0 * static_cast<double>(global_insertions + global_deletions)) /
             static_cast<double>(settings.test_duration.count())
               << std::endl;
     std::clog << "done" << std::endl;
