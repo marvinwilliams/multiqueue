@@ -253,10 +253,12 @@ struct Task {
         std::pair<key_type, value_type> retval;
         while (!stop_flag.load(std::memory_order_relaxed)) {
             if (inserter()) {
+        
+                key_type const key = key_generator();
 #ifdef PQ_IS_WRAPPER
-                pq.push({key_generator(), 0});
+                pq.push({key, key});
 #else
-                pq.push(handle, {key_generator(), 0});
+                pq.push(handle, {key, key});
 #endif
                 ++insertions;
             } else {
