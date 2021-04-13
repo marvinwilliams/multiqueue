@@ -19,10 +19,16 @@ class capq {
     capq_wrapper_type* pq_;
 
    public:
+    struct Handle{};
+
     capq(unsigned int = 0);
 
-    void push(std::pair<uint32_t, uint32_t> const& value);
-    bool extract_top(std::pair<uint32_t, uint32_t>& retval);
+    constexpr Handle get_handle(unsigned int) {
+        return Handle{};
+    }
+
+    void push(Handle, std::pair<uint32_t, uint32_t> const& value);
+    bool extract_top(Handle, std::pair<uint32_t, uint32_t>& retval);
 
     static std::string description() {
         std::stringstream ss;

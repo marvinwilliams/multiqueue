@@ -5,7 +5,6 @@
 
 #include "k_lsm/k_lsm.h"
 
-#include <cstdint>
 #include <string>
 #include <utility>
 
@@ -17,13 +16,20 @@ class klsm {
     kpq::k_lsm<KeyType, ValueType, 256> pq_;
 
    public:
+    struct Handle{};
+
     klsm(unsigned int = 0) : pq_{} {
     }
 
-    void push(std::pair<KeyType, ValueType> const& value) {
+    constexpr Handle get_handle(unsigned int) {
+        return Handle{};
+    }
+
+    void push(Handle, std::pair<KeyType, ValueType> const& value) {
         pq_.insert(value.first, value.second);
     }
-    bool extract_top(std::pair<KeyType, ValueType>& retval) {
+
+    bool extract_top(Handle, std::pair<KeyType, ValueType>& retval) {
         return pq_.delete_min(retval.first, retval.second);
     }
 

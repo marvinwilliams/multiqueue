@@ -19,13 +19,18 @@ class spraylist {
     pq_t* pq_;
 
    public:
+    struct Handle{};
     spraylist(size_t const num_threads);
     virtual ~spraylist();
 
+    constexpr Handle get_handle(unsigned int) {
+        return Handle{};
+    }
+
     void init_thread(size_t const num_threads);
 
-    void push(std::pair<uint32_t, uint32_t> const& value);
-    bool extract_top(std::pair<uint32_t, uint32_t>& retval);
+    void push(Handle, std::pair<uint32_t, uint32_t> const& value);
+    bool extract_top(Handle, std::pair<uint32_t, uint32_t>& retval);
 
     static std::string description() {
         return "spraylist";
