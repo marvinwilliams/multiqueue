@@ -13,7 +13,7 @@ generate-build:
     - uname -a
     - gcc -v
     - cmake -version
-    - cmake -B build -Dmultiqueue_BUILD_EXAMPLES=0 -Dmultiqueue_BUILD_BENCHMARKS=1
+    - cmake -B build -Dmultiqueue_BUILD_EXAMPLES=1 -Dmultiqueue_BUILD_TESTS=1 -Dmultiqueue_BUILD_BENCHMARKS=0 -Dmultiqueue_GENERATE_DOCS=1
   variables:
     GIT_SUBMODULE_STRATEGY: normal
   artifacts:
@@ -27,6 +27,7 @@ build-tests:
     - generate-build
   script:
     - cmake --build build --target all_tests
+    - cmake --build build --target evaluate_quality
   artifacts:
     name: built_tests
     paths:
@@ -34,21 +35,12 @@ build-tests:
   variables:
     GIT_SUBMODULE_STRATEGY: normal
 
-# build-examples:
-#   stage: build
-#   dependencies:
-#     - generate-build
-#   script:
-#     - cmake --build build --target examples
-#   variables:
-#     GIT_SUBMODULE_STRATEGY: normal
-
-build-benchmarks:
+build-examples:
   stage: build
   dependencies:
     - generate-build
   script:
-    - cmake --build build --target all_benchmarks
+    - echo "Skipping examples for now"
   variables:
     GIT_SUBMODULE_STRATEGY: normal
 
@@ -61,7 +53,7 @@ test-ci-only:
   dependencies:
     - build-tests
   script:
-    - ./build/tests/unit_tests
+    - ctest --test-dir build -E "performance_large"
 
 build-and-test-cdash:
   stage: test

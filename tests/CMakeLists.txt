@@ -8,13 +8,26 @@ target_link_libraries(performance INTERFACE threading basic_test)
 target_link_libraries_system(performance INTERFACE cxxopts)
 target_sources(performance INTERFACE performance.cpp)
 
+add_executable(evaluate_quality evaluate_quality.cpp)
+target_link_libraries(evaluate_quality PRIVATE multiqueue_internal)
+target_link_libraries_system(evaluate_quality PRIVATE cxxopts tlx)
+target_compile_features(
+  evaluate_quality PRIVATE
+  cxx_std_17
+)
+
 add_custom_target(all_performances COMMENT "Build the performance test for all priority queues")
 
 function(add_wrapper_performance name define)
-  add_executable(wrapper_${name}_performance)
-  target_compile_definitions(wrapper_${name}_performance PRIVATE ${define})
-  target_link_libraries(wrapper_${name}_performance PRIVATE ${name}_wrapper performance)
-  add_dependencies(all_performances wrapper_${name}_performance)
+  set(target_name wrapper_${name}_performance)
+  add_executable(${target_name})
+  target_compile_definitions(${target_name} PRIVATE ${define})
+  target_link_libraries(${target_name} PRIVATE ${name}_wrapper performance)
+  add_dependencies(all_performances ${target_name})
+if(BUILD_TESTING)
+  add_test(NAME ${target_name}_small COMMAND /bin/bash -c "$<TARGET_FILE:${target_name}> -n 0 -j 1 -t 100 | $<TARGET_FILE:evaluate_quality> -v")
+  add_test(NAME ${target_name}_large COMMAND /bin/bash -c "$<TARGET_FILE:${target_name}> -n 1000000 -j 8 -t 500 | $<TARGET_FILE:evaluate_quality> -v")
+endif()
 endfunction()
 
 add_wrapper_performance(capq PQ_CAPQ)
@@ -29,6 +42,10 @@ function(add_mq_performance name define)
   target_compile_definitions(${target_name} PRIVATE ${define})
   target_link_libraries(${target_name} PRIVATE multiqueue::multiqueue performance)
   add_dependencies(all_performances ${target_name})
+if(BUILD_TESTING)
+  add_test(NAME ${target_name}_small COMMAND /bin/bash -c "$<TARGET_FILE:${target_name}> -n 0 -j 1 -t 100 | $<TARGET_FILE:evaluate_quality> -v")
+  add_test(NAME ${target_name}_large COMMAND /bin/bash -c "$<TARGET_FILE:${target_name}> -n 1000000 -j 8 -t 500 | $<TARGET_FILE:evaluate_quality> -v")
+endif()
 endfunction()
 
 add_mq_performance(nobufferingmq PQ_MQ_NOBUFFERING)
@@ -117,14 +134,6 @@ add_nodesize_performance(8)
 add_nodesize_performance(64)
 add_nodesize_performance(128)
 add_nodesize_performance(512)
-
-add_executable(evaluate_quality evaluate_quality.cpp)
-target_link_libraries(evaluate_quality PRIVATE multiqueue_internal)
-target_link_libraries_system(evaluate_quality PRIVATE cxxopts tlx)
-target_compile_features(
-  evaluate_quality PRIVATE
-  cxx_std_17
-)
 
 add_subdirectory(unit_tests)
 

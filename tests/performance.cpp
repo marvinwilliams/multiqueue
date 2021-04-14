@@ -83,7 +83,7 @@ struct KeyGenerator {
 
     explicit KeyGenerator(unsigned int id, Settings const& settings);
 
-    inline bool operator()() {
+    inline key_type operator()() {
         switch (distribution) {
             case Distribution::Uniform:
                 return dist(gen);
@@ -127,7 +127,7 @@ Inserter::Inserter(unsigned int id, Settings const& settings)
 }
 
 KeyGenerator::KeyGenerator(unsigned int id, Settings const& settings)
-    : distribution{settings.key_distribution}, gen{id} {
+    : distribution{settings.key_distribution}, gen(id) {
     switch (distribution) {
         case Distribution::Uniform:
             dist = std::uniform_int_distribution<key_type>(settings.min_key, settings.max_key);

@@ -189,7 +189,7 @@ int main(int argc, char* argv[]) {
                           << std::endl;
                 return 1;
             }
-            entry.failed = false;
+            entry.failed = true;
             deletions.push_back(entry);
         } else {
             std::cerr << "Line " << line << ": "
@@ -206,9 +206,9 @@ int main(int argc, char* argv[]) {
         std::cerr << "Too few deletions" << std::endl;
         return 1;
     }
-    std::clog << "Sorting deletions...\n";
+    std::clog << "Sorting deletions..." << std::flush;
     std::sort(deletions.begin(), deletions.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
-    std::cout << std::flush;
+    std::clog << "done\n";
     std::vector<size_t> rank_histogram;
     std::vector<size_t> delay_histogram;
     std::vector<size_t> top_delay_histogram;
@@ -282,6 +282,8 @@ int main(int argc, char* argv[]) {
         }
     }
     std::clog << "\rProcessed 100.0%" << std::endl;
+    std::clog << "Invalid failed deletions: " << failed_deletions << std::endl;
+    std::clog << "Writing histograms..." << std::flush;
     {
         auto out_f = std::ofstream{out_rank};
         for (size_t i = 0; i < rank_histogram.size(); ++i) {
@@ -309,7 +311,6 @@ int main(int argc, char* argv[]) {
         }
         out_f.close();
     }
-    std::clog << "Histograms have been written" << std::endl;
-    std::clog << "Invalid failed deletions: " << failed_deletions << std::endl;
+    std::clog << "done" << std::endl;
     return 0;
 }
