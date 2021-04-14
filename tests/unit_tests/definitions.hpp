@@ -1,5 +1,5 @@
-#ifndef DEFINITIONS_HPP_1XVO9BK7
-#define DEFINITIONS_HPP_1XVO9BK7
+#ifndef TESTS_UNIT_TESTS_DEFINITIONS_HPP_INCLUDED
+#define TESTS_UNIT_TESTS_DEFINITIONS_HPP_INCLUDED
 
 struct no_default_no_copy_type {
   int i;
@@ -42,4 +42,4 @@ template <typename T> struct counting_compare {
 };
 
 
-#endif /* end of include guard: DEFINITIONS_HPP_1XVO9BK7 */
+#endif /* end of include guard: TESTS_UNIT_TESTS_DEFINITIONS_HPP_INCLUDED */

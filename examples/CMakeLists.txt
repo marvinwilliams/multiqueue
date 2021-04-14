@@ -1,7 +1,4 @@
 add_executable(example example.cpp)
 target_link_libraries(example PRIVATE multiqueue::multiqueue)
-target_link_libraries(example PRIVATE multiqueue_warnings)
-target_compile_options(example PRIVATE "-O3")
-target_compile_options(example PRIVATE "-march=native")
-target_compile_options(example PRIVATE "-g")
+target_link_libraries(example PRIVATE multiqueue_internal)
 target_link_libraries(example PRIVATE "papi")

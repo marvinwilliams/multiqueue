@@ -19,26 +19,11 @@ endif()
 option(${PROJECT_NAME}_GENERATE_DOCS "Add a target to generate the documentation with doxygen" OFF)
 cmake_dependent_option(${PROJECT_NAME}_INSTALL_DOCS "Add the generated documentation to the install list" ON, ${PROJECT_NAME}_GENERATE_DOCS OFF)
 option("${PROJECT_NAME}_BUILD_TESTS" "Build tests for ${PROJECT_NAME}" ON)
-option("${PROJECT_NAME}_BUILD_BENCHMARKS" "Build benchmarks" OFF)
-option("${PROJECT_NAME}_BUILD_EXAMPLES" "Build examples" OFF)
+option("${PROJECT_NAME}_BUILD_BENCHMARKS" "Build benchmarks" ON)
+option("${PROJECT_NAME}_BUILD_EXAMPLES" "Build examples" ON)
 
 execute_process(COMMAND getconf LEVEL1_DCACHE_LINESIZE OUTPUT_VARIABLE L1_CACHE_LINESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
 execute_process(COMMAND getconf PAGESIZE OUTPUT_VARIABLE PAGESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
-
-FIND_PATH(NUMA_INCLUDE_DIR NAME numa.h
-  HINTS $ENV{HOME}/local/include /opt/local/include /usr/local/include /usr/include)
-
-FIND_LIBRARY(NUMA_LIBRARY NAME numa
-  HINTS $ENV{HOME}/local/lib64 $ENV{HOME}/local/lib /usr/local/lib64 /usr/local/lib /opt/local/lib64 /opt/local/lib /usr/lib64 /usr/lib
-)
-message(STATUS "Looking for numa")
-if (NUMA_INCLUDE_DIR AND NUMA_LIBRARY)
-  set(NUMA_FOUND TRUE)
-  message(STATUS "Looking for numa - found")
-else()
-  set(NUMA_FOUND FALSE)
-  message(STATUS "Looking for numa - not found")
-endif()
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
@@ -76,8 +61,8 @@ target_compile_features(
   cxx_std_17
 )
 
-if (NUMA_FOUND)
-  target_compile_definitions("${PROJECT_NAME}_compile_requirements" INTERFACE NUMA_SUPPORT)
+if (Numa_FOUND)
+  target_compile_definitions("${PROJECT_NAME}_compile_requirements" INTERFACE HAVE_NUMA)
 endif()
 
 target_link_libraries("${PROJECT_NAME}" INTERFACE "${PROJECT_NAME}_compile_requirements")
@@ -135,6 +120,11 @@ if(${PROJECT_NAME}_BUILD_TESTS OR ${PROJECT_NAME}_BUILD_BENCHMARKS)
   # Find the pthread library
   set(THREADS_PREFER_PTHREAD_FLAG ON)
   find_package(Threads)
+  find_package(Numa)
+
+  set(CATCH_BUILD_TESTING OFF CACHE BOOL "Build SelfTest project" FORCE)
+  set(CATCH_BUILD_EXAMPLES OFF CACHE BOOL "Build documentation examples" FORCE)
+  set(CATCH_BUILD_EXTRA_TESTS OFF CACHE BOOL "Build extra tests" FORCE)
   find_package(Catch2 QUIET)
   if (NOT Catch_FOUND)
     if(IS_DIRECTORY "${EXTERNAL_DIR}/Catch2")
@@ -144,6 +134,9 @@ if(${PROJECT_NAME}_BUILD_TESTS OR ${PROJECT_NAME}_BUILD_BENCHMARKS)
       message(SEND_ERROR "Could not find Catch2 in ${EXTERNAL_DIR}")
     endif()
   endif()
+
+  set(CXXOPTS_BUILD_EXAMPLES OFF CACHE BOOL "Set to ON to build examples" FORCE)
+  set(CXXOPTS_BUILD_TESTS OFF CACHE BOOL "Set to ON to build tests" FORCE)
   find_package(cxxopts QUIET)
   if (NOT cxxopts_FOUND)
     if(IS_DIRECTORY "${EXTERNAL_DIR}/cxxopts")
@@ -152,6 +145,10 @@ if(${PROJECT_NAME}_BUILD_TESTS OR ${PROJECT_NAME}_BUILD_BENCHMARKS)
       message(SEND_ERROR "Could not find cxxopts in ${EXTERNAL_DIR}")
     endif()
   endif()
+
+  set(TLX_BUILD_STATIC_LIBS OFF CACHE BOOL "Build static library version of libtlx" FORCE)
+  set(TLX_BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared library version of libtlx" FORCE)
+
   find_package(tlx)
   if (NOT tlx_FOUND)
     if(IS_DIRECTORY "${EXTERNAL_DIR}/tlx")

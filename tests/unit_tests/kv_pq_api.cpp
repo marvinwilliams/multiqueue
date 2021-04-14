@@ -1,6 +1,6 @@
 #include "catch2/catch.hpp"
+#include "definitions.hpp"
 #include "multiqueue/sequential/kv_pq.hpp"
-#include "utils.hpp"
 
 #include <array>
 #include <functional>

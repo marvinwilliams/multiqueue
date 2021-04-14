@@ -19,7 +19,7 @@
 #include "sequential/heap/heap.hpp"
 #include "system_config.hpp"
 
-#ifdef NUMA_SUPPORT
+#ifdef HAVE_NUMA
 #include <numa.h>
 #endif
 #include <algorithm>
@@ -509,7 +509,7 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
     explicit multiqueue(unsigned int const num_threads, allocator_type const &alloc = allocator_type())
         : base_type{num_threads}, pq_list_size_{num_threads * Configuration::C}, alloc_(alloc) {
         assert(num_threads >= 1);
-#ifdef NUMA_SUPPORT
+#ifdef HAVE_NUMA
         if (Configuration::NumaFriendly) {
             numa_set_interleave_mask(numa_all_nodes_ptr);
         }
@@ -518,13 +518,13 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
         for (std::size_t i = 0; i < pq_list_size_; ++i) {
             alloc_traits::construct(alloc_, pq_list_ + i);
         }
-#ifdef NUMA_SUPPORT
+#ifdef HAVE_NUMA
         if (Configuration::NumaFriendly) {
             numa_set_interleave_mask(numa_no_nodes_ptr);
         }
 #endif
         for (std::size_t i = 0; i < pq_list_size_; ++i) {
-#ifdef NUMA_SUPPORT
+#ifdef HAVE_NUMA
             if (Configuration::NumaFriendly) {
                 numa_set_preferred(
                     static_cast<int>(i / (pq_list_size_ / (static_cast<std::size_t>(numa_max_node()) + 1))));
@@ -545,7 +545,7 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
                         allocator_type const &alloc = allocator_type())
         : base_type{num_threads, comp}, pq_list_size_{num_threads * Configuration::C}, alloc_(alloc) {
         assert(num_threads >= 1);
-#ifdef NUMA_SUPPORT
+#ifdef HAVE_NUMA
         if (Configuration::NumaFriendly) {
             numa_set_interleave_mask(numa_all_nodes_ptr);
         }
@@ -554,13 +554,13 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
         for (std::size_t i = 0; i < pq_list_size_; ++i) {
             std::allocator_traits<allocator_type>::construct(alloc_, pq_list_ + i, comp);
         }
-#ifdef NUMA_SUPPORT
+#ifdef HAVE_NUMA
         if (Configuration::NumaFriendly) {
             numa_set_interleave_mask(numa_no_nodes_ptr);
         }
 #endif
         for (std::size_t i = 0; i < pq_list_.size(); ++i) {
-#ifdef NUMA_SUPPORT
+#ifdef HAVE_NUMA
             if (Configuration::NumaFriendly) {
                 numa_set_preferred(
                     static_cast<int>(i / (pq_list_.size() / (static_cast<std::size_t>(numa_max_node()) + 1))));
@@ -663,27 +663,27 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
 
     static std::string description() {
         std::stringstream ss;
-        ss << "multiqueue\n";
-        ss << "C: " << Configuration::C << '\n';
-        ss << "K: " << Configuration::K << '\n';
+        ss << "multiqueue\n\t";
+        ss << "C: " << Configuration::C << "\n\t";
+        ss << "K: " << Configuration::K << "\n\t";
         if (Configuration::UseMergeHeap) {
-            ss << "Using merge heap, node size: " << Configuration::NodeSize << '\n';
+            ss << "Using merge heap, node size: " << Configuration::NodeSize << "\n\t";
         } else {
             if (Configuration::WithDeletionBuffer) {
-                ss << "Using deletion buffer with size: " << Configuration::DeletionBufferSize << '\n';
+                ss << "Using deletion buffer with size: " << Configuration::DeletionBufferSize << "\n\t";
             }
             if (Configuration::WithInsertionBuffer) {
-                ss << "Using insertion buffer with size: " << Configuration::InsertionBufferSize << '\n';
+                ss << "Using insertion buffer with size: " << Configuration::InsertionBufferSize << "\n\t";
             }
-            ss << "Heap degree: " << Configuration::HeapDegree << '\n';
+            ss << "Heap degree: " << Configuration::HeapDegree << "\n\t";
         }
         if (Configuration::NumaFriendly) {
-            ss << "Numa friendly\n";
-#ifndef NUMA_SUPPORT
-            ss << "No libnuma support!\n";
+            ss << "Numa friendly\n\t";
+#ifndef HAVE_NUMA
+            ss << "But numasupport disabled!\n\t";
 #endif
         }
-        ss << "Preallocation for " << Configuration::ReservePerQueue << " elements per internal pq\n";
+        ss << "Preallocation for " << Configuration::ReservePerQueue << " elements per internal pq";
         return ss.str();
     }
 };

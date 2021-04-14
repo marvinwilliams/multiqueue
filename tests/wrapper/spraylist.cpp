@@ -53,11 +53,11 @@ void spraylist::init_thread(size_t const num_threads) {
     d->nb_threads = num_threads;
 }
 
-void spraylist::push(std::pair<uint32_t, uint32_t> const &value) {
+void spraylist::push(Handle, std::pair<uint32_t, uint32_t> const &value) {
     sl_add_val(pq_, value.first, value.second, TRANSACTIONAL);
 }
 
-bool spraylist::extract_top(std::pair<uint32_t, uint32_t> &retval) {
+bool spraylist::extract_top(Handle, std::pair<uint32_t, uint32_t> &retval) {
     slkey_t k_ret;
     val_t v_ret;
     int ret;

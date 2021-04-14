@@ -16,15 +16,17 @@ target_compile_definitions(micro_benchmarks PRIVATE CATCH_CONFIG_ENABLE_BENCHMAR
 add_library(throughput_benchmark INTERFACE)
 target_link_libraries(throughput_benchmark INTERFACE threading basic_benchmark)
 target_link_libraries_system(throughput_benchmark INTERFACE cxxopts)
-target_sources(throughput_benchmark INTERFACE throughput.cpp)
+target_sources(throughput_benchmark INTERFACE ../performance.cpp)
+target_compile_definitions(throughput_benchmark INTERFACE THROUGHPUT_ONLY)
 
 add_custom_target(all_throughput_benchmarks COMMENT "Build all throughput benchmarks")
 
 function(add_wrapper_throughput_benchmark name define)
-  add_executable(wrapper_${name}_throughput_benchmark)
-  target_compile_definitions(wrapper_${name}_throughput_benchmark PRIVATE ${define})
-  target_link_libraries(wrapper_${name}_throughput_benchmark PRIVATE ${name}_wrapper throughput_benchmark)
-  add_dependencies(all_throughput_benchmarks wrapper_${name}_throughput_benchmark)
+  set(target_name wrapper_${name}_throughput)
+  add_executable(${target_name})
+  target_compile_definitions(${target_name} PRIVATE ${define})
+  target_link_libraries(${target_name} PRIVATE ${name}_wrapper throughput_benchmark)
+  add_dependencies(all_throughput_benchmarks ${target_name})
 endfunction()
 
 add_wrapper_throughput_benchmark(capq PQ_CAPQ)
@@ -34,7 +36,7 @@ add_wrapper_throughput_benchmark(linden PQ_LINDEN)
 add_wrapper_throughput_benchmark(spraylist PQ_SPRAYLIST)
 
 function(add_mq_throughput_benchmark name define)
-  set(target_name ${name}_throughput_benchmark)
+  set(target_name ${name}_throughput)
   add_executable(${target_name})
   target_compile_definitions(${target_name} PRIVATE ${define})
   target_link_libraries(${target_name} PRIVATE multiqueue::multiqueue throughput_benchmark)
@@ -50,12 +52,12 @@ add_mq_throughput_benchmark(numamq PQ_MQ_NUMA)
 add_mq_throughput_benchmark(numamergingmq PQ_MQ_NUMAMERGING)
 
 if (NUMA_FOUND)
-target_link_libraries(numamq_throughput_benchmark PRIVATE numa)
-target_link_libraries(numamergingmq_throughput_benchmark PRIVATE numa)
+target_link_libraries(numamq_throughput PRIVATE numa)
+target_link_libraries(numamergingmq_throughput PRIVATE numa)
 endif()
 
 function(add_buffersize_throughput_benchmark ib db)
-  set(target_name fullbufferingmq_ib_${ib}_db_${db}_throughput_benchmark)
+  set(target_name fullbufferingmq_ib_${ib}_db_${db}_throughput)
   add_executable(${target_name})
   target_compile_definitions(${target_name}
     PRIVATE
@@ -84,7 +86,7 @@ add_buffersize_throughput_benchmark(16 64)
 add_buffersize_throughput_benchmark(64 64)
 
 function(add_stickiness_throughput_benchmark c k)
-  set(target_name fullbufferingmq_c_${c}_k_${k}_throughput_benchmark)
+  set(target_name fullbufferingmq_c_${c}_k_${k}_throughput)
   add_executable(${target_name})
   target_compile_definitions(${target_name}
     PRIVATE
@@ -112,7 +114,7 @@ add_stickiness_throughput_benchmark(16 16)
 add_stickiness_throughput_benchmark(16 64)
 
 function(add_nodesize_throughput_benchmark ns)
-  set(target_name mergingmq_ns_${ns}_throughput_benchmark)
+  set(target_name mergingmq_ns_${ns}_throughput)
   add_executable(${target_name})
   target_compile_definitions(${target_name}
     PRIVATE

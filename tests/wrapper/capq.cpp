@@ -30,13 +30,13 @@ capq<remove_min_relax, put_relax, catree_adapt>::capq(unsigned int) {
 }
 
 template <bool remove_min_relax, bool put_relax, bool catree_adapt>
-void capq<remove_min_relax, put_relax, catree_adapt>::push(std::pair<uint32_t, uint32_t> const& value) {
+void capq<remove_min_relax, put_relax, catree_adapt>::push(Handle, std::pair<uint32_t, uint32_t> const& value) {
     capq_put_param(pq_->pq, static_cast<unsigned long>(value.first), static_cast<unsigned long>(value.second),
                    catree_adapt);
 }
 
 template <bool remove_min_relax, bool put_relax, bool catree_adapt>
-bool capq<remove_min_relax, put_relax, catree_adapt>::extract_top(std::pair<uint32_t, uint32_t>& retval) {
+bool capq<remove_min_relax, put_relax, catree_adapt>::extract_top(Handle, std::pair<uint32_t, uint32_t>& retval) {
     unsigned long key_write_back;
     retval.second = static_cast<uint32_t>(
         capq_remove_min_param(pq_->pq, &key_write_back, remove_min_relax, put_relax, catree_adapt));
