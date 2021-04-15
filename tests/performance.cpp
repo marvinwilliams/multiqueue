@@ -171,15 +171,19 @@ struct LogEntry {
     value_type value;
 };
 
-std::vector<std::vector<LogEntry>> insertions;
-std::vector<std::vector<LogEntry>> deletions;
-std::vector<std::vector<tick_type>> failed_deletions;
+std::vector<LogEntry>* insertions;
+std::vector<LogEntry>* deletions;
+std::vector<tick_type>* failed_deletions;
 
+#else
+// Used to guarantee writing of result so it can't be optimized out;
+volatile key_type* result_keys;
+volatile value_type* result_values;
 #endif
 
-std::atomic_uint64_t num_insertions = 0;
-std::atomic_uint64_t num_deletions = 0;
-std::atomic_uint64_t num_failed_deletions = 0;
+std::atomic_uint64_t num_insertions;
+std::atomic_uint64_t num_deletions;
+std::atomic_uint64_t num_failed_deletions;
 
 std::atomic_bool start_flag;
 std::atomic_bool stop_flag;
@@ -196,10 +200,6 @@ struct Task {
         local_deletions.reserve(1'000'000);
         std::vector<tick_type> local_failed_deletions;
         local_failed_deletions.reserve(1'000'000);
-#else
-        // Used to guarantee writing of result so it can't be optimized out;
-        [[maybe_unused]] volatile key_type result_key;
-        [[maybe_unused]] volatile value_type result_value;
 #endif
         uint64_t num_local_insertions = 0;
         uint64_t num_local_deletions = 0;
@@ -273,8 +273,10 @@ struct Task {
                 }
 #else
                 if (success) {
-                    result_key = retval.first;
-                    result_value = retval.second;
+                  asm volatile("" : : "m"(retval.first) : "memory");
+                  asm volatile("" : : "m"(retval.second) : "memory");
+                    /* result_keys[ctx.get_id()] = retval.first; */
+                    /* result_values[ctx.get_id()] = retval.second; */
                 } else {
                     ++num_local_failed_deletions;
                 }
@@ -400,13 +402,19 @@ int main(int argc, char* argv[]) {
     std::clog << "Using priority queue: " << PriorityQueue::description() << '\n';
     PriorityQueue pq{settings.num_threads};
 
+#ifndef THROUGHPUT_ONLY
+    insertions = new std::vector<LogEntry>[settings.num_threads];
+    deletions = new std::vector<LogEntry>[settings.num_threads];
+    failed_deletions = new std::vector<tick_type>[settings.num_threads];
+#else
+    result_keys = new volatile key_type[settings.num_threads];
+    result_values = new volatile value_type[settings.num_threads];
+#endif
+    num_insertions = 0;
+    num_deletions = 0;
+    num_failed_deletions = 0;
     start_flag.store(false, std::memory_order_relaxed);
     stop_flag.store(false, std::memory_order_relaxed);
-#ifndef THROUGHPUT_ONLY
-    insertions.resize(settings.num_threads);
-    deletions.resize(settings.num_threads);
-    failed_deletions.resize(settings.num_threads);
-#endif
     std::atomic_thread_fence(std::memory_order_release);
     thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
     coordinator.run<Task>(std::ref(pq), settings);
@@ -443,6 +451,16 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << std::flush;
+
+    delete[] insertions;
+    delete[] deletions;
+    delete[] failed_deletions;
+#else
+    delete[] result_keys;
+    delete[] result_values;
 #endif
+    std::pair<key_type, value_type> retval;
+    pq.extract_top(pq.get_handle(0), retval);
+    std::cout << retval.first << ' ' << retval.second << '\n';
     return 0;
 }

@@ -171,11 +171,11 @@ read_scenario <- function(scenario) {
   for (pq in list.dirs(path = paste(experiment_dir, scenario, sep = "/"), full.names = T, recursive = F)) {
     name <- gsub(".*/", "", pq)
     # if (name %in% c("nobufferingmq", "fullbufferingmq", "insertionbuffermq", "deletionbuffermq", "mergingmq", "numamq", "numamergingmq", "wrapper_linden", "wrapper_capq", "wrapper_dlsm", "wrapper_spraylist")) {
-    rank_data <- read_histogram(paste(pq, "/rank.txt", sep = ""), name)
+    rank_data <- read_histogram(paste(pq, "/rank_16.txt", sep = ""), name)
     rank_list[[i]] <- rank_data
-    delay_data <- read_histogram(paste(pq, "/delay.txt", sep = ""), name)
+    delay_data <- read_histogram(paste(pq, "/delay_16.txt", sep = ""), name)
     delay_list[[i]] <- delay_data
-    top_delay_data <- read_histogram(paste(pq, "/top_delay.txt", sep = ""), name)
+    top_delay_data <- read_histogram(paste(pq, "/top_delay_16.txt", sep = ""), name)
     top_delay_list[[i]] <- top_delay_data
     throughput_data <- read_throughput(paste(pq, "/throughput.txt", sep = ""), name)
     throughput_list[[i]] <- throughput_data
@@ -197,8 +197,8 @@ read_scenario <- function(scenario) {
 # plot_scenario(data, paste(experiment_dir, "distribution", sep = "/"))
 # plot_throughput_by_dist(data$throughput, paste(experiment_dir, "distribution", sep = "/"))
 
-data <- read_scenario("i10pc132")
-plot_scenario(data, paste(experiment_dir, "i10pc132", sep = "/"))
+data <- read_scenario("i10pc130/results")
+plot_scenario(data, paste(experiment_dir, "i10pc130", sep = "/"))
 # plot_throughput_by_dist(data$throughput, paste(experiment_dir, "distribution", sep = "/"))
 
 # data <- read_scenario("buf_size")
