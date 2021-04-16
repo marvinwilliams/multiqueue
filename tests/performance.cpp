@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "cxxopts.hpp"
+#include "system_config.hpp"
 #include "utils/priority_queue_factory.hpp"
 #include "utils/thread_coordination.hpp"
 #include "utils/threading.hpp"
@@ -179,8 +180,8 @@ std::vector<tick_type>* failed_deletions;
 
 // Used to guarantee writing of result so it can't be optimized out;
 struct alignas(L1_CACHE_LINESIZE) DummyResult {
-   volatile key_type key;
-   volatile value_type value;
+    volatile key_type key;
+    volatile value_type value;
 };
 
 DummyResult* dummy_result;

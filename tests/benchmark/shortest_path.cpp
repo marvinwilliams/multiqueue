@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "cxxopts.hpp"
+#include "system_config.hpp"
 #include "utils/priority_queue_factory.hpp"
 #include "utils/thread_coordination.hpp"
 #include "utils/threading.hpp"
@@ -50,7 +51,7 @@ struct IdleState {
     alignas(L1_CACHE_LINESIZE) std::atomic_uint state;
 };
 
-alignas(L1_CACHE_LINESIZE) static  std::atomic_size_t  idle_counter;
+alignas(L1_CACHE_LINESIZE) static std::atomic_size_t idle_counter;
 static IdleState* idle_state;
 
 static std::atomic_size_t num_processed_nodes;
@@ -270,7 +271,8 @@ int main(int argc, char* argv[]) {
     coordinator.join();
     auto end_tick = clock_type::now();
     std::clog << "Done\n";
-    std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(end_tick - start_tick).count() << ' ' << num_processed_nodes << '\n';
+    std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(end_tick - start_tick).count() << ' '
+              << num_processed_nodes << '\n';
     /* for (auto const& d : distances) { */
     /*   std::cout << d.distance << '\n'; */
     /* } */
