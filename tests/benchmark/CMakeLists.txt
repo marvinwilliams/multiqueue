@@ -130,5 +130,19 @@ add_nodesize_throughput_benchmark(64)
 add_nodesize_throughput_benchmark(128)
 add_nodesize_throughput_benchmark(512)
 
+add_library(sssp_benchmark INTERFACE)
+target_link_libraries(sssp_benchmark INTERFACE threading basic_benchmark)
+target_link_libraries_system(sssp_benchmark INTERFACE cxxopts)
+target_sources(sssp_benchmark INTERFACE shortest_path.cpp)
+
+function(add_mq_sssp name define)
+  set(target_name ${name}_sssp)
+  add_executable(${target_name})
+  target_compile_definitions(${target_name} PRIVATE ${define})
+  target_link_libraries(${target_name} PRIVATE multiqueue::multiqueue sssp_benchmark)
+endfunction()
+
+add_mq_sssp(fullbufferingmq PQ_MQ_FULLBUFFERING)
+
 add_custom_target(all_benchmarks COMMENT "Build all benchmarks")
 add_dependencies(all_benchmarks micro_benchmarks all_throughput_benchmarks)

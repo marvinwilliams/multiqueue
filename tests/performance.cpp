@@ -176,9 +176,15 @@ std::vector<LogEntry>* deletions;
 std::vector<tick_type>* failed_deletions;
 
 #else
+
 // Used to guarantee writing of result so it can't be optimized out;
-volatile key_type* result_keys;
-volatile value_type* result_values;
+struct alignas(L1_CACHE_LINESIZE) DummyResult {
+   volatile key_type key;
+   volatile value_type value;
+};
+
+DummyResult* dummy_result;
+
 #endif
 
 std::atomic_uint64_t num_insertions;
@@ -273,10 +279,8 @@ struct Task {
                 }
 #else
                 if (success) {
-                  asm volatile("" : : "m"(retval.first) : "memory");
-                  asm volatile("" : : "m"(retval.second) : "memory");
-                    /* result_keys[ctx.get_id()] = retval.first; */
-                    /* result_values[ctx.get_id()] = retval.second; */
+                    dummy_result[ctx.get_id()].key = retval.first;
+                    dummy_result[ctx.get_id()].value = retval.second;
                 } else {
                     ++num_local_failed_deletions;
                 }
@@ -407,8 +411,7 @@ int main(int argc, char* argv[]) {
     deletions = new std::vector<LogEntry>[settings.num_threads];
     failed_deletions = new std::vector<tick_type>[settings.num_threads];
 #else
-    result_keys = new volatile key_type[settings.num_threads];
-    result_values = new volatile value_type[settings.num_threads];
+    dummy_result = new DummyResult[settings.num_threads];
 #endif
     num_insertions = 0;
     num_deletions = 0;
@@ -456,11 +459,7 @@ int main(int argc, char* argv[]) {
     delete[] deletions;
     delete[] failed_deletions;
 #else
-    delete[] result_keys;
-    delete[] result_values;
+    delete[] dummy_result;
 #endif
-    std::pair<key_type, value_type> retval;
-    pq.extract_top(pq.get_handle(0), retval);
-    std::cout << retval.first << ' ' << retval.second << '\n';
     return 0;
 }

@@ -76,6 +76,10 @@ struct PriorityQueueConfiguration<false, false, false, Key, T, Comparator, Confi
     inline void pop() {
         heap.pop();
     }
+
+    inline bool empty() const noexcept {
+      return heap.empty();
+    }
 };
 
 template <typename Key, typename T, typename Comparator, typename Configuration>
@@ -127,6 +131,10 @@ struct PriorityQueueConfiguration<false, true, false, Key, T, Comparator, Config
     inline void pop() {
         assert(insertion_buffer.empty());
         heap.pop();
+    }
+
+    inline bool empty() const noexcept {
+      return insertion_buffer.empty() && heap.empty();
     }
 };
 
@@ -190,6 +198,10 @@ struct PriorityQueueConfiguration<false, false, true, Key, T, Comparator, Config
     inline void pop() {
         assert(!deletion_buffer.empty());
         deletion_buffer.pop_front();
+    }
+
+    inline bool empty() const noexcept {
+      return deletion_buffer.empty() && heap.empty();
     }
 };
 
@@ -264,6 +276,10 @@ struct PriorityQueueConfiguration<false, true, true, Key, T, Comparator, Configu
     void pop() {
         assert(!deletion_buffer.empty());
         deletion_buffer.pop_front();
+    }
+
+    inline bool empty() const noexcept {
+      return insertion_buffer.empty() && deletion_buffer.empty() && heap.empty();
     }
 };
 
@@ -370,6 +386,10 @@ struct PriorityQueueConfiguration<true, true, true, Key, T, Comparator, Configur
         assert(!deletion_buffer.empty());
         deletion_buffer.pop_front();
     }
+
+    inline bool empty() const noexcept {
+      return insertion_buffer.empty() && deletion_buffer.empty() && heap.empty();
+    }
 };
 
 template <typename Key, typename T, typename Comparator, typename Configuration>
@@ -457,7 +477,7 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
     struct alignas(Configuration::NumaFriendly ? PAGESIZE : L1_CACHE_LINESIZE) InternalPriorityQueueWrapper {
         using pq_type = internal_priority_queue_t<key_type, mapped_type, key_comparator, Configuration>;
         using allocator_type = typename Configuration::HeapAllocator;
-        std::atomic_bool guard = false;
+        mutable std::atomic_bool guard = false;
         pq_type pq;
 
         InternalPriorityQueueWrapper() = default;
@@ -469,12 +489,12 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
             : pq(comp, alloc) {
         }
 
-        inline bool try_lock() noexcept {
+        inline bool try_lock() const noexcept {
             bool expect = false;
             return guard.compare_exchange_strong(expect, true, std::memory_order_acquire, std::memory_order_relaxed);
         }
 
-        inline void unlock() noexcept {
+        inline void unlock() const noexcept {
             assert(guard == true);
             guard.store(false, std::memory_order_release);
         }
@@ -659,6 +679,20 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
         }
         --thread_data_[handle.id_].extract_count;
         return true;
+    }
+
+    // threadsafe, but can be inaccurate if multiqueue is accessed
+    bool weak_empty() const {
+      for (size_type i = 0; i < pq_list_size_; ++i) {
+        if (!pq_list_[i].try_lock()) {
+          return false;
+        }
+        if (!pq_list_[i].pq.empty()) {
+          return false;
+        }
+        pq_list_[i].unlock();
+      }
+      return true;
     }
 
     static std::string description() {
