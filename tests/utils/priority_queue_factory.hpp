@@ -84,6 +84,8 @@ using BaseConfig = configuration::Merging;
 using BaseConfig = configuration::Numa;
 #elif defined PQ_MQ_NUMAMERGING
 using BaseConfig = configuration::NumaMerging;
+#elif defined PQ_MQ_PHEROMONE
+using BaseConfig = configuration::Pheromone;
 #endif
 
 struct Config : BaseConfig {

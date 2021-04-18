@@ -19,21 +19,13 @@ target_link_libraries_system(throughput_benchmark INTERFACE cxxopts)
 target_sources(throughput_benchmark INTERFACE ../performance.cpp)
 target_compile_definitions(throughput_benchmark INTERFACE THROUGHPUT_ONLY)
 
+add_library(sssp_benchmark INTERFACE)
+target_link_libraries(sssp_benchmark INTERFACE threading basic_benchmark)
+target_link_libraries_system(sssp_benchmark INTERFACE cxxopts)
+target_sources(sssp_benchmark INTERFACE shortest_path.cpp)
+
 add_custom_target(all_throughput_benchmarks COMMENT "Build all throughput benchmarks")
-
-function(add_wrapper_throughput_benchmark name define)
-  set(target_name wrapper_${name}_throughput)
-  add_executable(${target_name})
-  target_compile_definitions(${target_name} PRIVATE ${define})
-  target_link_libraries(${target_name} PRIVATE ${name}_wrapper throughput_benchmark)
-  add_dependencies(all_throughput_benchmarks ${target_name})
-endfunction()
-
-add_wrapper_throughput_benchmark(capq PQ_CAPQ)
-add_wrapper_throughput_benchmark(klsm PQ_KLSM)
-add_wrapper_throughput_benchmark(dlsm PQ_DLSM)
-add_wrapper_throughput_benchmark(linden PQ_LINDEN)
-add_wrapper_throughput_benchmark(spraylist PQ_SPRAYLIST)
+add_custom_target(all_sssp_benchmarks COMMENT "Build all sssp benchmarks")
 
 function(add_mq_throughput_benchmark name define)
   set(target_name ${name}_throughput)
@@ -45,7 +37,6 @@ function(add_mq_throughput_benchmark name define)
   add_executable(${sssp_target_name})
   target_compile_definitions(${sssp_target_name} PRIVATE ${define})
   target_link_libraries(${sssp_target_name} PRIVATE multiqueue::multiqueue sssp_benchmark)
-  add_dependencies(all_sssp_benchmarks ${sssp_target_name})
 endfunction()
 
 add_mq_throughput_benchmark(nobufferingmq PQ_MQ_NOBUFFERING)
@@ -55,6 +46,7 @@ add_mq_throughput_benchmark(fullbufferingmq PQ_MQ_FULLBUFFERING)
 add_mq_throughput_benchmark(mergingmq PQ_MQ_MERGING)
 add_mq_throughput_benchmark(numamq PQ_MQ_NUMA)
 add_mq_throughput_benchmark(numamergingmq PQ_MQ_NUMAMERGING)
+add_mq_throughput_benchmark(pheromonemq PQ_MQ_PHEROMONE)
 
 if (NUMA_FOUND)
 target_link_libraries(numamq_throughput PRIVATE numa)
@@ -71,6 +63,15 @@ function(add_buffersize_throughput_benchmark ib db)
       MQ_CONFIG_INSERTION_BUFFER_SIZE=${ib}
       )
   target_link_libraries(${target_name} PRIVATE multiqueue::multiqueue throughput_benchmark)
+  set(sssp_target_name fullbufferingmq_ib_${ib}_db_${db}_sssp)
+  add_executable(${sssp_target_name})
+  target_compile_definitions(${sssp_target_name}
+    PRIVATE
+      PQ_MQ_FULLBUFFERING
+      MQ_CONFIG_DELETION_BUFFER_SIZE=${db}
+      MQ_CONFIG_INSERTION_BUFFER_SIZE=${ib}
+      )
+  target_link_libraries(${sssp_target_name} PRIVATE multiqueue::multiqueue sssp_benchmark)
 endfunction()
 
 add_buffersize_throughput_benchmark(4 4)
@@ -100,6 +101,24 @@ function(add_stickiness_throughput_benchmark c k)
       MQ_CONFIG_STICKINESS=${k}
       )
   target_link_libraries(${target_name} PRIVATE multiqueue::multiqueue throughput_benchmark)
+  set(p_target_name pheromonemq_c_${c}_k_${k}_throughput)
+  add_executable(${p_target_name})
+  target_compile_definitions(${p_target_name}
+    PRIVATE
+      PQ_MQ_PHEROMONE
+      MQ_CONFIG_C=${c}
+      MQ_CONFIG_STICKINESS=${k}
+      )
+  target_link_libraries(${p_target_name} PRIVATE multiqueue::multiqueue throughput_benchmark)
+  set(sssp_target_name fullbufferingmq_c_${c}_k_${k}_sssp)
+  add_executable(${sssp_target_name})
+  target_compile_definitions(${sssp_target_name}
+    PRIVATE
+      PQ_MQ_FULLBUFFERING
+      MQ_CONFIG_C=${c}
+      MQ_CONFIG_STICKINESS=${k}
+      )
+  target_link_libraries(${sssp_target_name} PRIVATE multiqueue::multiqueue sssp_benchmark)
 endfunction()
 
 add_stickiness_throughput_benchmark(4 2)
@@ -127,6 +146,14 @@ function(add_nodesize_throughput_benchmark ns)
       MQ_CONFIG_NODE_SIZE=${ns}
       )
   target_link_libraries(${target_name} PRIVATE multiqueue::multiqueue throughput_benchmark)
+  set(sssp_target_name mergingmq_ns_${ns}_sssp)
+  add_executable(${sssp_target_name})
+  target_compile_definitions(${sssp_target_name}
+    PRIVATE
+      PQ_MQ_MERGING
+      MQ_CONFIG_NODE_SIZE=${ns}
+      )
+  target_link_libraries(${sssp_target_name} PRIVATE multiqueue::multiqueue sssp_benchmark)
 endfunction()
 
 add_nodesize_throughput_benchmark(4)
@@ -135,13 +162,16 @@ add_nodesize_throughput_benchmark(64)
 add_nodesize_throughput_benchmark(128)
 add_nodesize_throughput_benchmark(512)
 
-add_library(sssp_benchmark INTERFACE)
-target_link_libraries(sssp_benchmark INTERFACE threading basic_benchmark)
-target_link_libraries_system(sssp_benchmark INTERFACE cxxopts)
-target_sources(sssp_benchmark INTERFACE shortest_path.cpp)
+add_executable(sssp_seq shortest_path_sequential.cpp)
+target_link_libraries(sssp_seq PRIVATE multiqueue_internal)
+target_link_libraries_system(sssp_seq PRIVATE cxxopts)
+target_compile_features(
+  sssp_seq PRIVATE
+  cxx_std_17
+)
 
-function(add_mq_sssp name define)
-  set(target_name ${name}_sssp)
+function(add_wrapper_throughput_benchmark name define)
+  set(target_name wrapper_${name}_throughput)
   add_executable(${target_name})
   target_compile_definitions(${target_name} PRIVATE ${define})
   target_link_libraries(${target_name} PRIVATE ${name}_wrapper throughput_benchmark)
@@ -150,10 +180,13 @@ function(add_mq_sssp name define)
   add_executable(${sssp_target_name})
   target_compile_definitions(${sssp_target_name} PRIVATE ${define})
   target_link_libraries(${sssp_target_name} PRIVATE ${name}_wrapper sssp_benchmark)
-  add_dependencies(all_sssp_benchmarks ${sssp_target_name})
 endfunction()
 
-add_mq_sssp(fullbufferingmq PQ_MQ_FULLBUFFERING)
+add_wrapper_throughput_benchmark(capq PQ_CAPQ)
+add_wrapper_throughput_benchmark(klsm PQ_KLSM)
+add_wrapper_throughput_benchmark(dlsm PQ_DLSM)
+add_wrapper_throughput_benchmark(linden PQ_LINDEN)
+add_wrapper_throughput_benchmark(spraylist PQ_SPRAYLIST)
 
 add_custom_target(all_benchmarks COMMENT "Build all benchmarks")
-add_dependencies(all_benchmarks micro_benchmarks all_throughput_benchmarks)
+add_dependencies(all_benchmarks micro_benchmarks all_throughput_benchmarks all_sssp_benchmarks)

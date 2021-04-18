@@ -77,7 +77,7 @@ struct PriorityQueueConfiguration<false, false, false, Key, T, Comparator, Confi
     }
 
     inline bool empty() const noexcept {
-      return heap.empty();
+        return heap.empty();
     }
 };
 
@@ -133,7 +133,7 @@ struct PriorityQueueConfiguration<false, true, false, Key, T, Comparator, Config
     }
 
     inline bool empty() const noexcept {
-      return insertion_buffer.empty() && heap.empty();
+        return insertion_buffer.empty() && heap.empty();
     }
 };
 
@@ -200,7 +200,7 @@ struct PriorityQueueConfiguration<false, false, true, Key, T, Comparator, Config
     }
 
     inline bool empty() const noexcept {
-      return deletion_buffer.empty() && heap.empty();
+        return deletion_buffer.empty() && heap.empty();
     }
 };
 
@@ -278,7 +278,7 @@ struct PriorityQueueConfiguration<false, true, true, Key, T, Comparator, Configu
     }
 
     inline bool empty() const noexcept {
-      return insertion_buffer.empty() && deletion_buffer.empty() && heap.empty();
+        return insertion_buffer.empty() && deletion_buffer.empty() && heap.empty();
     }
 };
 
@@ -387,7 +387,7 @@ struct PriorityQueueConfiguration<true, true, true, Key, T, Comparator, Configur
     }
 
     inline bool empty() const noexcept {
-      return insertion_buffer.empty() && deletion_buffer.empty() && heap.empty();
+        return insertion_buffer.empty() && deletion_buffer.empty() && heap.empty();
     }
 };
 
@@ -403,10 +403,10 @@ struct Handle {
     friend class multiqueue;
 
    private:
-    unsigned int id_;
+    uint32_t id_;
 
    private:
-    explicit Handle(unsigned int id) : id_{id} {
+    explicit Handle(unsigned int id) : id_{static_cast<uint32_t>(id)} {
     }
 };
 
@@ -486,7 +486,9 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
     struct alignas(Configuration::NumaFriendly ? PAGESIZE : L1_CACHE_LINESIZE) InternalPriorityQueueWrapper {
         using pq_type = internal_priority_queue_t<key_type, mapped_type, key_comparator, Configuration>;
         using allocator_type = typename Configuration::HeapAllocator;
-        mutable std::atomic_bool guard = false;
+        static constexpr uint32_t lock_mask = static_cast<uint32_t>(1) << 31;
+        static constexpr uint32_t pheromone_mask = lock_mask - 1;
+        mutable std::atomic_uint32_t guard = Configuration::WithPheromones ? pheromone_mask : 0;
         pq_type pq;
 
         InternalPriorityQueueWrapper() = default;
@@ -498,16 +500,25 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
             : pq(comp, alloc) {
         }
 
-        inline bool try_lock() const noexcept {
-            bool expect = false;
-            return guard.compare_exchange_strong(expect, true, std::memory_order_acquire, std::memory_order_relaxed);
+        inline bool try_lock(uint32_t id, bool claiming) const noexcept {
+            uint32_t lock_status = guard.load(std::memory_order_relaxed);
+            if ((lock_status >> 31) == 1) {
+                return false;
+            }
+            if (Configuration::WithPheromones && !claiming && lock_status != static_cast<uint32_t>(id)) {
+                return false;
+            }
+            uint32_t const locked = Configuration::WithPheromones ? (lock_mask | static_cast<uint32_t>(id)) : lock_mask;
+            return guard.compare_exchange_strong(lock_status, locked, std::memory_order_acquire,
+                                                 std::memory_order_relaxed);
         }
 
-        inline void unlock() const noexcept {
-            assert(guard == true);
-            guard.store(false, std::memory_order_release);
+        inline void unlock(uint32_t id) const noexcept {
+            assert(guard == Configuration::WithPheromones ? (lock_mask | static_cast<uint32_t>(id)) : lock_mask);
+            guard.store(Configuration::WithPheromones ? static_cast<uint32_t>(id) : 0, std::memory_order_release);
         }
     };
+
     static_assert(std::is_same_v<value_type, typename InternalPriorityQueueWrapper::pq_type::heap_type::value_type>);
 
     using queue_alloc_type = typename allocator_type::template rebind<InternalPriorityQueueWrapper>::other;
@@ -521,17 +532,17 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
     queue_alloc_type alloc_;
 
    private:
-    inline void refresh_insert_index(size_type index) {
-        thread_data_[index].insert_index = thread_data_[index].get_random_index();
-        thread_data_[index].insert_count = Configuration::K;
+    inline void refresh_insert_index(Handle handle) {
+        thread_data_[handle.id_].insert_index = thread_data_[handle.id_].get_random_index();
+        thread_data_[handle.id_].insert_count = Configuration::K;
     }
 
-    inline void refresh_extract_indices(size_type index) {
-        thread_data_[index].extract_index[0] = thread_data_[index].get_random_index();
+    inline void refresh_extract_indices(Handle handle) {
+        thread_data_[handle.id_].extract_index[0] = thread_data_[handle.id_].get_random_index();
         do {
-            thread_data_[index].extract_index[1] = thread_data_[index].get_random_index();
-        } while (thread_data_[index].extract_index[1] == thread_data_[index].extract_index[0]);
-        thread_data_[index].extract_count = Configuration::K;
+            thread_data_[handle.id_].extract_index[1] = thread_data_[handle.id_].get_random_index();
+        } while (thread_data_[handle.id_].extract_index[1] == thread_data_[handle.id_].extract_index[0]);
+        thread_data_[handle.id_].extract_count = Configuration::K;
     }
 
    public:
@@ -618,40 +629,46 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
     }
 
     void push(Handle const &handle, value_type const &value) {
+        bool claiming = false;
         if (thread_data_[handle.id_].insert_count == 0) {
-            refresh_insert_index(handle.id_);
+            refresh_insert_index(handle);
+            claiming = true;
         }
         size_type index = thread_data_[handle.id_].insert_index;
-        while (!pq_list_[index].try_lock()) {
-            refresh_insert_index(handle.id_);
+        while (!pq_list_[index].try_lock(handle.id_, claiming)) {
+            refresh_insert_index(handle);
             index = thread_data_[handle.id_].insert_index;
+            claiming = true;
         }
         /* std::cout << "lock " << index << '\n'; */
         pq_list_[index].pq.push(value);
-        pq_list_[index].unlock();
+        pq_list_[index].unlock(handle.id_);
         /* std::cout << "unlock " << index << '\n'; */
         --thread_data_[handle.id_].insert_count;
     }
 
     bool extract_top(Handle const &handle, value_type &retval) {
+        bool claiming = false;
         if (thread_data_[handle.id_].extract_count == 0) {
-            refresh_extract_indices(handle.id_);
+            refresh_extract_indices(handle);
+            claiming = true;
         }
         size_type first_index = thread_data_[handle.id_].extract_index[0];
         size_type second_index = thread_data_[handle.id_].extract_index[1];
         do {
-            if (pq_list_[first_index].try_lock()) {
+            if (pq_list_[first_index].try_lock(handle.id_, claiming)) {
                 /* std::cout << "1 lock " << first_index << '\n'; */
-                if (pq_list_[second_index].try_lock()) {
+                if (pq_list_[second_index].try_lock(handle.id_, claiming)) {
                     /* std::cout << "2 lock " << second_index << '\n'; */
                     break;
                 }
-                pq_list_[first_index].unlock();
+                pq_list_[first_index].unlock(handle.id_);
                 /* std::cout << "unlock " << first_index << '\n'; */
             }
-            refresh_extract_indices(handle.id_);
+            refresh_extract_indices(handle);
             first_index = thread_data_[handle.id_].extract_index[0];
             second_index = thread_data_[handle.id_].extract_index[1];
+            claiming = true;
             /* std::cout <<first_index << " " << second_index << '\n'; */
         } while (true);
         /* std::cout << "1 lock " << first_index << '\n'; */
@@ -659,49 +676,49 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
         // When we get here, we hold the lock for both queues
         bool first_empty = !pq_list_[first_index].pq.refresh_top();
         if (first_empty) {
-            pq_list_[first_index].unlock();
+            pq_list_[first_index].unlock(handle.id_);
             /* std::cout << "1 unlock " << first_index << '\n'; */
         }
         bool second_empty = !pq_list_[second_index].pq.refresh_top();
         if (second_empty) {
-            pq_list_[second_index].unlock();
+            pq_list_[second_index].unlock(handle.id_);
             /* std::cout << "2 unlock " << second_index << '\n'; */
         }
         if (first_empty && second_empty) {
-            refresh_extract_indices(handle.id_);
+            refresh_extract_indices(handle);
             return false;
         }
         if (!first_empty && !second_empty) {
             if (comp_(pq_list_[second_index].pq.top().first, pq_list_[first_index].pq.top().first)) {
                 std::swap(first_index, second_index);
             }
-            pq_list_[second_index].unlock();
+            pq_list_[second_index].unlock(handle.id_);
             /* std::cout << "unlock other " << first_index << '\n'; */
         } else if (first_empty) {
             first_index = second_index;
         }
         pq_list_[first_index].pq.extract_top(retval);
-        pq_list_[first_index].unlock();
+        pq_list_[first_index].unlock(handle.id_);
         /* std::cout << "unlock best " << first_index << '\n'; */
         if (first_empty || second_empty) {
-            refresh_extract_indices(handle.id_);
+            refresh_extract_indices(handle);
         }
         --thread_data_[handle.id_].extract_count;
         return true;
     }
 
     // threadsafe, but can be inaccurate if multiqueue is accessed
-    bool weak_empty() const {
-      for (size_type i = 0; i < pq_list_size_; ++i) {
-        if (!pq_list_[i].try_lock()) {
-          return false;
+    bool weak_empty(Handle handle) const {
+        for (size_type i = 0; i < pq_list_size_; ++i) {
+            if (!pq_list_[i].try_lock(handle.id_, true)) {
+                return false;
+            }
+            if (!pq_list_[i].pq.empty()) {
+                return false;
+            }
+            pq_list_[i].unlock(handle.id_);
         }
-        if (!pq_list_[i].pq.empty()) {
-          return false;
-        }
-        pq_list_[i].unlock();
-      }
-      return true;
+        return true;
     }
 
     static std::string description() {
@@ -725,6 +742,9 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
 #ifndef HAVE_NUMA
             ss << "But numasupport disabled!\n\t";
 #endif
+        }
+        if (Configuration::WithPheromones) {
+            ss << "Using pheromones\n\t";
         }
         ss << "Preallocation for " << Configuration::ReservePerQueue << " elements per internal pq";
         return ss.str();

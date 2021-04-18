@@ -18,24 +18,6 @@ target_compile_features(
 
 add_custom_target(all_performances COMMENT "Build the performance test for all priority queues")
 
-function(add_wrapper_performance name define)
-  set(target_name wrapper_${name}_performance)
-  add_executable(${target_name})
-  target_compile_definitions(${target_name} PRIVATE ${define})
-  target_link_libraries(${target_name} PRIVATE ${name}_wrapper performance)
-  add_dependencies(all_performances ${target_name})
-if(BUILD_TESTING)
-  add_test(NAME ${target_name}_small COMMAND /bin/bash -c "$<TARGET_FILE:${target_name}> -n 0 -j 1 -t 100 | $<TARGET_FILE:evaluate_quality> -v")
-  add_test(NAME ${target_name}_large COMMAND /bin/bash -c "$<TARGET_FILE:${target_name}> -n 1000000 -j 8 -t 500 | $<TARGET_FILE:evaluate_quality> -v")
-endif()
-endfunction()
-
-add_wrapper_performance(capq PQ_CAPQ)
-add_wrapper_performance(klsm PQ_KLSM)
-add_wrapper_performance(dlsm PQ_DLSM)
-add_wrapper_performance(linden PQ_LINDEN)
-add_wrapper_performance(spraylist PQ_SPRAYLIST)
-
 function(add_mq_performance name define)
   set(target_name ${name}_performance)
   add_executable(${target_name})
@@ -55,6 +37,7 @@ add_mq_performance(fullbufferingmq PQ_MQ_FULLBUFFERING)
 add_mq_performance(mergingmq PQ_MQ_MERGING)
 add_mq_performance(numamq PQ_MQ_NUMA)
 add_mq_performance(numamergingmq PQ_MQ_NUMAMERGING)
+add_mq_performance(pheromonemq PQ_MQ_PHEROMONE)
 
 if (Numa_FOUND)
   target_link_libraries(numamq_performance PRIVATE Numa::Numa)
@@ -100,6 +83,15 @@ function(add_stickiness_performance c k)
       MQ_CONFIG_STICKINESS=${k}
       )
   target_link_libraries(${target_name} PRIVATE multiqueue::multiqueue performance)
+  set(p_target_name pheromonemq_c_${c}_k_${k}_performance)
+  add_executable(${p_target_name})
+  target_compile_definitions(${p_target_name}
+    PRIVATE
+      PQ_MQ_PHEROMONE
+      MQ_CONFIG_C=${c}
+      MQ_CONFIG_STICKINESS=${k}
+      )
+  target_link_libraries(${p_target_name} PRIVATE multiqueue::multiqueue performance)
 endfunction()
 
 add_stickiness_performance(4 2)
@@ -134,6 +126,24 @@ add_nodesize_performance(8)
 add_nodesize_performance(64)
 add_nodesize_performance(128)
 add_nodesize_performance(512)
+
+function(add_wrapper_performance name define)
+  set(target_name wrapper_${name}_performance)
+  add_executable(${target_name})
+  target_compile_definitions(${target_name} PRIVATE ${define})
+  target_link_libraries(${target_name} PRIVATE ${name}_wrapper performance)
+  add_dependencies(all_performances ${target_name})
+if(BUILD_TESTING)
+  add_test(NAME ${target_name}_small COMMAND /bin/bash -c "$<TARGET_FILE:${target_name}> -n 0 -j 1 -t 100 | $<TARGET_FILE:evaluate_quality> -v")
+  add_test(NAME ${target_name}_large COMMAND /bin/bash -c "$<TARGET_FILE:${target_name}> -n 1000000 -j 8 -t 500 | $<TARGET_FILE:evaluate_quality> -v")
+endif()
+endfunction()
+
+add_wrapper_performance(capq PQ_CAPQ)
+add_wrapper_performance(klsm PQ_KLSM)
+add_wrapper_performance(dlsm PQ_DLSM)
+add_wrapper_performance(linden PQ_LINDEN)
+add_wrapper_performance(spraylist PQ_SPRAYLIST)
 
 add_subdirectory(unit_tests)
 

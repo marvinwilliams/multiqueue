@@ -34,6 +34,8 @@ struct Default {
     static constexpr bool UseMergeHeap = false;
     // Node size used only by the merge heap
     static constexpr std::size_t NodeSize = 128;
+    // Use pheromones on the locks
+    static constexpr bool WithPheromones = false;
     // Make multiqueue numa friendly (induces more overhead)
     static constexpr bool NumaFriendly = false;
     // degree of the heap tree (effect only if merge heap deactivated)
@@ -75,6 +77,10 @@ struct Numa : Default {
 struct NumaMerging : Default {
     static constexpr bool UseMergeHeap = true;
     static constexpr bool NumaFriendly = true;
+};
+
+struct Pheromone : Default {
+    static constexpr bool WithPheromones = true;
 };
 
 }  // namespace configuration

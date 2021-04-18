@@ -31,6 +31,7 @@ static constexpr auto retries = 100;
 
 struct Settings {
     std::filesystem::path graph_file;
+    std::filesystem::path solution_file;
     unsigned int num_threads = 4;
 };
 
@@ -59,14 +60,18 @@ static std::atomic_size_t num_processed_nodes;
 std::atomic_bool start_flag;
 
 #ifdef PQ_IS_WRAPPER
-static bool idle(PriorityQueue::Handle handle, thread_coordination::Context ctx, PriorityQueue & pq,
+static bool idle(thread_coordination::Context ctx, PriorityQueue & pq,
                  std::pair<std::uint32_t, std::uint32_t>& retval) {
 #else
-static bool idle(PriorityQueue::Handle handle, thread_coordination::Context ctx, PriorityQueue const& pq) {
+static bool idle(thread_coordination::Context ctx, PriorityQueue const& pq) {
 #endif
     idle_counter.fetch_add(1, std::memory_order_relaxed);
     idle_state[ctx.get_id()].state.store(1, std::memory_order_release);
-    if (!pq.weak_empty()) {
+#ifdef PQ_IS_WRAPPER
+    if (!pq.extract_top(pq.get_handle(ctx.get_id()), retval)) {
+#else
+    if (!pq.weak_empty(pq.get_handle(ctx.get_id()))) {
+#endif
         idle_counter.fetch_sub(1, std::memory_order_relaxed);
         idle_state[ctx.get_id()].state.store(0, std::memory_order_release);
         return false;
@@ -161,17 +166,18 @@ struct Task {
                     std::this_thread::yield();
                 }
 #ifdef PQ_IS_WRAPPER
-                if (idle(handle, ctx, pq, retval)) {
+                if (idle(ctx, pq, retval)) {
                     break;
                 } else {
                     goto found;
                 }
 #else
-                if (idle(handle, ctx, pq)) {
+                if (idle(ctx, pq)) {
                     break;
                 } else {
                     continue;
                 }
+#endif
             }
         }
         num_processed_nodes += num_local_processed_nodes;
@@ -228,7 +234,7 @@ static std::vector<std::uint32_t> read_solution(Settings const& settings) {
         throw std::runtime_error{"Could not open solution file"};
     }
     std::vector<std::uint32_t> solution;
-    std::uint32_t node;
+    std::size_t node;
     std::uint32_t distance;
     while (solution_stream >> node >> distance) {
         solution.push_back(distance);
@@ -247,6 +253,7 @@ int main(int argc, char* argv[]) {
       ("j,threads", "Specify the number of threads "
        "(default: 4)", cxxopts::value<unsigned int>(), "NUMBER")
       ("f,file", "The input graph", cxxopts::value<std::filesystem::path>(settings.graph_file)->default_value("graph.gr"), "PATH")
+      ("c,check", "The shortest paths", cxxopts::value<std::filesystem::path>(settings.solution_file)->default_value("solution.txt"), "PATH")
       ("h,help", "Print this help");
     // clang-format on
 
@@ -274,21 +281,31 @@ int main(int argc, char* argv[]) {
 
     std::clog << "Using priority queue: " << PriorityQueue::description() << '\n';
     Graph graph;
+    std::vector<std::uint32_t> solution;
+    std::clog << "Reading graph..." << std::flush;
     try {
         graph = read_graph(settings);
+        solution = read_solution(settings);
     } catch (std::runtime_error const& e) {
         std::cerr << e.what() << '\n';
         return 1;
     }
-    std::vector<Distance> distances(graph.nodes.size());
+    assert(graph.nodes.size() > 0);
+    if (graph.nodes.size() - 1 != solution.size()) {
+        std::cerr << "Graph and solution size does not match\n";
+        return 1;
+    }
+    std::vector<Distance> distances(graph.nodes.size() - 1);
     for (std::size_t i = 0; i + 1 < graph.nodes.size(); ++i) {
         distances[i].distance = std::numeric_limits<std::uint32_t>::max();
     }
+    std::clog << "done\n";
     idle_state = new IdleState[settings.num_threads];
     num_processed_nodes = 0;
     PriorityQueue pq{settings.num_threads};
     start_flag.store(false, std::memory_order_relaxed);
     std::atomic_thread_fence(std::memory_order_release);
+    std::clog << "Calculating shortest paths..." << std::flush;
     thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
     coordinator.run<Task>(std::ref(pq), graph, std::ref(distances));
     coordinator.wait_until_notified();
@@ -299,6 +316,12 @@ int main(int argc, char* argv[]) {
     std::clog << "Done\n";
     std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(end_tick - start_tick).count() << ' '
               << num_processed_nodes << '\n';
+    for (std::size_t i = 0; i + 1 < graph.nodes.size(); ++i) {
+        if (distances[i].distance.load(std::memory_order_relaxed) != solution[i]) {
+            std::cerr << "Solution invalid!\n";
+            return 1;
+        }
+    }
     /* for (auto const& d : distances) { */
     /*   std::cout << d.distance << '\n'; */
     /* } */
