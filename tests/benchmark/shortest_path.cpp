@@ -22,7 +22,7 @@
 #include "utils/thread_coordination.hpp"
 #include "utils/threading.hpp"
 
-using PriorityQueue = typename multiqueue::util::PriorityQueueFactory<std::uint32_t, std::size_t>::type;
+using PriorityQueue = typename multiqueue::util::PriorityQueueFactory<std::uint32_t, std::uint32_t>::type;
 
 using namespace std::chrono_literals;
 using clock_type = std::chrono::steady_clock;
@@ -36,10 +36,10 @@ struct Settings {
 
 struct Graph {
     struct Edge {
-        std::size_t target;
+        std::uint32_t target;
         std::uint32_t weight;
     };
-    std::vector<std::size_t> nodes;
+    std::vector<std::uint32_t> nodes;
     std::vector<Edge> edges;
 };
 
@@ -58,7 +58,12 @@ static std::atomic_size_t num_processed_nodes;
 
 std::atomic_bool start_flag;
 
-static bool idle(thread_coordination::Context ctx, PriorityQueue const& pq) {
+#ifdef PQ_IS_WRAPPER
+static bool idle(PriorityQueue::Handle handle, thread_coordination::Context ctx, PriorityQueue & pq,
+                 std::pair<std::uint32_t, std::uint32_t>& retval) {
+#else
+static bool idle(PriorityQueue::Handle handle, thread_coordination::Context ctx, PriorityQueue const& pq) {
+#endif
     idle_counter.fetch_add(1, std::memory_order_relaxed);
     idle_state[ctx.get_id()].state.store(1, std::memory_order_release);
     if (!pq.weak_empty()) {
@@ -81,7 +86,7 @@ static bool idle(thread_coordination::Context ctx, PriorityQueue const& pq) {
 
 struct Task {
     static void run(thread_coordination::Context ctx, PriorityQueue& pq, Graph const& graph,
-                    std::vector<Distance>& distances, Settings const& settings) {
+                    std::vector<Distance>& distances) {
 #ifdef PQ_SPRAYLIST
         pq.init_thread(ctx.get_num_threads());
 #endif
@@ -104,7 +109,7 @@ struct Task {
         }
         std::atomic_thread_fence(std::memory_order_acquire);
         while (true) {
-            std::pair<std::uint32_t, std::size_t> retval;
+            std::pair<std::uint32_t, std::uint32_t> retval;
             if (pq.extract_top(handle, retval)) {
             found:
                 std::uint32_t const current_distance =
@@ -115,7 +120,7 @@ struct Task {
                 ++num_local_processed_nodes;
                 bool pushed = false;
                 for (std::size_t i = graph.nodes[retval.second]; i < graph.nodes[retval.second + 1]; ++i) {
-                    std::size_t target = graph.edges[i].target;
+                    std::uint32_t target = graph.edges[i].target;
                     std::uint32_t const new_target_distance = current_distance + graph.edges[i].weight;
                     std::uint32_t old_target_distance = distances[target].distance.load(std::memory_order_relaxed);
                     while (old_target_distance > new_target_distance &&
@@ -155,7 +160,14 @@ struct Task {
                     }
                     std::this_thread::yield();
                 }
-                if (idle(ctx, pq)) {
+#ifdef PQ_IS_WRAPPER
+                if (idle(handle, ctx, pq, retval)) {
+                    break;
+                } else {
+                    goto found;
+                }
+#else
+                if (idle(handle, ctx, pq)) {
                     break;
                 } else {
                     continue;
@@ -180,8 +192,8 @@ static Graph read_graph(Settings const& settings) {
     }
     Graph graph;
     std::vector<std::vector<Graph::Edge>> edges_per_node;
-    std::size_t source;
-    std::size_t target;
+    std::uint32_t source;
+    std::uint32_t target;
     std::uint32_t weight;
     std::string problem;
     std::string first;
@@ -204,10 +216,24 @@ static Graph read_graph(Settings const& settings) {
         }
     }
     for (std::size_t i = 0; i < edges_per_node.size(); ++i) {
-        graph.nodes[i + 1] = graph.nodes[i] + edges_per_node[i].size();
+        graph.nodes[i + 1] = graph.nodes[i] + static_cast<std::uint32_t>(edges_per_node[i].size());
         std::copy(edges_per_node[i].begin(), edges_per_node[i].end(), std::back_inserter(graph.edges));
     }
     return graph;
+}
+
+static std::vector<std::uint32_t> read_solution(Settings const& settings) {
+    std::ifstream solution_stream{settings.solution_file};
+    if (!solution_stream) {
+        throw std::runtime_error{"Could not open solution file"};
+    }
+    std::vector<std::uint32_t> solution;
+    std::uint32_t node;
+    std::uint32_t distance;
+    while (solution_stream >> node >> distance) {
+        solution.push_back(distance);
+    }
+    return solution;
 }
 
 int main(int argc, char* argv[]) {
@@ -264,7 +290,7 @@ int main(int argc, char* argv[]) {
     start_flag.store(false, std::memory_order_relaxed);
     std::atomic_thread_fence(std::memory_order_release);
     thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
-    coordinator.run<Task>(std::ref(pq), graph, std::ref(distances), settings);
+    coordinator.run<Task>(std::ref(pq), graph, std::ref(distances));
     coordinator.wait_until_notified();
     start_flag.store(true, std::memory_order_release);
     auto start_tick = clock_type::now();

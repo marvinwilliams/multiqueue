@@ -11,6 +11,7 @@
 #ifndef MULTIQUEUE_HPP_INCLUDED
 #define MULTIQUEUE_HPP_INCLUDED
 
+#include "multiqueue/configurations.hpp"
 #include "multiqueue/sequential/heap/heap.hpp"
 #include "multiqueue/sequential/heap/merge_heap.hpp"
 #include "multiqueue/util/buffer.hpp"
@@ -33,8 +34,6 @@
 #include <type_traits>
 
 namespace multiqueue {
-
-namespace {
 
 template <bool isMerging, bool WithInsertionBuffer, bool WithDeletionBuffer, typename Key, typename T,
           typename Comparator, typename Configuration>
@@ -459,8 +458,8 @@ struct multiqueue_base {
     }
 };
 
-template <typename Key, typename T, typename Comparator = std::less<Key>, typename Configuration,
-          typename Allocator = std::allocator<Key>>
+template <typename Key, typename T, typename Comparator = std::less<Key>,
+          typename Configuration = configuration::Default, typename Allocator = std::allocator<Key>>
 class multiqueue : private multiqueue_base<Key, T, Comparator> {
    private:
     using base_type = multiqueue_base<Key, T, Comparator>;
@@ -472,6 +471,16 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
     using value_type = typename base_type::value_type;
     using key_comparator = typename base_type::key_comparator;
     using size_type = typename base_type::size_type;
+    struct Handle {
+        friend class multiqueue;
+
+       private:
+        uint32_t id_;
+
+       private:
+        explicit Handle(unsigned int id) : id_{static_cast<uint32_t>(id)} {
+        }
+    };
 
    private:
     struct alignas(Configuration::NumaFriendly ? PAGESIZE : L1_CACHE_LINESIZE) InternalPriorityQueueWrapper {
