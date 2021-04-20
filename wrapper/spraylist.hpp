@@ -10,7 +10,6 @@
 
 struct sl_intset;
 
-namespace multiqueue {
 namespace wrapper {
 
 class spraylist {
@@ -38,6 +37,5 @@ class spraylist {
 };
 
 }  // namespace wrapper
-}  // namespace multiqueue
 
 #endif

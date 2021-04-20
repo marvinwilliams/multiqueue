@@ -16,7 +16,6 @@ extern "C" {
 
 __thread unsigned long *seeds;
 
-namespace multiqueue {
 namespace wrapper {
 
 constexpr unsigned int INITIAL_SIZE = 1000000;
@@ -70,4 +69,3 @@ bool spraylist::extract_top(Handle, std::pair<uint32_t, uint32_t> &retval) {
 }
 
 }  // namespace wrapper
-}  // namespace multiqueue

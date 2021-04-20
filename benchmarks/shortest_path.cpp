@@ -17,12 +17,12 @@
 #include <vector>
 
 #include "cxxopts.hpp"
+#include "priority_queue_factory.hpp"
 #include "system_config.hpp"
-#include "utils/priority_queue_factory.hpp"
-#include "utils/thread_coordination.hpp"
-#include "utils/threading.hpp"
+#include "thread_coordination.hpp"
+#include "threading.hpp"
 
-using PriorityQueue = typename multiqueue::util::PriorityQueueFactory<std::uint32_t, std::uint32_t>::type;
+using PriorityQueue = typename util::PriorityQueueFactory<std::uint32_t, std::uint32_t>::type;
 
 using namespace std::chrono_literals;
 using clock_type = std::chrono::steady_clock;
@@ -59,30 +59,23 @@ static std::atomic_size_t num_processed_nodes;
 
 std::atomic_bool start_flag;
 
-#ifdef PQ_IS_WRAPPER
-static bool idle(thread_coordination::Context ctx, PriorityQueue & pq,
-                 std::pair<std::uint32_t, std::uint32_t>& retval) {
-#else
-static bool idle(thread_coordination::Context ctx, PriorityQueue const& pq) {
-#endif
-    idle_counter.fetch_add(1, std::memory_order_relaxed);
-    idle_state[ctx.get_id()].state.store(1, std::memory_order_release);
-#ifdef PQ_IS_WRAPPER
-    if (!pq.extract_top(pq.get_handle(ctx.get_id()), retval)) {
-#else
-    if (!pq.weak_empty(pq.get_handle(ctx.get_id()))) {
-#endif
-        idle_counter.fetch_sub(1, std::memory_order_relaxed);
-        idle_state[ctx.get_id()].state.store(0, std::memory_order_release);
-        return false;
-    }
-    idle_counter.fetch_add(1, std::memory_order_relaxed);
-    idle_state[ctx.get_id()].state.store(2, std::memory_order_release);
+static bool idle(unsigned int id, unsigned int num_threads) {
+    idle_counter.fetch_add(1, std::memory_order_seq_cst);
+    idle_state[id].state.store(2, std::memory_order_seq_cst);
+    /* if (id == 0) { */
+    /*     std::cout << "idling " << id << '\n'; */
+    /* } */
     while (true) {
-        if (idle_counter.load(std::memory_order_acquire) == 2 * ctx.get_num_threads()) {
+        if (idle_counter.load(std::memory_order_seq_cst) == 2 * num_threads) {
+            /* if (id == 0) { */
+            /*     std::cout << "finished " << id << '\n'; */
+            /* } */
             return true;
         }
-        if (idle_state[ctx.get_id()].state.load(std::memory_order_acquire) == 0) {
+        if (idle_state[id].state.load(std::memory_order_seq_cst) == 0) {
+            /* if (id == 0) { */
+            /*     std::cout << "get back to work " << id << '\n'; */
+            /* } */
             return false;
         }
         std::this_thread::yield();
@@ -106,22 +99,32 @@ struct Task {
             pq.push(handle, {0, 0});
         }
         ctx.synchronize(stage++, [&ctx]() {
-            std::clog << "Start benchmark..." << std::flush;
+            std::clog << "Calculating shortest paths...\n" << std::flush;
             ctx.notify_coordinator();
         });
         while (!start_flag.load(std::memory_order_relaxed)) {
             _mm_pause();
         }
         std::atomic_thread_fence(std::memory_order_acquire);
+        std::pair<std::uint32_t, std::uint32_t> retval;
         while (true) {
-            std::pair<std::uint32_t, std::uint32_t> retval;
+            /* if (ctx.get_id() == 0) { */
+            /*     std::cout << "looping\n"; */
+            /* } */
             if (pq.extract_top(handle, retval)) {
             found:
                 std::uint32_t const current_distance =
                     distances[retval.second].distance.load(std::memory_order_relaxed);
+                /* std::cout << "popping successful\n"; */
+                /* if (ctx.get_id() == 0) { */
+                /*     std::cout << "popping successful\n"; */
+                /* } */
                 if (retval.first > current_distance) {
                     continue;
                 }
+                /* if (ctx.get_id() == 0) { */
+                /*     std::cout << "actually smaller\n"; */
+                /* } */
                 ++num_local_processed_nodes;
                 bool pushed = false;
                 for (std::size_t i = graph.nodes[retval.second]; i < graph.nodes[retval.second + 1]; ++i) {
@@ -139,47 +142,76 @@ struct Task {
                     }
                 }
                 if (pushed) {
-                    if (idle_counter.load(std::memory_order_acquire) > 0) {
+                    /* if (ctx.get_id() == 0) { */
+                    /*     std::cout << "reinserted some\n"; */
+                    /* } */
+                    if (idle_counter.load(std::memory_order_seq_cst) > 0) {
+                        /* if (ctx.get_id() == 0) { */
+                        /*     std::cout << "some are idling, waking\n"; */
+                        /* } */
                         for (std::size_t i = 0; i < ctx.get_num_threads(); ++i) {
                             if (i == ctx.get_id()) {
                                 continue;
                             }
                             unsigned int thread_state = 2;
                             while (!idle_state[i].state.compare_exchange_weak(thread_state, 3,
-                                                                              std::memory_order_acq_rel) &&
+                                                                              std::memory_order_seq_cst) &&
                                    thread_state != 0 && thread_state != 3) {
+                                /* if (ctx.get_id() == 0) { */
+                                /*     std::cout << "thread_state " << thread_state << '\n'; */
+                                /* } */
                                 thread_state = 2;
                                 std::this_thread::yield();
                             }
                             if (thread_state == 2) {
-                                idle_counter.fetch_sub(2, std::memory_order_relaxed);
-                                idle_state[i].state.store(0, std::memory_order_release);
+                                idle_counter.fetch_sub(2, std::memory_order_seq_cst);
+                                idle_state[i].state.store(0, std::memory_order_seq_cst);
                             }
                         }
                     }
                 }
             } else {
+                /* if (ctx.get_id() == 0) { */
+                /*     std::cout << "queue empty\n"; */
+                /* } */
+                /* std::cout << "popping failed\n"; */
                 for (std::size_t i = 0; i < retries; ++i) {
                     if (pq.extract_top(handle, retval)) {
+                        /* std::cout << "successing\n"; */
+                        /* if (ctx.get_id() == 0) { */
+                        /*     std::cout << "nevermind, found one\n"; */
+                        /* } */
                         goto found;
                     }
                     std::this_thread::yield();
                 }
+                idle_state[ctx.get_id()].state.store(1, std::memory_order_seq_cst);
+                idle_counter.fetch_add(1, std::memory_order_seq_cst);
+                /* if (ctx.get_id() == 0) { */
+                /*     std::cout << "increased counter by 1\n"; */
+                /* } */
 #ifdef PQ_IS_WRAPPER
-                if (idle(ctx, pq, retval)) {
-                    break;
-                } else {
+                if (pq.extract_top(handle, retval)) {
+#else
+                if (pq.extract_from_partition(handle, retval)) {
+#endif
+                    idle_counter.fetch_sub(1, std::memory_order_seq_cst);
+                    idle_state[ctx.get_id()].state.store(0, std::memory_order_seq_cst);
+                    /* if (ctx.get_id() == 0) { */
+                    /*     std::cout << "empty check failed, resuming\n"; */
+                    /* } */
                     goto found;
                 }
-#else
-                if (idle(ctx, pq)) {
+
+                if (idle(ctx.get_id(), ctx.get_num_threads())) {
                     break;
                 } else {
+                    /* std::cout << "Continuing\n"; */
                     continue;
                 }
-#endif
             }
         }
+        /* std::cout << "Done " << ctx.get_id() << '\n'; */
         num_processed_nodes += num_local_processed_nodes;
     }
 
@@ -261,7 +293,7 @@ int main(int argc, char* argv[]) {
         auto result = options.parse(argc, argv);
         if (result.count("help")) {
             std::cerr << options.help() << std::endl;
-            exit(0);
+            return 0;
         }
         if (result.count("threads") > 0) {
             settings.num_threads = result["threads"].as<unsigned int>();
@@ -300,31 +332,31 @@ int main(int argc, char* argv[]) {
         distances[i].distance = std::numeric_limits<std::uint32_t>::max();
     }
     std::clog << "done\n";
-    idle_state = new IdleState[settings.num_threads];
+    idle_state = new IdleState[settings.num_threads]();
     num_processed_nodes = 0;
     PriorityQueue pq{settings.num_threads};
     start_flag.store(false, std::memory_order_relaxed);
     std::atomic_thread_fence(std::memory_order_release);
-    std::clog << "Calculating shortest paths..." << std::flush;
     thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
     coordinator.run<Task>(std::ref(pq), graph, std::ref(distances));
     coordinator.wait_until_notified();
     start_flag.store(true, std::memory_order_release);
     auto start_tick = clock_type::now();
+    __asm__ __volatile__("" ::: "memory");
     coordinator.join();
+    __asm__ __volatile__("" ::: "memory");
     auto end_tick = clock_type::now();
     std::clog << "Done\n";
     std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(end_tick - start_tick).count() << ' '
               << num_processed_nodes << '\n';
     for (std::size_t i = 0; i + 1 < graph.nodes.size(); ++i) {
+        /* std::cout << distances[i].distance.load(std::memory_order_relaxed) << '\n'; */
         if (distances[i].distance.load(std::memory_order_relaxed) != solution[i]) {
             std::cerr << "Solution invalid!\n";
             return 1;
         }
     }
-    /* for (auto const& d : distances) { */
-    /*   std::cout << d.distance << '\n'; */
-    /* } */
+
     delete[] idle_state;
     return 0;
 }

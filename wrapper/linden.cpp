@@ -8,7 +8,6 @@ extern "C" {
 #include "spraylist_linden/linden.h"
 }
 
-namespace multiqueue {
 namespace wrapper {
 
 struct linden_pq_wrapper {
@@ -41,4 +40,3 @@ bool linden::extract_top(Handle, std::pair<std::uint32_t, std::uint32_t>& retval
 }
 
 }  // namespace wrapper
-}  // namespace multiqueue

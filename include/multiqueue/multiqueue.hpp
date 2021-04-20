@@ -12,12 +12,6 @@
 #define MULTIQUEUE_HPP_INCLUDED
 
 #include "multiqueue/configurations.hpp"
-#include "multiqueue/sequential/heap/heap.hpp"
-#include "multiqueue/sequential/heap/merge_heap.hpp"
-#include "multiqueue/util/buffer.hpp"
-#include "multiqueue/util/extractors.hpp"
-#include "multiqueue/util/ring_buffer.hpp"
-#include "sequential/heap/heap.hpp"
 #include "system_config.hpp"
 
 #ifdef HAVE_NUMA
@@ -34,381 +28,6 @@
 #include <type_traits>
 
 namespace multiqueue {
-
-template <bool isMerging, bool WithInsertionBuffer, bool WithDeletionBuffer, typename Key, typename T,
-          typename Comparator, typename Configuration>
-struct PriorityQueueConfiguration;
-
-template <typename Key, typename T, typename Comparator, typename Configuration>
-struct PriorityQueueConfiguration<false, false, false, Key, T, Comparator, Configuration> {
-    using heap_type =
-        sequential::key_value_heap<Key, T, Comparator, Configuration::HeapDegree, typename Configuration::SiftStrategy,
-                                   typename Configuration::HeapAllocator>;
-    using allocator_type = typename Configuration::HeapAllocator;
-
-    heap_type heap;
-
-    PriorityQueueConfiguration() = default;
-
-    explicit PriorityQueueConfiguration(allocator_type const &alloc) : heap(alloc) {
-    }
-
-    explicit PriorityQueueConfiguration(Comparator const &comp, allocator_type const &alloc = allocator_type())
-        : heap(comp, alloc) {
-    }
-    inline typename heap_type::value_type const &top() {
-        return heap.top();
-    }
-
-    inline void extract_top(typename heap_type::value_type &retval) {
-        heap.extract_top(retval);
-    }
-
-    inline bool refresh_top() noexcept {
-        return !heap.empty();
-    }
-
-    inline void push(typename heap_type::value_type const &value) {
-        heap.insert(value);
-    }
-
-    inline void pop() {
-        heap.pop();
-    }
-
-    inline bool empty() const noexcept {
-        return heap.empty();
-    }
-};
-
-template <typename Key, typename T, typename Comparator, typename Configuration>
-struct PriorityQueueConfiguration<false, true, false, Key, T, Comparator, Configuration> {
-    using heap_type =
-        sequential::key_value_heap<Key, T, Comparator, Configuration::HeapDegree, typename Configuration::SiftStrategy,
-                                   typename Configuration::HeapAllocator>;
-    using allocator_type = typename Configuration::HeapAllocator;
-
-    util::buffer<typename heap_type::value_type, Configuration::InsertionBufferSize> insertion_buffer;
-    heap_type heap;
-
-    PriorityQueueConfiguration() = default;
-
-    explicit PriorityQueueConfiguration(allocator_type const &alloc) : heap(alloc) {
-    }
-
-    explicit PriorityQueueConfiguration(Comparator const &comp, allocator_type const &alloc = allocator_type())
-        : heap(comp, alloc) {
-    }
-
-    inline typename heap_type::value_type const &top() {
-        assert(insertion_buffer.empty());
-        return heap.top();
-    }
-
-    inline void extract_top(typename heap_type::value_type &retval) {
-        assert(insertion_buffer.empty());
-        heap.extract_top(retval);
-    }
-
-    inline bool refresh_top() {
-        for (auto &v : insertion_buffer) {
-            heap.insert(std::move(v));
-        }
-        insertion_buffer.clear();
-        return !heap.empty();
-    }
-
-    inline void push(typename heap_type::value_type const &value) {
-        if (insertion_buffer.size() != Configuration::InsertionBufferSize) {
-            insertion_buffer.push_back(value);
-        } else {
-            refresh_top();
-            heap.insert(value);
-        }
-    }
-
-    inline void pop() {
-        assert(insertion_buffer.empty());
-        heap.pop();
-    }
-
-    inline bool empty() const noexcept {
-        return insertion_buffer.empty() && heap.empty();
-    }
-};
-
-template <typename Key, typename T, typename Comparator, typename Configuration>
-struct PriorityQueueConfiguration<false, false, true, Key, T, Comparator, Configuration> {
-    using heap_type =
-        sequential::key_value_heap<Key, T, Comparator, Configuration::HeapDegree, typename Configuration::SiftStrategy,
-                                   typename Configuration::HeapAllocator>;
-    using allocator_type = typename Configuration::HeapAllocator;
-
-    util::ring_buffer<typename heap_type::value_type, Configuration::DeletionBufferSize> deletion_buffer;
-    heap_type heap;
-
-    PriorityQueueConfiguration() = default;
-
-    explicit PriorityQueueConfiguration(allocator_type const &alloc) : heap(alloc) {
-    }
-
-    explicit PriorityQueueConfiguration(Comparator const &comp, allocator_type const &alloc = allocator_type())
-        : heap(comp, alloc) {
-    }
-
-    inline typename heap_type::value_type const &top() {
-        assert(!deletion_buffer.empty());
-        return deletion_buffer.front();
-    }
-
-    inline bool refresh_top() {
-        if (!deletion_buffer.empty()) {
-            return true;
-        }
-        typename heap_type::value_type tmp;
-        for (std::size_t i = 0; i < Configuration::DeletionBufferSize && !heap.empty(); ++i) {
-            heap.extract_top(tmp);
-            deletion_buffer.push_back(std::move(tmp));
-        }
-        return !deletion_buffer.empty();
-    }
-
-    inline void extract_top(typename heap_type::value_type &retval) {
-        assert(!deletion_buffer.empty());
-        retval = std::move(deletion_buffer.front());
-        deletion_buffer.pop_front();
-    };
-
-    inline void push(typename heap_type::value_type const &value) {
-        if (deletion_buffer.empty() || !heap.get_comparator()(value.first, deletion_buffer.back().first)) {
-            heap.insert(value);
-        } else {
-            if (deletion_buffer.full()) {
-                heap.insert(std::move(deletion_buffer.back()));
-                deletion_buffer.pop_back();
-            }
-            std::size_t pos = deletion_buffer.size();
-            for (; pos > 0 && heap.get_comparator()(value.first, deletion_buffer[pos - 1].first); --pos) {
-            }
-            deletion_buffer.insert_at(pos, value);
-        }
-    }
-
-    inline void pop() {
-        assert(!deletion_buffer.empty());
-        deletion_buffer.pop_front();
-    }
-
-    inline bool empty() const noexcept {
-        return deletion_buffer.empty() && heap.empty();
-    }
-};
-
-template <typename Key, typename T, typename Comparator, typename Configuration>
-struct PriorityQueueConfiguration<false, true, true, Key, T, Comparator, Configuration> {
-    using heap_type =
-        sequential::key_value_heap<Key, T, Comparator, Configuration::HeapDegree, typename Configuration::SiftStrategy,
-                                   typename Configuration::HeapAllocator>;
-    using allocator_type = typename Configuration::HeapAllocator;
-    util::buffer<typename heap_type::value_type, Configuration::InsertionBufferSize> insertion_buffer;
-    util::ring_buffer<typename heap_type::value_type, Configuration::DeletionBufferSize> deletion_buffer;
-
-    heap_type heap;
-
-    inline typename heap_type::value_type const &top() {
-        assert(!deletion_buffer.empty());
-        return deletion_buffer.front();
-    }
-
-    inline void flush_insertion_buffer() {
-        for (auto &v : insertion_buffer) {
-            heap.insert(std::move(v));
-        }
-        insertion_buffer.clear();
-    }
-
-    bool refresh_top() {
-        if (!deletion_buffer.empty()) {
-            return true;
-        }
-        flush_insertion_buffer();
-        typename heap_type::value_type tmp;
-        for (std::size_t i = 0; i < Configuration::DeletionBufferSize && !heap.empty(); ++i) {
-            heap.extract_top(tmp);
-            deletion_buffer.push_back(std::move(tmp));
-        }
-        return !deletion_buffer.empty();
-    }
-
-    void extract_top(typename heap_type::value_type &retval) {
-        assert(!deletion_buffer.empty());
-        retval = std::move(deletion_buffer.front());
-        deletion_buffer.pop_front();
-    };
-
-    void push(typename heap_type::value_type const &value) {
-        if (!deletion_buffer.empty() && heap.get_comparator()(value.first, deletion_buffer.back().first)) {
-            if (deletion_buffer.full()) {
-                if (insertion_buffer.full()) {
-                    flush_insertion_buffer();
-                    heap.insert(std::move(deletion_buffer.back()));
-                } else {
-                    insertion_buffer.push_back(std::move(deletion_buffer.back()));
-                }
-                deletion_buffer.pop_back();
-            }
-            std::size_t pos = deletion_buffer.size();
-            for (; pos > 0 && heap.get_comparator()(value.first, deletion_buffer[pos - 1].first); --pos) {
-            }
-            deletion_buffer.insert_at(pos, value);
-            return;
-        }
-        if (insertion_buffer.full()) {
-            flush_insertion_buffer();
-            heap.insert(value);
-            return;
-        } else {
-            insertion_buffer.push_back(value);
-        }
-    }
-
-    void pop() {
-        assert(!deletion_buffer.empty());
-        deletion_buffer.pop_front();
-    }
-
-    inline bool empty() const noexcept {
-        return insertion_buffer.empty() && deletion_buffer.empty() && heap.empty();
-    }
-};
-
-template <typename Key, typename T, typename Comparator, typename Configuration>
-struct PriorityQueueConfiguration<true, true, true, Key, T, Comparator, Configuration> {
-    using heap_type = sequential::key_value_merge_heap<Key, T, Comparator, Configuration::NodeSize,
-                                                       typename Configuration::HeapAllocator>;
-    using allocator_type = typename Configuration::HeapAllocator;
-
-    util::buffer<typename heap_type::value_type, Configuration::NodeSize> insertion_buffer;
-    util::ring_buffer<typename heap_type::value_type, Configuration::NodeSize * 2> deletion_buffer;
-    heap_type heap;
-
-    PriorityQueueConfiguration() = default;
-
-    explicit PriorityQueueConfiguration(allocator_type const &alloc) : heap(alloc) {
-    }
-
-    explicit PriorityQueueConfiguration(Comparator const &comp, allocator_type const &alloc = allocator_type())
-        : heap(comp, alloc) {
-    }
-
-    inline typename heap_type::value_type const &top() {
-        assert(!deletion_buffer.empty());
-        return deletion_buffer.front();
-    }
-
-    inline void flush_insertion_buffer() {
-        assert(insertion_buffer.full());
-        std::sort(insertion_buffer.begin(), insertion_buffer.end(),
-                  [&](auto const &lhs, auto const &rhs) { return heap.get_comparator()(lhs.first, rhs.first); });
-        for (std::size_t i = 0; i < insertion_buffer.size(); i += Configuration::NodeSize) {
-            heap.insert(insertion_buffer.begin() + (i * Configuration::NodeSize),
-                        insertion_buffer.begin() + ((i + 1) * Configuration::NodeSize));
-        }
-        insertion_buffer.clear();
-    }
-
-    bool refresh_top() {
-        if (!deletion_buffer.empty()) {
-            return true;
-        }
-        if (insertion_buffer.full()) {
-            flush_insertion_buffer();
-        }
-        if (!heap.empty()) {
-            if (!insertion_buffer.empty()) {
-                auto insert_it = std::partition(insertion_buffer.begin(), insertion_buffer.end(), [&](auto const &v) {
-                    return heap.get_comparator()(heap.top_node().back().first, v.first);
-                });
-                std::sort(insert_it, insertion_buffer.end(), [&](auto const &lhs, auto const &rhs) {
-                    return heap.get_comparator()(rhs.first, lhs.first);
-                });
-                auto heap_it = heap.top_node().begin();
-                for (auto current = insert_it; current != insertion_buffer.end(); ++current) {
-                    while (heap.get_comparator()(heap_it->first, current->first)) {
-                        deletion_buffer.push_back(std::move(*heap_it++));
-                    }
-                    deletion_buffer.push_back(std::move(*current));
-                }
-                insertion_buffer.set_size(static_cast<std::size_t>(insert_it - insertion_buffer.begin()));
-                std::move(heap_it, heap.top_node().end(), std::back_inserter(deletion_buffer));
-            } else {
-                std::move(heap.top_node().begin(), heap.top_node().end(), std::back_inserter(deletion_buffer));
-            }
-            heap.pop_node();
-        } else if (!insertion_buffer.empty()) {
-            std::sort(insertion_buffer.begin(), insertion_buffer.end(),
-                      [&](auto const &lhs, auto const &rhs) { return heap.get_comparator()(lhs.first, rhs.first); });
-            std::move(insertion_buffer.begin(), insertion_buffer.end(), std::back_inserter(deletion_buffer));
-            insertion_buffer.clear();
-        }
-        return !deletion_buffer.empty();
-    }
-
-    void extract_top(typename heap_type::value_type &retval) {
-        assert(!deletion_buffer.empty());
-        retval = std::move(deletion_buffer.front());
-        deletion_buffer.pop_front();
-    };
-
-    void push(typename heap_type::value_type const &value) {
-        if (!deletion_buffer.empty() && heap.get_comparator()(value.first, deletion_buffer.back().first)) {
-            if (deletion_buffer.full()) {
-                if (insertion_buffer.full()) {
-                    flush_insertion_buffer();
-                }
-                insertion_buffer.push_back(std::move(deletion_buffer.back()));
-                deletion_buffer.pop_back();
-            }
-            std::size_t pos = deletion_buffer.size();
-            for (; pos > 0 && heap.get_comparator()(value.first, deletion_buffer[pos - 1].first); --pos) {
-            }
-            deletion_buffer.insert_at(pos, value);
-            return;
-        }
-        if (insertion_buffer.full()) {
-            flush_insertion_buffer();
-        }
-        insertion_buffer.push_back(value);
-    }
-
-    void pop() {
-        assert(!deletion_buffer.empty());
-        deletion_buffer.pop_front();
-    }
-
-    inline bool empty() const noexcept {
-        return insertion_buffer.empty() && deletion_buffer.empty() && heap.empty();
-    }
-};
-
-template <typename Key, typename T, typename Comparator, typename Configuration>
-using internal_priority_queue_t = PriorityQueueConfiguration<
-    Configuration::UseMergeHeap, Configuration::UseMergeHeap ? true : Configuration::WithInsertionBuffer,
-    Configuration::UseMergeHeap ? true : Configuration::WithDeletionBuffer, Key, T, Comparator, Configuration>;
-
-}  // namespace
-
-struct Handle {
-    template <typename Key, typename T, typename Comparator, typename Configuration, typename Allocator>
-    friend class multiqueue;
-
-   private:
-    uint32_t id_;
-
-   private:
-    explicit Handle(unsigned int id) : id_{static_cast<uint32_t>(id)} {
-    }
-};
 
 template <typename Key, typename T, typename Comparator>
 struct multiqueue_base {
@@ -430,7 +49,7 @@ struct multiqueue_base {
 
    protected:
     struct alignas(L1_CACHE_LINESIZE) ThreadLocalData {
-        std::default_random_engine gen;
+        std::mt19937 gen;
         std::uniform_int_distribution<size_type> dist;
         unsigned int insert_count = 0;
         unsigned int extract_count = 0;
@@ -514,7 +133,7 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
         }
 
         inline void unlock(uint32_t id) const noexcept {
-            assert(guard == Configuration::WithPheromones ? (lock_mask | static_cast<uint32_t>(id)) : lock_mask);
+            assert(guard == (Configuration::WithPheromones ? (lock_mask | static_cast<uint32_t>(id)) : lock_mask));
             guard.store(Configuration::WithPheromones ? static_cast<uint32_t>(id) : 0, std::memory_order_release);
         }
     };
@@ -628,7 +247,7 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
         return Handle{id};
     }
 
-    void push(Handle const &handle, value_type const &value) {
+    void push(Handle handle, value_type const &value) {
         bool claiming = false;
         if (thread_data_[handle.id_].insert_count == 0) {
             refresh_insert_index(handle);
@@ -647,7 +266,7 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
         --thread_data_[handle.id_].insert_count;
     }
 
-    bool extract_top(Handle const &handle, value_type &retval) {
+    bool extract_top(Handle handle, value_type &retval) {
         bool claiming = false;
         if (thread_data_[handle.id_].extract_count == 0) {
             refresh_extract_indices(handle);
@@ -708,17 +327,19 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
     }
 
     // threadsafe, but can be inaccurate if multiqueue is accessed
-    bool weak_empty(Handle handle) const {
-        for (size_type i = 0; i < pq_list_size_; ++i) {
+    bool extract_from_partition(Handle handle, value_type &retval) {
+        for (size_type i = Configuration::C * handle.id_; i < Configuration::C * (handle.id_ + 1); ++i) {
             if (!pq_list_[i].try_lock(handle.id_, true)) {
-                return false;
+                continue;
             }
-            if (!pq_list_[i].pq.empty()) {
-                return false;
+            if (pq_list_[i].pq.refresh_top()) {
+                pq_list_[i].pq.extract_top(retval);
+                pq_list_[i].unlock(handle.id_);
+                return true;
             }
             pq_list_[i].unlock(handle.id_);
         }
-        return true;
+        return false;
     }
 
     static std::string description() {

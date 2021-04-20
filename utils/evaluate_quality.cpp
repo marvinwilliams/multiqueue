@@ -11,8 +11,6 @@
 #include "cxxopts.hpp"
 #include "tlx/container/btree_map.hpp"
 
-static constexpr std::size_t num_deletions = 100'000;
-
 struct log_entry {
     unsigned int thread_id;
     uint64_t tick;
@@ -130,7 +128,8 @@ int main(int argc, char* argv[]) {
             }
             if (!insertions[entry.thread_id].empty() && entry.tick < insertions[entry.thread_id].back().tick) {
                 std::cerr << "Line " << line << ": "
-                          << "Insertion\n\t" << entry << "\nhappens before previous insertion" << std::endl;
+                          << "Insertion\n\t" << entry << "\nhappens before previous insertion of same thread"
+                          << std::endl;
                 return 1;
             }
             if (entry.value != insertions[entry.thread_id].size() || entry.thread_id != entry.insert_thread_id) {
@@ -202,10 +201,6 @@ int main(int argc, char* argv[]) {
         std::clog << "Log is consistent" << std::endl;
         return 0;
     }
-    if (deletions.size() < num_deletions) {
-        std::cerr << "Too few deletions" << std::endl;
-        return 1;
-    }
     std::clog << "Sorting deletions..." << std::flush;
     std::sort(deletions.begin(), deletions.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
     std::clog << "done\n";
@@ -217,7 +212,7 @@ int main(int argc, char* argv[]) {
     tlx::btree_map<heap_entry, std::pair<size_t, size_t>> replay_heap{};
     std::vector<size_t> insert_index(insertions.size(), 0);
     std::size_t failed_deletions = 0;
-    for (size_t i = 0; i < num_deletions; ++i) {
+    for (size_t i = 0; i < deletions.size(); ++i) {
         // Inserting everything before next deletion
         for (unsigned int t = 0; t < insertions.size(); ++t) {
             while (insert_index[t] < insertions[t].size() && insertions[t][insert_index[t]].tick < deletions[i].tick) {
@@ -275,14 +270,13 @@ int main(int argc, char* argv[]) {
             std::cerr << "Element\n\t" << deletions[i] << "\nis not in the heap at deletion time" << std::endl;
             return 1;
         }
-        if (i % (num_deletions / 100) == 0) {
+        if (i % (deletions.size() / 100) == 0) {
             std::clog << "\rProcessed " << std::setprecision(3)
                       << 100. * static_cast<double>(i) / static_cast<double>(deletions.size()) << "%";
-            std::clog << "\rProcessed " << std::setprecision(3) << 100. * static_cast<double>(i) / num_deletions << "%";
         }
     }
-    std::clog << "\rProcessed 100.0%" << std::endl;
-    std::clog << "Invalid failed deletions: " << failed_deletions << std::endl;
+    std::clog << "\rProcessing done         " << std::endl;
+    std::clog << "Failed deletions: " << failed_deletions << std::endl;
     std::clog << "Writing histograms..." << std::flush;
     {
         auto out_f = std::ofstream{out_rank};

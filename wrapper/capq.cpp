@@ -12,7 +12,6 @@ extern "C" {
 
 __thread ptst_t* ptst;
 
-namespace multiqueue {
 namespace wrapper {
 
 struct capq_wrapper_type {
@@ -50,4 +49,3 @@ template class capq<false, true, true>;
 template class capq<false, false, true>;
 
 }  // namespace wrapper
-}  // namespace multiqueue

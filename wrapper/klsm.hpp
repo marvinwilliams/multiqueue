@@ -8,12 +8,11 @@
 #include <string>
 #include <utility>
 
-namespace multiqueue {
 namespace wrapper {
 
-template <typename KeyType, typename ValueType>
+template <typename KeyType, typename ValueType, int Relaxation = 256>
 class klsm {
-    kpq::k_lsm<KeyType, ValueType, 256> pq_;
+    kpq::k_lsm<KeyType, ValueType, Relaxation> pq_;
 
    public:
     struct Handle{};
@@ -34,11 +33,10 @@ class klsm {
     }
 
     static std::string description() {
-        return "klsm";
+        return "klsm" + std::to_string(Relaxation);
     }
 };
 
 }  // namespace wrapper
-}  // namespace multiqueue
 
 #endif

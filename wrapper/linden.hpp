@@ -8,7 +8,6 @@
 #include <string>
 #include <utility>
 
-namespace multiqueue {
 namespace wrapper {
 
 struct linden_pq_wrapper;
@@ -38,6 +37,5 @@ class linden {
 };
 
 }  // namespace wrapper
-}  // namespace multiqueue
 
 #endif

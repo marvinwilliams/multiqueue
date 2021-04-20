@@ -9,7 +9,6 @@
 #include <string>
 #include <utility>
 
-namespace multiqueue {
 namespace wrapper {
 
 struct capq_wrapper_type;
@@ -41,6 +40,5 @@ class capq {
 };
 
 }  // namespace wrapper
-}  // namespace multiqueue
 
 #endif

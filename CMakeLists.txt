@@ -20,7 +20,7 @@ option(${PROJECT_NAME}_GENERATE_DOCS "Add a target to generate the documentation
 cmake_dependent_option(${PROJECT_NAME}_INSTALL_DOCS "Add the generated documentation to the install list" ON, ${PROJECT_NAME}_GENERATE_DOCS OFF)
 option("${PROJECT_NAME}_BUILD_TESTS" "Build tests for ${PROJECT_NAME}" ON)
 option("${PROJECT_NAME}_BUILD_BENCHMARKS" "Build benchmarks" ON)
-option("${PROJECT_NAME}_BUILD_EXAMPLES" "Build examples" ON)
+option("${PROJECT_NAME}_BUILD_EXAMPLES" "Build examples" OFF)
 
 execute_process(COMMAND getconf LEVEL1_DCACHE_LINESIZE OUTPUT_VARIABLE L1_CACHE_LINESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
 execute_process(COMMAND getconf PAGESIZE OUTPUT_VARIABLE PAGESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -61,6 +61,8 @@ target_compile_features(
   cxx_std_17
 )
 
+find_package(Numa)
+
 if (Numa_FOUND)
   target_compile_definitions("${PROJECT_NAME}_compile_requirements" INTERFACE HAVE_NUMA)
 endif()
@@ -71,7 +73,7 @@ target_link_libraries("${PROJECT_NAME}" INTERFACE "${PROJECT_NAME}_compile_requi
 # subproject.
 add_library("${PROJECT_NAME}::${PROJECT_NAME}" ALIAS "${PROJECT_NAME}")
 
-# Not added as link target to avoid propagation of 
+# Not added as link target to avoid propagation of
 # flags.  Is used only by internal targets that compile the library.
 add_library("${PROJECT_NAME}_internal" INTERFACE)
 
@@ -101,7 +103,82 @@ target_compile_options(
   $<BUILD_INTERFACE:${WARNING_FLAGS}>
 )
 
+# Find the pthread library
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads)
+
+function(generate_mq_target name compiler_define)
+  add_library(${name} INTERFACE)
+  target_compile_definitions(${name} INTERFACE ${compiler_define})
+  target_link_libraries(${name} INTERFACE multiqueue::multiqueue)
+  set_property(TARGET ${name} PROPERTY pq_name ${name})
+endfunction()
+
+generate_mq_target(nobufferingmq PQ_MQ_NO_BUFFERING)
+generate_mq_target(deletebufferingmq PQ_MQ_DELETE_BUFFERING)
+generate_mq_target(insertbufferingmq PQ_MQ_INSERT_BUFFERING)
+generate_mq_target(fullbufferingmq PQ_MQ_FULL_BUFFERING)
+generate_mq_target(mergingmq PQ_MQ_MERGING)
+
+function(add_mq_variants priority_queue_target)
+  get_property(name TARGET ${priority_queue_target} PROPERTY pq_name)
+  add_library(${name}_pheromone INTERFACE)
+  target_link_libraries(${name}_pheromone INTERFACE ${priority_queue_target})
+  target_compile_definitions(${name}_pheromone INTERFACE MQ_CONFIG_PHEROMONES)
+  set_property(TARGET ${name}_pheromone PROPERTY pq_name ${name}_pheromone)
+
+  if(Numa_FOUND)
+    add_library(${name}_numa INTERFACE)
+    target_link_libraries(${name}_numa INTERFACE ${priority_queue_target} numa)
+    target_compile_definitions(${name}_numa INTERFACE ${define} MQ_CONFIG_NUMA)
+    set_property(TARGET ${name}_numa PROPERTY pq_name ${name}_numa)
+
+    add_library(${name}_numa_pheromone INTERFACE)
+    target_link_libraries(${name}_numa_pheromone INTERFACE ${priority_queue_target} numa)
+    target_compile_definitions(${name}_numa_pheromone INTERFACE MQ_CONFIG_PHEROMONES MQ_CONFIG_NUMA)
+    set_property(TARGET ${name}_numa_pheromone PROPERTY pq_name ${name}_numa_pheromone)
+  endif()
+endfunction()
+
+add_mq_variants(nobufferingmq)
+add_mq_variants(deletebufferingmq)
+add_mq_variants(insertbufferingmq)
+add_mq_variants(fullbufferingmq)
+add_mq_variants(mergingmq)
+
 set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/external")
+
+set(CATCH_BUILD_TESTING OFF CACHE BOOL "Build SelfTest project" FORCE)
+set(CATCH_BUILD_EXAMPLES OFF CACHE BOOL "Build documentation examples" FORCE)
+set(CATCH_BUILD_EXTRA_TESTS OFF CACHE BOOL "Build extra tests" FORCE)
+if(IS_DIRECTORY "${EXTERNAL_DIR}/Catch2")
+  add_subdirectory("${EXTERNAL_DIR}/Catch2" EXCLUDE_FROM_ALL)
+  list(APPEND CMAKE_MODULE_PATH "${EXTERNAL_DIR}/Catch2/contrib")
+  set(Catch2_FOUND TRUE)
+else()
+  message(WARNING "Could not find Catch2 in ${EXTERNAL_DIR}")
+  set(Catch2_FOUND FALSE)
+endif()
+
+set(CXXOPTS_BUILD_EXAMPLES OFF CACHE BOOL "Set to ON to build examples" FORCE)
+set(CXXOPTS_BUILD_TESTS OFF CACHE BOOL "Set to ON to build tests" FORCE)
+if(IS_DIRECTORY "${EXTERNAL_DIR}/cxxopts")
+  add_subdirectory("${EXTERNAL_DIR}/cxxopts" EXCLUDE_FROM_ALL)
+  set(cxxopts_FOUND TRUE)
+else()
+  message(WARNING "Could not find cxxopts in ${EXTERNAL_DIR}")
+  set(cxxopts_FOUND FALSE)
+endif()
+
+set(TLX_BUILD_STATIC_LIBS OFF CACHE BOOL "Build static library version of libtlx" FORCE)
+set(TLX_BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared library version of libtlx" FORCE)
+if(IS_DIRECTORY "${EXTERNAL_DIR}/tlx")
+  add_subdirectory("${EXTERNAL_DIR}/tlx" EXCLUDE_FROM_ALL)
+  set(tlx_FOUND TRUE)
+else()
+  message(WARNING "Could not find tlx in ${EXTERNAL_DIR}")
+  set(tlx_FOUND FALSE)
+endif()
 
 if(${PROJECT_NAME}_GENERATE_DOCS)
   find_package(Doxygen)
@@ -112,53 +189,17 @@ if(${PROJECT_NAME}_GENERATE_DOCS)
       COMMENT "Generate documentation"
     )
   else()
-    message(WARNING "Doxygen not found, skipping documentation generation")
+    message(WARNING "Doxygen not found, documentation cannot be built")
   endif()
 endif()
 
 if(${PROJECT_NAME}_BUILD_TESTS OR ${PROJECT_NAME}_BUILD_BENCHMARKS)
-  # Find the pthread library
-  set(THREADS_PREFER_PTHREAD_FLAG ON)
-  find_package(Threads)
-  find_package(Numa)
-
-  set(CATCH_BUILD_TESTING OFF CACHE BOOL "Build SelfTest project" FORCE)
-  set(CATCH_BUILD_EXAMPLES OFF CACHE BOOL "Build documentation examples" FORCE)
-  set(CATCH_BUILD_EXTRA_TESTS OFF CACHE BOOL "Build extra tests" FORCE)
-  find_package(Catch2 QUIET)
-  if (NOT Catch_FOUND)
-    if(IS_DIRECTORY "${EXTERNAL_DIR}/Catch2")
-      add_subdirectory("${EXTERNAL_DIR}/Catch2" EXCLUDE_FROM_ALL)
-      list(APPEND CMAKE_MODULE_PATH "${EXTERNAL_DIR}/Catch2/contrib")
-    else()
-      message(SEND_ERROR "Could not find Catch2 in ${EXTERNAL_DIR}")
-    endif()
+  if(NOT Threads_FOUND OR NOT tlx_FOUND OR NOT Catch2_FOUND)
+    message(SEND_ERROR "Cannot build tests and benchmarks because dependencies are not fulfilled")
+  else()
+    add_subdirectory(utils)
+    add_subdirectory(wrapper)
   endif()
-
-  set(CXXOPTS_BUILD_EXAMPLES OFF CACHE BOOL "Set to ON to build examples" FORCE)
-  set(CXXOPTS_BUILD_TESTS OFF CACHE BOOL "Set to ON to build tests" FORCE)
-  find_package(cxxopts QUIET)
-  if (NOT cxxopts_FOUND)
-    if(IS_DIRECTORY "${EXTERNAL_DIR}/cxxopts")
-      add_subdirectory("${EXTERNAL_DIR}/cxxopts" EXCLUDE_FROM_ALL)
-    else()
-      message(SEND_ERROR "Could not find cxxopts in ${EXTERNAL_DIR}")
-    endif()
-  endif()
-
-  set(TLX_BUILD_STATIC_LIBS OFF CACHE BOOL "Build static library version of libtlx" FORCE)
-  set(TLX_BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared library version of libtlx" FORCE)
-
-  find_package(tlx)
-  if (NOT tlx_FOUND)
-    if(IS_DIRECTORY "${EXTERNAL_DIR}/tlx")
-      add_subdirectory("${EXTERNAL_DIR}/tlx" EXCLUDE_FROM_ALL)
-    else()
-      message(SEND_ERROR "Could not find tlx in ${EXTERNAL_DIR}")
-    endif()
-  endif()
-  add_subdirectory(tests/utils)
-  add_subdirectory(tests/wrapper)
 endif()
 
 if(${PROJECT_NAME}_BUILD_TESTS)
@@ -167,7 +208,7 @@ if(${PROJECT_NAME}_BUILD_TESTS)
 endif()
 
 if(${PROJECT_NAME}_BUILD_BENCHMARKS)
-  add_subdirectory(tests/benchmark)
+  add_subdirectory(benchmarks)
 endif()
 
 if(${PROJECT_NAME}_BUILD_EXAMPLES)

@@ -8,7 +8,6 @@
 #include <string>
 #include <utility>
 
-namespace multiqueue {
 namespace wrapper {
 
 template <typename KeyType, typename ValueType>
@@ -39,6 +38,5 @@ class dlsm {
 };
 
 }  // namespace wrapper
-}  // namespace multiqueue
 
 #endif

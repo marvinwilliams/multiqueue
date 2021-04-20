@@ -12,6 +12,8 @@ read_histogram <- function(file, name) {
   data["cummulated"] <- rev(cumsum(rev(data$frequency)))
   data$cummulated <- data$cummulated / data$cummulated[1]
   data
+  # } else {
+  #   setNames(data.frame(matrix(ncol = 4, nrow = 0)), c("rank", "frequency", "name", "cummulated"))
   }
 }
 
@@ -47,42 +49,60 @@ read_throughput <- function(file, name) {
 }
 
 
-plot_rank_histogram <- function(data, outdir) {
-  plot <- ggplot(subset(data, name %in% c("nobufferingmq", "fullbufferingmq", "mergingmq", "numamq", "wrapper_linden", "wrapper_capq", "wrapper_dlsm", "wrapper_spraylist")), aes(x = rank, y = cummulated, group = name, color = name)) +
-  # plot <- ggplot(subset(data, name %in% c("wrapper_linden", "wrapper_capq", "wrapper_dlsm", "wrapper_spraylist")), aes(x = rank, y = cummulated, group = name, color = name)) +
+plot_histogram <- function(data, outdir, plotname) {
+  # print(head(data[data$name == "fullbufferingmq", ]))
+  plot_data <- data[data$name %in% c("wrapper_capq", "mergingmq", "nummq", "fullbufferingmq_c_4_k_4", "fullbufferingmq_c_4_k_64"), ]
+  plot_data %>% group_by(threads) %>% do({
+  plot <- ggplot(., aes(x = rank, y = cummulated, group = name, color = name)) +
     labs(x = "Rank", y = "Cummul. Frequency", title = "Rank") +
     geom_line() +
     scale_color_brewer(palette = "Set1") +
     scale_x_log10()
-  ggsave(plot, file = paste(outdir, "/rank.pdf", sep = ""))
+  ggsave(plot, file = paste(outdir, "/", plotname, "_", .$threads[1],".pdf", sep = ""))
+  .
+  })
 }
 
-plot_delay_histogram <- function(data, outdir) {
-  plot <- ggplot(subset(data, name %in% c("nobufferingmq", "fullbufferingmq", "mergingmq", "numamq", "wrapper_linden", "wrapper_capq", "wrapper_dlsm", "wrapper_spraylist")), aes(x = rank, y = cummulated, group = name, color = name)) +
-    labs(x = "Rank", y = "Cummul. Frequency", title = "Delay") +
+plot_histogram_by_stickiness <- function(data, outdir, plotname) {
+  ss <- data[startsWith(data$name, "fullbufferingmq_c"), ]
+  ss$c <- as.factor(str_extract(ss$name, "(?<=c_)\\d+(?=_k)"))
+  ss$c <- ordered(ss$c, levels = c("4", "8", "16"))
+  ss$k <- as.factor(str_extract(ss$name, "(?<=k_)\\d+$"))
+  ss$k <- ordered(ss$k, levels = c("2", "4", "8", "16", "64"))
+  ss %>% group_by(threads) %>% do({
+  plot <- ggplot(., aes(x = rank, y = cummulated, group = interaction(c, k), color = k)) +
+    labs(x = "Rank", y = "Cummul. Frequency", title = "Rank") +
     geom_line() +
     scale_color_brewer(palette = "Set1") +
+    facet_wrap(~c, ncol = 1) +
     scale_x_log10()
-  ggsave(plot, file = paste(outdir, "/delay.pdf", sep = ""))
+  ggsave(plot, file = paste(outdir, "/", plotname, "_", .$threads[1], ".pdf", sep = ""))
+  .
+  })
 }
 
-plot_top_delay_bar <- function(data, outdir) {
-  transformed <- subset(data, name %in% c("nobufferingmq", "fullbufferingmq", "insertionbuffermq", "deletionbuffermq", "mergingmq", "numamq", "numamergingmq", "wrapper_linden", "wrapper_capq", "wrapper_dlsm", "wrapper_spraylist")) %>%
-    group_by(name) %>%
-    summarize(mean = weighted.mean(rank, frequency), max = max(rank), .groups = "keep")
-  transformed <- melt(transformed, measure.vars = c("mean", "max"))
-  plot <- ggplot(transformed, aes(x = as.factor(name), y = value, fill = name)) +
-    labs(x = "Priority Queue", y = "Top Delay", title = "Top Delay") +
-    geom_bar(stat = "identity") +
-    scale_color_brewer(palette = "Set1") +
-    # facet_grid(cols = vars(variable), rows = vars(prefill, dist), scales = "free") +
-    facet_grid(rows = vars(variable), scales = "free") +
-    theme(axis.ticks.x = element_blank(), axis.text.x = element_blank())
-  ggsave(plot, file = paste(outdir, "/top_delay.pdf", sep = ""))
-}
+# plot_histogram_bar <- function(data, outdir, plotname) {
+#   plot_data <- data[data$name %in% c("nobufferingmq", "fullbufferingmq", "insertionbuffermq", "deletionbuffermq", "mergingmq", "numamq", "numamergingmq", "wrapper_linden", "wrapper_capq", "wrapper_dlsm", "wrapper_spraylist"), ] %>%
+#   group_by(threads, name) %>%
+#     summarize(mean = weighted.mean(rank, frequency), max = max(rank), .groups = "keep") %>%
+#     do ({
+#       print(.)
+#   transformed = melt(., measure.vars = c("mean", "max")) 
+#   plot <- ggplot(transformed, aes(x = as.factor(name), y = value, fill = name)) +
+#     labs(x = "Priority Queue", y = "Top Delay", title = "Top Delay") +
+#     geom_bar(stat = "identity") +
+#     scale_color_brewer(palette = "Set1") +
+#     # facet_grid(cols = vars(variable), rows = vars(prefill, dist), scales = "free") +
+#     facet_grid(rows = vars(variable), scales = "free") +
+#     theme(axis.ticks.x = element_blank(), axis.text.x = element_blank())
+#   ggsave(plot, file = paste(outdir, "/", plotname, "_", .$threads[1], ".pdf", sep = ""))
+#   .
+#   })
+# }
 
 plot_throughput_by_thread <- function(data, outdir) {
-  plot <- ggplot(subset(data, name %in% c("nobufferingmq", "fullbufferingmq", "insertionbuffermq", "mergingmq", "numamq", "numamergingmq", "wrapper_capq", "wrapper_dlsm", "wrapper_klsm")), aes(x = threads, y = mean, group = name, color = name)) +
+  # plot <- ggplot(data[data$name %in% c("nobufferingmq", "fullbufferingmq", "insertionbuffermq", "mergingmq", "numamq", "numamergingmq", "wrapper_capq", "wrapper_dlsm", "wrapper_klsm"), ], aes(x = threads, y = mean, group = name, color = name)) +
+  plot <- ggplot(data[data$name %in% c("wrapper_capq", "mergingmq", "nummq", "fullbufferingmq_c_4_k_4", "fullbufferingmq_c_4_k_64"), ], aes(x = threads, y = mean, group = name, color = name)) +
     geom_line() +
     geom_point() +
     scale_color_brewer(palette = "Set1") +
@@ -95,7 +115,7 @@ plot_throughput_by_thread <- function(data, outdir) {
 }
 
 plot_throughput_by_buffer_size <- function(data, outdir) {
-  ss <- subset(data, startsWith(name, "fullbufferingmq_ib"))
+  ss <- data[startsWith(data$name, "fullbufferingmq_ib"), ]
   ss$ibs <- as.factor(str_extract(ss$name, "(?<=ib_)\\d+(?=_db)"))
   ss$ibs <- ordered(ss$ibs, levels = c("4", "8", "16", "64"))
   ss$dbs <- as.factor(str_extract(ss$name, "(?<=db_)\\d+$"))
@@ -115,7 +135,7 @@ plot_throughput_by_buffer_size <- function(data, outdir) {
 }
 
 plot_throughput_by_stickiness <- function(data, outdir) {
-  ss <- subset(data, startsWith(name, "fullbufferingmq_c"))
+  ss <- data[startsWith(data$name, "fullbufferingmq_c"), ]
   ss$c <- as.factor(str_extract(ss$name, "(?<=c_)\\d+(?=_k)"))
   ss$c <- ordered(ss$c, levels = c("4", "8", "16"))
   ss$k <- as.factor(str_extract(ss$name, "(?<=k_)\\d+$"))
@@ -135,7 +155,7 @@ plot_throughput_by_stickiness <- function(data, outdir) {
 }
 
 plot_throughput_by_ns <- function(data, outdir) {
-  ss <- subset(data, startsWith(name, "mergingmq_ns"))
+  ss <- data[startsWith(data$name, "mergingmq_ns"), ]
   ss$ns <- as.factor(str_extract(ss$name, "(?<=ns_)\\d+$"))
   ss$ns <- ordered(ss$ns, levels = c("2", "4", "8", "16", "64", "128", "512"))
   plot <- ggplot(ss, aes(x = threads, y = mean, group = ns, color = ns)) +
@@ -152,9 +172,11 @@ plot_throughput_by_ns <- function(data, outdir) {
 }
 
 plot_scenario <- function(data, dir) {
-  plot_rank_histogram(data$rank, dir)
-  plot_delay_histogram(data$delay, dir)
-  plot_top_delay_bar(data$top_delay, dir)
+  plot_histogram(data$rank, dir, "rank")
+  plot_histogram_by_stickiness(data$rank, dir, "rank_by_stickiness")
+  plot_histogram(data$rank, dir, "delay")
+  plot_histogram_by_stickiness(data$rank, dir, "delay_by_stickiness")
+  # plot_histogram_bar(data$top_delay, dir, "top_delay")
   plot_throughput_by_thread(data$throughput, dir)
   plot_throughput_by_buffer_size(data$throughput, dir)
   plot_throughput_by_stickiness(data$throughput, dir)
@@ -171,16 +193,21 @@ read_scenario <- function(scenario) {
   for (pq in list.dirs(path = paste(experiment_dir, scenario, sep = "/"), full.names = T, recursive = F)) {
     name <- gsub(".*/", "", pq)
     # if (name %in% c("nobufferingmq", "fullbufferingmq", "insertionbuffermq", "deletionbuffermq", "mergingmq", "numamq", "numamergingmq", "wrapper_linden", "wrapper_capq", "wrapper_dlsm", "wrapper_spraylist")) {
-    rank_data <- read_histogram(paste(pq, "/rank_16.txt", sep = ""), name)
-    rank_list[[i]] <- rank_data
-    delay_data <- read_histogram(paste(pq, "/delay_16.txt", sep = ""), name)
-    delay_list[[i]] <- delay_data
-    top_delay_data <- read_histogram(paste(pq, "/top_delay_16.txt", sep = ""), name)
-    top_delay_list[[i]] <- top_delay_data
+    for (j in c(1, 2, 4, 8, 16)) {
+      rank_data <- read_histogram(paste(pq, "/rank_", j, ".txt", sep = ""), name)
+      rank_data$threads <- j
+      rank_list[[i]] <- rank_data
+      delay_data <- read_histogram(paste(pq, "/delay_", j, ".txt", sep = ""), name)
+      delay_data$threads <- j
+      delay_list[[i]] <- delay_data
+      top_delay_data <- read_histogram(paste(pq, "/top_delay_", j, "16.txt", sep = ""), name)
+      top_delay_data$threads <- j
+      top_delay_list[[i]] <- top_delay_data
+      i <- i + 1
+    }
     throughput_data <- read_throughput(paste(pq, "/throughput.txt", sep = ""), name)
     throughput_list[[i]] <- throughput_data
     i <- i + 1
-    # }
   }
   rank_data <- do.call(rbind, rank_list)
   delay_data <- do.call(rbind, delay_list)
@@ -197,8 +224,8 @@ read_scenario <- function(scenario) {
 # plot_scenario(data, paste(experiment_dir, "distribution", sep = "/"))
 # plot_throughput_by_dist(data$throughput, paste(experiment_dir, "distribution", sep = "/"))
 
-data <- read_scenario("i10pc130/results")
-plot_scenario(data, paste(experiment_dir, "i10pc130", sep = "/"))
+data <- read_scenario("i10pc137/results")
+plot_scenario(data, paste(experiment_dir, "i10pc137", sep = "/"))
 # plot_throughput_by_dist(data$throughput, paste(experiment_dir, "distribution", sep = "/"))
 
 # data <- read_scenario("buf_size")

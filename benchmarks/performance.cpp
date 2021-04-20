@@ -16,19 +16,36 @@
 #include <vector>
 
 #include "cxxopts.hpp"
+#include "priority_queue_factory.hpp"
 #include "system_config.hpp"
-#include "utils/priority_queue_factory.hpp"
-#include "utils/thread_coordination.hpp"
-#include "utils/threading.hpp"
+#include "thread_coordination.hpp"
+#include "threading.hpp"
+
+#if !defined THROUGHPUT && !defined QUALITY
+#define THROUGHPUT
+#endif
+
+#if defined THROUGHPUT
+#undef QUALITY
+#elif defined QUALITY
+#undef THROUGHPUT
+#else
+#error No performance mode specified
+#endif
 
 using key_type = std::uint32_t;
 using value_type = std::uint32_t;
 static_assert(std::is_unsigned_v<value_type>, "Value type must be unsigned");
-using PriorityQueue = typename multiqueue::util::PriorityQueueFactory<key_type, value_type>::type;
+using PriorityQueue = typename util::PriorityQueueFactory<key_type, value_type>::type;
 
 using namespace std::chrono_literals;
 using clock_type = std::chrono::steady_clock;
+using time_point_type = clock_type::time_point;
 using tick_type = clock_type::rep;
+
+static inline time_point_type get_time_point() noexcept {
+    return clock_type::now();
+}
 
 static inline tick_type get_tick() noexcept {
     return clock_type::now().time_since_epoch().count();
@@ -72,8 +89,8 @@ struct Inserter {
 };
 
 struct KeyGenerator {
-    enum class Distribution : std::size_t { Uniform, Dijkstra, Ascending, Descending };
-    static inline std::array distribution_names = {"uniform", "dijkstra", "ascending", "descending"};
+    enum class Distribution : std::size_t { Uniform, Dijkstra, Ascending, Descending, ThreadId };
+    static inline std::array distribution_names = {"uniform", "dijkstra", "ascending", "descending", "threadid"};
 
     Distribution distribution;
 
@@ -87,6 +104,7 @@ struct KeyGenerator {
     inline key_type operator()() {
         switch (distribution) {
             case Distribution::Uniform:
+            case Distribution::ThreadId:
                 return dist(gen);
             case Distribution::Dijkstra:
                 return current++ + dist(gen);
@@ -103,7 +121,12 @@ struct KeyGenerator {
 
 struct Settings {
     std::size_t prefill_size = 1'000'000;
+#ifdef THROUGHPUT
     std::chrono::milliseconds test_duration = 3s;
+    std::chrono::nanoseconds sleep_between_operations = 0ns;
+#else
+    std::size_t num_operations = 100'000;
+#endif
     unsigned int num_threads = 4;
     Inserter::Policy insert_policy = Inserter::Policy::Uniform;
     KeyGenerator::Distribution key_distribution = KeyGenerator::Distribution::Uniform;
@@ -144,18 +167,21 @@ KeyGenerator::KeyGenerator(unsigned int id, Settings const& settings)
             dist =
                 std::uniform_int_distribution<key_type>(settings.dijkstra_min_increase, settings.dijkstra_max_increase);
             break;
+        case Distribution::ThreadId:
+            dist = std::uniform_int_distribution<key_type>(id * 1000, (id + 2) * 1000);
+            break;
     }
 }
 
-#ifndef THROUGHPUT_ONLY
+#ifdef QUALITY
 
-static constexpr unsigned int bits_for_thread_id = 6;
-static constexpr value_type thread_id_mask =
+static constexpr unsigned int bits_for_thread_id = 8;
+static constexpr value_type value_mask =
     (static_cast<value_type>(1) << (std::numeric_limits<value_type>::digits - bits_for_thread_id)) - 1;
 
 static constexpr value_type to_value(unsigned int thread_id, value_type elem_id) noexcept {
     return (static_cast<value_type>(thread_id) << (std::numeric_limits<value_type>::digits - bits_for_thread_id)) |
-        (elem_id & thread_id_mask);
+        (elem_id & value_mask);
 }
 
 static constexpr unsigned int get_thread_id(value_type value) noexcept {
@@ -163,7 +189,7 @@ static constexpr unsigned int get_thread_id(value_type value) noexcept {
 }
 
 static constexpr value_type get_elem_id(value_type value) noexcept {
-    return value & thread_id_mask;
+    return value & value_mask;
 }
 
 struct LogEntry {
@@ -193,14 +219,16 @@ std::atomic_uint64_t num_deletions;
 std::atomic_uint64_t num_failed_deletions;
 
 std::atomic_bool start_flag;
+#ifdef THROUGHPUT
 std::atomic_bool stop_flag;
+#endif
 
 // Assume rdtsc is thread-safe and synchronized on each CPU
 // Assumption false
 
 struct Task {
     static void run(thread_coordination::Context ctx, PriorityQueue& pq, Settings const& settings) {
-#ifndef THROUGHPUT_ONLY
+#ifdef QUALITY
         std::vector<LogEntry> local_insertions;
         local_insertions.reserve(settings.prefill_size + 1'000'000);
         std::vector<LogEntry> local_deletions;
@@ -214,6 +242,11 @@ struct Task {
 
 #ifdef PQ_SPRAYLIST
         pq.init_thread(ctx.get_num_threads());
+#endif
+
+#ifdef THROUGHPUT
+        auto gen = std::mt19937(ctx.get_id());
+        auto dist = std::uniform_int_distribution<long>(0, settings.sleep_between_operations.count());
 #endif
 
         unsigned int stage = 0;
@@ -231,14 +264,10 @@ struct Task {
             }
             for (size_t i = 0; i < thread_prefill_size; ++i) {
                 key_type const key = key_generator();
-#ifndef THROUGHPUT_ONLY
+#ifdef QUALITY
                 value_type const value = to_value(ctx.get_id(), static_cast<value_type>(local_insertions.size()));
-                auto tick = get_tick();
-                // Compiler memory barrier (might flush registers, so has performance implications, see
-                // https://gcc.gnu.org/onlinedocs/gcc/Extended-Asm.html)
-                __asm__ __volatile__("" ::: "memory");
                 pq.push(handle, {key, value});
-                local_insertions.push_back(LogEntry{tick, key, value});
+                local_insertions.push_back(LogEntry{0, key, value});
 #else
                 pq.push(handle, {key, key});
 #endif
@@ -254,10 +283,14 @@ struct Task {
         }
         std::atomic_thread_fence(std::memory_order_acquire);
         std::pair<key_type, value_type> retval;
+#ifdef THROUGHPUT
         while (!stop_flag.load(std::memory_order_relaxed)) {
+#else
+        for (std::size_t i = 0; i < settings.num_operations; ++i) {
+#endif
             if (inserter()) {
                 key_type const key = key_generator();
-#ifndef THROUGHPUT_ONLY
+#ifdef QUALITY
                 value_type const value = to_value(ctx.get_id(), static_cast<value_type>(local_insertions.size()));
                 auto tick = get_tick();
                 __asm__ __volatile__("" ::: "memory");
@@ -269,7 +302,7 @@ struct Task {
                 ++num_local_insertions;
             } else {
                 bool success = pq.extract_top(handle, retval);
-#ifndef THROUGHPUT_ONLY
+#ifdef QUALITY
                 __asm__ __volatile__("" ::: "memory");
                 auto tick = get_tick();
                 if (success) {
@@ -288,9 +321,18 @@ struct Task {
 #endif
                 ++num_local_deletions;
             }
+#ifdef THROUGHPUT
+            if (settings.sleep_between_operations > 0us) {
+                auto dest = std::chrono::nanoseconds{dist(gen)};
+                auto now = get_time_point();
+                do {
+                    _mm_pause();
+                } while ((get_time_point() - now) < dest);
+            }
+#endif
         }
         ctx.synchronize(stage++, []() { std::clog << "done" << std::endl; });
-#ifndef THROUGHPUT_ONLY
+#ifdef QUALITY
         insertions[ctx.get_id()] = std::move(local_insertions);
         deletions[ctx.get_id()] = std::move(local_deletions);
         failed_deletions[ctx.get_id()] = std::move(local_failed_deletions);
@@ -322,10 +364,21 @@ int main(int argc, char* argv[]) {
        "(default: uniform)", cxxopts::value<std::string>(), "ARG")
       ("j,threads", "Specify the number of threads "
        "(default: 4)", cxxopts::value<unsigned int>(), "NUMBER")
+#ifdef THROUGHPUT
       ("t,time", "Specify the test timeout in ms "
        "(default: 3000)", cxxopts::value<unsigned int>(), "NUMBER")
-      ("d,distribution", "Specify the key distribution as one of \"uniform\", \"dijkstra\", \"ascending\", \"descending\" "
+      ("s,sleep", "Specify the sleep time between operations in ns"
+       "(default: 0)", cxxopts::value<unsigned int>(), "NUMBER")
+#else
+      ("o,ops", "Specify the number of operations per thread"
+       "(default: 100'000)", cxxopts::value<std::size_t>(), "NUMBER")
+#endif
+      ("d,distribution", "Specify the key distribution as one of \"uniform\", \"dijkstra\", \"ascending\", \"descending\", \"threadid\" "
        "(default: uniform)", cxxopts::value<std::string>(), "ARG")
+      ("m,max", "Specify the max key "
+       "(default: MAX)", cxxopts::value<key_type>(), "NUMBER")
+      ("l,min", "Specify the min key "
+       "(default: 0)", cxxopts::value<key_type>(), "NUMBER")
       ("h,help", "Print this help");
     // clang-format on
 
@@ -333,7 +386,7 @@ int main(int argc, char* argv[]) {
         auto result = options.parse(argc, argv);
         if (result.count("help")) {
             std::cerr << options.help() << std::endl;
-            exit(0);
+            return 0;
         }
         if (result.count("prefill") > 0) {
             settings.prefill_size = result["prefill"].as<size_t>();
@@ -356,11 +409,20 @@ int main(int argc, char* argv[]) {
         if (result.count("threads") > 0) {
             settings.num_threads = result["threads"].as<unsigned int>();
         }
+#ifdef THROUGHPUT
         if (result.count("time") > 0) {
             settings.test_duration = std::chrono::milliseconds{result["time"].as<unsigned int>()};
         }
-        if (result.count("key-distribution") > 0) {
-            std::string dist = result["key-distribution"].as<std::string>();
+        if (result.count("sleep") > 0) {
+            settings.sleep_between_operations = std::chrono::nanoseconds{result["sleep"].as<unsigned int>()};
+        }
+#else
+        if (result.count("ops") > 0) {
+            settings.num_operations = result["ops"].as<std::size_t>();
+        }
+#endif
+        if (result.count("distribution") > 0) {
+            std::string dist = result["distribution"].as<std::string>();
             if (dist == "uniform") {
                 settings.key_distribution = KeyGenerator::Distribution::Uniform;
             } else if (dist == "ascending") {
@@ -369,31 +431,54 @@ int main(int argc, char* argv[]) {
                 settings.key_distribution = KeyGenerator::Distribution::Descending;
             } else if (dist == "dijkstra") {
                 settings.key_distribution = KeyGenerator::Distribution::Dijkstra;
+            } else if (dist == "threadid") {
+                settings.key_distribution = KeyGenerator::Distribution::ThreadId;
             } else {
                 std::cerr << "Unknown key distribution \"" << dist << "\"\n";
                 return 1;
             }
+        }
+        if (result.count("max") > 0) {
+            settings.max_key = result["max"].as<key_type>();
+        }
+        if (result.count("min") > 0) {
+            settings.min_key = result["min"].as<key_type>();
         }
     } catch (cxxopts::OptionParseException const& e) {
         std::cerr << e.what() << std::endl;
         return 1;
     }
 
-#ifndef THROUGHPUT_ONLY
+#ifndef NDEBUG
+    std::clog << "Using debug build!\n\n";
+#endif
+
+#ifdef QUALITY
     if (settings.num_threads > (1 << bits_for_thread_id) - 1) {
         std::cerr << "Too many threads, increase the number of thread bits!" << std::endl;
         return 1;
     }
+    if (settings.num_operations + settings.prefill_size / settings.num_threads > value_mask) {
+        std::cerr << "Too many operations, decrease the number of thread bits!" << std::endl;
+        return 1;
+    }
 #endif
-#ifndef NDEBUG
-    std::clog << "Using debug build!\n\n";
+
+#if defined THROUGHPUT
+    std::clog << "Measuring throughput!\n\n";
+#elif defined QUALITY
+    std::clog << "Recording quality log!\n\n";
 #endif
-#ifdef THROUGHPUT_ONLY
-    std::clog << "Measuring performance only!\n\n";
-#endif
+
     std::clog << "Settings: \n\t"
               << "Prefill size: " << settings.prefill_size << "\n\t"
+#ifdef THROUGHPUT
               << "Test duration: " << settings.test_duration.count() << " ms\n\t"
+              << "Sleep between operations: " << settings.sleep_between_operations.count() << " ns\n\t"
+#else
+
+              << "Num operations per thread: " << settings.num_operations << "\n\t"
+#endif
               << "Threads: " << settings.num_threads << "\n\t"
               << "Insert policy: " << Inserter::policy_names[static_cast<std::size_t>(settings.insert_policy)] << "\n\t"
               << "Min key: " << settings.min_key << "\n\t"
@@ -407,7 +492,7 @@ int main(int argc, char* argv[]) {
     std::clog << "Using priority queue: " << PriorityQueue::description() << '\n';
     PriorityQueue pq{settings.num_threads};
 
-#ifndef THROUGHPUT_ONLY
+#ifdef QUALITY
     insertions = new std::vector<LogEntry>[settings.num_threads];
     deletions = new std::vector<LogEntry>[settings.num_threads];
     failed_deletions = new std::vector<tick_type>[settings.num_threads];
@@ -418,21 +503,28 @@ int main(int argc, char* argv[]) {
     num_deletions = 0;
     num_failed_deletions = 0;
     start_flag.store(false, std::memory_order_relaxed);
+#ifdef THROUGHPUT
     stop_flag.store(false, std::memory_order_relaxed);
+#endif
     std::atomic_thread_fence(std::memory_order_release);
     thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
     coordinator.run<Task>(std::ref(pq), settings);
     coordinator.wait_until_notified();
     start_flag.store(true, std::memory_order_release);
+#ifdef THROUGHPUT
     std::this_thread::sleep_for(settings.test_duration);
     stop_flag.store(true, std::memory_order_release);
+#endif
     coordinator.join();
-    std::clog << "Insertions: " << num_insertions << "\nDeletions: " << num_deletions
+#ifdef THROUGHPUT
+    std::cout << "Insertions: " << num_insertions << "\nDeletions: " << num_deletions
               << "\nFailed deletions: " << num_failed_deletions << "\nOps/s: " << std::fixed << std::setprecision(1)
               << (1000.0 * static_cast<double>(num_insertions + num_deletions)) /
             static_cast<double>(settings.test_duration.count())
               << std::endl;
-#ifndef THROUGHPUT_ONLY
+
+    delete[] dummy_result;
+#else
     std::cout << settings.num_threads << '\n';
     for (unsigned int t = 0; t < settings.num_threads; ++t) {
         for (auto const& [tick, key, value] : insertions[t]) {
@@ -459,8 +551,6 @@ int main(int argc, char* argv[]) {
     delete[] insertions;
     delete[] deletions;
     delete[] failed_deletions;
-#else
-    delete[] dummy_result;
 #endif
     return 0;
 }
