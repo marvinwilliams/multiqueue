@@ -256,10 +256,8 @@ struct Task {
 
         if (settings.prefill_size > 0) {
             ctx.synchronize(stage++, []() { std::clog << "Prefilling..." << std::flush; });
-            size_t thread_prefill_size = settings.prefill_size / ctx.get_num_threads();
-            if (ctx.is_main()) {
-                thread_prefill_size += settings.prefill_size - thread_prefill_size * ctx.get_num_threads();
-            }
+            size_t const thread_prefill_size = settings.prefill_size / ctx.get_num_threads() +
+                (ctx.get_id() < settings.prefill_size % settings.num_threads ? 1 : 0);
             for (size_t i = 0; i < thread_prefill_size; ++i) {
                 key_type const key = key_generator();
 #ifdef QUALITY
@@ -284,7 +282,9 @@ struct Task {
 #ifdef THROUGHPUT
         while (!stop_flag.load(std::memory_order_relaxed)) {
 #else
-        for (std::size_t i = 0; i < settings.num_operations; ++i) {
+        size_t const thread_num_operations = settings.num_operations / settings.num_threads +
+            (ctx.get_id() < settings.num_operations % settings.num_threads ? 1 : 0);
+        for (std::size_t i = 0; i < thread_num_operations; ++i) {
 #endif
             if (inserter()) {
                 key_type const key = key_generator();
@@ -376,7 +376,7 @@ int main(int argc, char* argv[]) {
       ("t,time", "Specify the test timeout in ms "
        "(default: 3000)", cxxopts::value<unsigned int>(), "NUMBER")
 #else
-      ("o,ops", "Specify the number of operations per thread"
+      ("o,ops", "Specify the total number of operations"
        "(default: 100'000)", cxxopts::value<std::size_t>(), "NUMBER")
 #endif
       ("h,help", "Print this help");
@@ -458,7 +458,7 @@ int main(int argc, char* argv[]) {
         std::cerr << "Too many threads, increase the number of thread bits!" << std::endl;
         return 1;
     }
-    if (settings.num_operations + settings.prefill_size / settings.num_threads > value_mask) {
+    if ((settings.num_operations + settings.prefill_size) / settings.num_threads > value_mask) {
         std::cerr << "Too many operations, decrease the number of thread bits!" << std::endl;
         return 1;
     }
