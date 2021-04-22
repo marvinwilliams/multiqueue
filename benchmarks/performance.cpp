@@ -121,9 +121,9 @@ struct KeyGenerator {
 
 struct Settings {
     std::size_t prefill_size = 1'000'000;
+    std::chrono::nanoseconds sleep_between_operations = 0ns;
 #ifdef THROUGHPUT
     std::chrono::milliseconds test_duration = 3s;
-    std::chrono::nanoseconds sleep_between_operations = 0ns;
 #else
     std::size_t num_operations = 100'000;
 #endif
@@ -244,10 +244,8 @@ struct Task {
         pq.init_thread(ctx.get_num_threads());
 #endif
 
-#ifdef THROUGHPUT
         auto gen = std::mt19937(ctx.get_id());
         auto dist = std::uniform_int_distribution<long>(0, settings.sleep_between_operations.count());
-#endif
 
         unsigned int stage = 0;
 
@@ -321,15 +319,17 @@ struct Task {
 #endif
                 ++num_local_deletions;
             }
-#ifdef THROUGHPUT
             if (settings.sleep_between_operations > 0us) {
                 auto dest = std::chrono::nanoseconds{dist(gen)};
+#ifdef THROUGHPUT
                 auto now = get_time_point();
                 do {
                     _mm_pause();
                 } while ((get_time_point() - now) < dest);
-            }
+#else
+                std::this_thread::sleep_for(dest);
 #endif
+            }
         }
         ctx.synchronize(stage++, []() { std::clog << "done" << std::endl; });
 #ifdef QUALITY
@@ -364,21 +364,21 @@ int main(int argc, char* argv[]) {
        "(default: uniform)", cxxopts::value<std::string>(), "ARG")
       ("j,threads", "Specify the number of threads "
        "(default: 4)", cxxopts::value<unsigned int>(), "NUMBER")
-#ifdef THROUGHPUT
-      ("t,time", "Specify the test timeout in ms "
-       "(default: 3000)", cxxopts::value<unsigned int>(), "NUMBER")
       ("s,sleep", "Specify the sleep time between operations in ns"
        "(default: 0)", cxxopts::value<unsigned int>(), "NUMBER")
-#else
-      ("o,ops", "Specify the number of operations per thread"
-       "(default: 100'000)", cxxopts::value<std::size_t>(), "NUMBER")
-#endif
       ("d,distribution", "Specify the key distribution as one of \"uniform\", \"dijkstra\", \"ascending\", \"descending\", \"threadid\" "
        "(default: uniform)", cxxopts::value<std::string>(), "ARG")
       ("m,max", "Specify the max key "
        "(default: MAX)", cxxopts::value<key_type>(), "NUMBER")
       ("l,min", "Specify the min key "
        "(default: 0)", cxxopts::value<key_type>(), "NUMBER")
+#ifdef THROUGHPUT
+      ("t,time", "Specify the test timeout in ms "
+       "(default: 3000)", cxxopts::value<unsigned int>(), "NUMBER")
+#else
+      ("o,ops", "Specify the number of operations per thread"
+       "(default: 100'000)", cxxopts::value<std::size_t>(), "NUMBER")
+#endif
       ("h,help", "Print this help");
     // clang-format on
 
@@ -409,18 +409,9 @@ int main(int argc, char* argv[]) {
         if (result.count("threads") > 0) {
             settings.num_threads = result["threads"].as<unsigned int>();
         }
-#ifdef THROUGHPUT
-        if (result.count("time") > 0) {
-            settings.test_duration = std::chrono::milliseconds{result["time"].as<unsigned int>()};
-        }
         if (result.count("sleep") > 0) {
             settings.sleep_between_operations = std::chrono::nanoseconds{result["sleep"].as<unsigned int>()};
         }
-#else
-        if (result.count("ops") > 0) {
-            settings.num_operations = result["ops"].as<std::size_t>();
-        }
-#endif
         if (result.count("distribution") > 0) {
             std::string dist = result["distribution"].as<std::string>();
             if (dist == "uniform") {
@@ -444,6 +435,15 @@ int main(int argc, char* argv[]) {
         if (result.count("min") > 0) {
             settings.min_key = result["min"].as<key_type>();
         }
+#ifdef THROUGHPUT
+        if (result.count("time") > 0) {
+            settings.test_duration = std::chrono::milliseconds{result["time"].as<unsigned int>()};
+        }
+#else
+        if (result.count("ops") > 0) {
+            settings.num_operations = result["ops"].as<std::size_t>();
+        }
+#endif
     } catch (cxxopts::OptionParseException const& e) {
         std::cerr << e.what() << std::endl;
         return 1;
