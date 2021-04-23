@@ -48,7 +48,7 @@ struct multiqueue_base {
     };
 
    protected:
-    struct alignas(L1_CACHE_LINESIZE) ThreadLocalData {
+    struct alignas(2 * L1_CACHE_LINESIZE) ThreadLocalData {
         std::mt19937 gen;
         std::uniform_int_distribution<size_type> dist;
         unsigned int insert_count = 0;
@@ -66,10 +66,12 @@ struct multiqueue_base {
 
     explicit multiqueue_base(unsigned int const num_threads) : comp_() {
         thread_data_ = new ThreadLocalData[num_threads]();
+        assert((reinterpret_cast<std::uintptr_t>(&thread_data_[0]) & (L1_CACHE_LINESIZE - 1)) == 0);
     }
 
     explicit multiqueue_base(unsigned int const num_threads, key_comparator const &c) : comp_(c) {
         thread_data_ = new ThreadLocalData[num_threads]();
+        assert((reinterpret_cast<std::uintptr_t>(&thread_data_[0]) & (L1_CACHE_LINESIZE - 1)) == 0);
     }
 
     ~multiqueue_base() noexcept {
@@ -102,21 +104,26 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
     };
 
    private:
-    struct alignas(Configuration::NumaFriendly ? PAGESIZE : L1_CACHE_LINESIZE) InternalPriorityQueueWrapper {
+    struct alignas(Configuration::NumaFriendly ? PAGESIZE : 2 * L1_CACHE_LINESIZE) InternalPriorityQueueWrapper {
         using pq_type = internal_priority_queue_t<key_type, mapped_type, key_comparator, Configuration>;
         using allocator_type = typename Configuration::HeapAllocator;
         static constexpr uint32_t lock_mask = static_cast<uint32_t>(1) << 31;
         static constexpr uint32_t pheromone_mask = lock_mask - 1;
-        mutable std::atomic_uint32_t guard = Configuration::WithPheromones ? pheromone_mask : 0;
-        pq_type pq;
+        alignas(L1_CACHE_LINESIZE) mutable std::atomic_uint32_t guard = Configuration::WithPheromones ? pheromone_mask
+                                                                                                      : 0;
+        alignas(L1_CACHE_LINESIZE) pq_type pq;
 
         InternalPriorityQueueWrapper() = default;
 
         explicit InternalPriorityQueueWrapper(allocator_type const &alloc) : pq(alloc) {
+            assert((reinterpret_cast<std::uintptr_t>(&guard) & (2 * L1_CACHE_LINESIZE - 1)) == 0);
+            assert((reinterpret_cast<std::uintptr_t>(&pq) & (L1_CACHE_LINESIZE - 1)) == 0);
         }
 
         explicit InternalPriorityQueueWrapper(Comparator const &comp, allocator_type const &alloc = allocator_type())
             : pq(comp, alloc) {
+            assert((reinterpret_cast<std::uintptr_t>(&guard) & (2 * L1_CACHE_LINESIZE - 1)) == 0);
+            assert((reinterpret_cast<std::uintptr_t>(&pq) & (L1_CACHE_LINESIZE - 1)) == 0);
         }
 
         inline bool try_lock(uint32_t id, bool claiming) const noexcept {
