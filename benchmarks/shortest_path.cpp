@@ -27,7 +27,7 @@ using PriorityQueue = typename util::PriorityQueueFactory<std::uint32_t, std::ui
 using namespace std::chrono_literals;
 using clock_type = std::chrono::steady_clock;
 
-static constexpr auto retries = 100;
+static constexpr auto retries = 400;
 
 struct Settings {
     std::filesystem::path graph_file;
@@ -45,14 +45,14 @@ struct Graph {
 };
 
 struct Distance {
-    alignas(L1_CACHE_LINESIZE) std::atomic_uint32_t distance;
+    alignas(2 * L1_CACHE_LINESIZE) std::atomic_uint32_t distance;
 };
 
 struct IdleState {
-    alignas(L1_CACHE_LINESIZE) std::atomic_uint state;
+    alignas(2 * L1_CACHE_LINESIZE) std::atomic_uint state;
 };
 
-alignas(L1_CACHE_LINESIZE) static std::atomic_size_t idle_counter;
+alignas(2 * L1_CACHE_LINESIZE) static std::atomic_size_t idle_counter;
 static IdleState* idle_state;
 
 static std::atomic_size_t num_processed_nodes;
@@ -60,22 +60,13 @@ static std::atomic_size_t num_processed_nodes;
 std::atomic_bool start_flag;
 
 static bool idle(unsigned int id, unsigned int num_threads) {
-    idle_counter.fetch_add(1, std::memory_order_seq_cst);
-    idle_state[id].state.store(2, std::memory_order_seq_cst);
-    /* if (id == 0) { */
-    /*     std::cout << "idling " << id << '\n'; */
-    /* } */
+    idle_state[id].state.store(2, std::memory_order_release);
+    idle_counter.fetch_add(1, std::memory_order_release);
     while (true) {
-        if (idle_counter.load(std::memory_order_seq_cst) == 2 * num_threads) {
-            /* if (id == 0) { */
-            /*     std::cout << "finished " << id << '\n'; */
-            /* } */
+        if (idle_counter.load(std::memory_order_acquire) == 2 * num_threads) {
             return true;
         }
-        if (idle_state[id].state.load(std::memory_order_seq_cst) == 0) {
-            /* if (id == 0) { */
-            /*     std::cout << "get back to work " << id << '\n'; */
-            /* } */
+        if (idle_state[id].state.load(std::memory_order_acquire) == 0) {
             return false;
         }
         std::this_thread::yield();
@@ -108,23 +99,13 @@ struct Task {
         std::atomic_thread_fence(std::memory_order_acquire);
         std::pair<std::uint32_t, std::uint32_t> retval;
         while (true) {
-            /* if (ctx.get_id() == 0) { */
-            /*     std::cout << "looping\n"; */
-            /* } */
             if (pq.extract_top(handle, retval)) {
             found:
                 std::uint32_t const current_distance =
                     distances[retval.second].distance.load(std::memory_order_relaxed);
-                /* std::cout << "popping successful\n"; */
-                /* if (ctx.get_id() == 0) { */
-                /*     std::cout << "popping successful\n"; */
-                /* } */
                 if (retval.first > current_distance) {
                     continue;
                 }
-                /* if (ctx.get_id() == 0) { */
-                /*     std::cout << "actually smaller\n"; */
-                /* } */
                 ++num_local_processed_nodes;
                 bool pushed = false;
                 for (std::size_t i = graph.nodes[retval.second]; i < graph.nodes[retval.second + 1]; ++i) {
@@ -142,76 +123,51 @@ struct Task {
                     }
                 }
                 if (pushed) {
-                    /* if (ctx.get_id() == 0) { */
-                    /*     std::cout << "reinserted some\n"; */
-                    /* } */
-                    if (idle_counter.load(std::memory_order_seq_cst) > 0) {
-                        /* if (ctx.get_id() == 0) { */
-                        /*     std::cout << "some are idling, waking\n"; */
-                        /* } */
+                    if (idle_counter.load(std::memory_order_acquire) > 0) {
                         for (std::size_t i = 0; i < ctx.get_num_threads(); ++i) {
                             if (i == ctx.get_id()) {
                                 continue;
                             }
                             unsigned int thread_state = 2;
                             while (!idle_state[i].state.compare_exchange_weak(thread_state, 3,
-                                                                              std::memory_order_seq_cst) &&
+                                                                              std::memory_order_acq_rel, std::memory_order_acquire) &&
                                    thread_state != 0 && thread_state != 3) {
-                                /* if (ctx.get_id() == 0) { */
-                                /*     std::cout << "thread_state " << thread_state << '\n'; */
-                                /* } */
                                 thread_state = 2;
                                 std::this_thread::yield();
                             }
                             if (thread_state == 2) {
-                                idle_counter.fetch_sub(2, std::memory_order_seq_cst);
-                                idle_state[i].state.store(0, std::memory_order_seq_cst);
+                                idle_counter.fetch_sub(2, std::memory_order_release);
+                                idle_state[i].state.store(0, std::memory_order_release);
                             }
                         }
                     }
                 }
             } else {
-                /* if (ctx.get_id() == 0) { */
-                /*     std::cout << "queue empty\n"; */
-                /* } */
-                /* std::cout << "popping failed\n"; */
                 for (std::size_t i = 0; i < retries; ++i) {
                     if (pq.extract_top(handle, retval)) {
-                        /* std::cout << "successing\n"; */
-                        /* if (ctx.get_id() == 0) { */
-                        /*     std::cout << "nevermind, found one\n"; */
-                        /* } */
                         goto found;
                     }
                     std::this_thread::yield();
                 }
-                idle_state[ctx.get_id()].state.store(1, std::memory_order_seq_cst);
-                idle_counter.fetch_add(1, std::memory_order_seq_cst);
-                /* if (ctx.get_id() == 0) { */
-                /*     std::cout << "increased counter by 1\n"; */
-                /* } */
+                idle_state[ctx.get_id()].state.store(1, std::memory_order_release);
+                idle_counter.fetch_add(1, std::memory_order_release);
 #ifdef PQ_IS_WRAPPER
                 if (pq.extract_top(handle, retval)) {
 #else
                 if (pq.extract_from_partition(handle, retval)) {
 #endif
-                    idle_counter.fetch_sub(1, std::memory_order_seq_cst);
-                    idle_state[ctx.get_id()].state.store(0, std::memory_order_seq_cst);
-                    /* if (ctx.get_id() == 0) { */
-                    /*     std::cout << "empty check failed, resuming\n"; */
-                    /* } */
+                    idle_counter.fetch_sub(1, std::memory_order_release);
+                    idle_state[ctx.get_id()].state.store(0, std::memory_order_release);
                     goto found;
                 }
 
                 if (idle(ctx.get_id(), ctx.get_num_threads())) {
                     break;
                 } else {
-                    /* std::cout << "Continuing\n"; */
                     continue;
                 }
             }
         }
-        /* std::cout << "Done " << ctx.get_id() << '\n'; */
         num_processed_nodes += num_local_processed_nodes;
     }
 
@@ -332,6 +288,7 @@ int main(int argc, char* argv[]) {
         distances[i].distance = std::numeric_limits<std::uint32_t>::max();
     }
     std::clog << "done\n";
+    idle_counter = 0;
     idle_state = new IdleState[settings.num_threads]();
     num_processed_nodes = 0;
     PriorityQueue pq{settings.num_threads};

@@ -205,7 +205,7 @@ std::vector<tick_type>* failed_deletions;
 #else
 
 // Used to guarantee writing of result so it can't be optimized out;
-struct alignas(L1_CACHE_LINESIZE) DummyResult {
+struct alignas(2 * L1_CACHE_LINESIZE) DummyResult {
     volatile key_type key;
     volatile value_type value;
 };

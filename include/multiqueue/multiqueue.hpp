@@ -21,6 +21,7 @@
 #include <atomic>
 #include <cassert>
 #include <cstddef>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <random>
@@ -48,11 +49,11 @@ struct multiqueue_base {
     };
 
    protected:
-    struct alignas(2 * L1_CACHE_LINESIZE) ThreadLocalData {
+    struct alignas(2 * L1_CACHE_LINESIZE) ThreadData {
         std::mt19937 gen;
         std::uniform_int_distribution<size_type> dist;
         unsigned int insert_count = 0;
-        unsigned int extract_count = 0;
+        std::array<unsigned int, 2> extract_count = {0, 0};
         size_type insert_index;
         std::array<size_type, 2> extract_index;
 
@@ -61,17 +62,34 @@ struct multiqueue_base {
         }
     };
 
-    ThreadLocalData *thread_data_;
+    ThreadData *thread_data_;
     key_comparator comp_;
 
-    explicit multiqueue_base(unsigned int const num_threads) : comp_() {
-        thread_data_ = new ThreadLocalData[num_threads]();
-        assert((reinterpret_cast<std::uintptr_t>(&thread_data_[0]) & (L1_CACHE_LINESIZE - 1)) == 0);
+    explicit multiqueue_base(unsigned int const num_threads, unsigned int const C) : comp_() {
+        thread_data_ = new ThreadData[num_threads]();
+        auto params = typename std::uniform_int_distribution<size_type>::param_type{0, num_threads * C - 1};
+        for (std::size_t i = 0; i < num_threads; ++i) {
+            thread_data_[i].dist.param(params);
+#ifdef ABORT_ON_MISALIGNMENT
+            if (reinterpret_cast<std::uintptr_t>(&thread_data_[i]) % (2 * L1_CACHE_LINESIZE) != 0) {
+                std::abort();
+            }
+#endif
+        }
     }
 
-    explicit multiqueue_base(unsigned int const num_threads, key_comparator const &c) : comp_(c) {
-        thread_data_ = new ThreadLocalData[num_threads]();
-        assert((reinterpret_cast<std::uintptr_t>(&thread_data_[0]) & (L1_CACHE_LINESIZE - 1)) == 0);
+    explicit multiqueue_base(unsigned int const num_threads, unsigned int const C, key_comparator const &comp)
+        : comp_(comp) {
+        thread_data_ = new ThreadData[num_threads]();
+        auto params = typename std::uniform_int_distribution<size_type>::param_type{0, num_threads * C - 1};
+        for (std::size_t i = 0; i < num_threads; ++i) {
+            thread_data_[i].dist.param(params);
+#ifdef ABORT_ON_MISALIGNMENT
+            if (reinterpret_cast<std::uintptr_t>(&thread_data_[i]) % (2 * L1_CACHE_LINESIZE) != 0) {
+                std::abort();
+            }
+#endif
+        }
     }
 
     ~multiqueue_base() noexcept {
@@ -109,21 +127,16 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
         using allocator_type = typename Configuration::HeapAllocator;
         static constexpr uint32_t lock_mask = static_cast<uint32_t>(1) << 31;
         static constexpr uint32_t pheromone_mask = lock_mask - 1;
-        alignas(L1_CACHE_LINESIZE) mutable std::atomic_uint32_t guard = Configuration::WithPheromones ? pheromone_mask
-                                                                                                      : 0;
-        alignas(L1_CACHE_LINESIZE) pq_type pq;
+        mutable std::atomic_uint32_t guard = Configuration::WithPheromones ? pheromone_mask : 0;
+        pq_type pq;
 
         InternalPriorityQueueWrapper() = default;
 
         explicit InternalPriorityQueueWrapper(allocator_type const &alloc) : pq(alloc) {
-            assert((reinterpret_cast<std::uintptr_t>(&guard) & (2 * L1_CACHE_LINESIZE - 1)) == 0);
-            assert((reinterpret_cast<std::uintptr_t>(&pq) & (L1_CACHE_LINESIZE - 1)) == 0);
         }
 
         explicit InternalPriorityQueueWrapper(Comparator const &comp, allocator_type const &alloc = allocator_type())
             : pq(comp, alloc) {
-            assert((reinterpret_cast<std::uintptr_t>(&guard) & (2 * L1_CACHE_LINESIZE - 1)) == 0);
-            assert((reinterpret_cast<std::uintptr_t>(&pq) & (L1_CACHE_LINESIZE - 1)) == 0);
         }
 
         inline bool try_lock(uint32_t id, bool claiming) const noexcept {
@@ -173,7 +186,7 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
 
    public:
     explicit multiqueue(unsigned int const num_threads, allocator_type const &alloc = allocator_type())
-        : base_type{num_threads}, pq_list_size_{num_threads * Configuration::C}, alloc_(alloc) {
+        : base_type{num_threads, Configuration::C}, pq_list_size_{num_threads * Configuration::C}, alloc_(alloc) {
         assert(num_threads >= 1);
 #ifdef HAVE_NUMA
         if (Configuration::NumaFriendly) {
@@ -183,6 +196,11 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
         pq_list_ = alloc_traits::allocate(alloc_, pq_list_size_);
         for (std::size_t i = 0; i < pq_list_size_; ++i) {
             alloc_traits::construct(alloc_, pq_list_ + i);
+#ifdef ABORT_ON_MISALIGNMENT
+            if (reinterpret_cast<std::uintptr_t>(&pq_list_[i]) % (2 * L1_CACHE_LINESIZE) != 0) {
+                std::abort();
+            }
+#endif
         }
 #ifdef HAVE_NUMA
         if (Configuration::NumaFriendly) {
@@ -201,15 +219,11 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
             pq_list_[i].pq.heap.reserve(Configuration::ReservePerQueue);
 #endif
         }
-        typename std::uniform_int_distribution<size_type>::param_type params{0, pq_list_size_ - 1};
-        for (std::size_t i = 0; i < num_threads; ++i) {
-            thread_data_[i].dist.param(params);
-        }
     }
 
     explicit multiqueue(unsigned int const num_threads, key_comparator const &comp,
                         allocator_type const &alloc = allocator_type())
-        : base_type{num_threads, comp}, pq_list_size_{num_threads * Configuration::C}, alloc_(alloc) {
+        : base_type{num_threads, Configuration::C, comp}, pq_list_size_{num_threads * Configuration::C}, alloc_(alloc) {
         assert(num_threads >= 1);
 #ifdef HAVE_NUMA
         if (Configuration::NumaFriendly) {
@@ -219,6 +233,11 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
         pq_list_ = std::allocator_traits<allocator_type>::allocate(alloc_, pq_list_size_);
         for (std::size_t i = 0; i < pq_list_size_; ++i) {
             std::allocator_traits<allocator_type>::construct(alloc_, pq_list_ + i, comp);
+#ifdef ABORT_ON_MISALIGNMENT
+            if (reinterpret_cast<std::uintptr_t>(&pq_list_[i]) % (2 * L1_CACHE_LINESIZE) != 0) {
+                std::abort();
+            }
+#endif
         }
 #ifdef HAVE_NUMA
         if (Configuration::NumaFriendly) {
@@ -237,10 +256,6 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
             pq_list_[i].pq.heap.reserve(Configuration::ReservePerQueue);
 #endif
         }
-        typename std::uniform_int_distribution<size_type>::param_type params{0, pq_list_size_ - 1};
-        for (std::size_t i = 0; i < num_threads; ++i) {
-            thread_data_[i].dist.param(params);
-        }
     }
 
     ~multiqueue() noexcept {
@@ -254,86 +269,142 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
         return Handle{id};
     }
 
+    template <unsigned int K = Configuration::K, std::enable_if_t<(K == 1), int> = 0>
     void push(Handle handle, value_type const &value) {
-        bool claiming = false;
-        if (thread_data_[handle.id_].insert_count == 0) {
-            refresh_insert_index(handle);
-            claiming = true;
+        size_type index = thread_data_[handle.id_].get_random_index();
+        while (!pq_list_[index].try_lock(handle.id_, true)) {
+            index = thread_data_[handle.id_].get_random_index();
         }
-        size_type index = thread_data_[handle.id_].insert_index;
-        while (!pq_list_[index].try_lock(handle.id_, claiming)) {
-            refresh_insert_index(handle);
-            index = thread_data_[handle.id_].insert_index;
-            claiming = true;
-        }
-        /* std::cout << "lock " << index << '\n'; */
         pq_list_[index].pq.push(value);
         pq_list_[index].unlock(handle.id_);
-        /* std::cout << "unlock " << index << '\n'; */
+    }
+
+    template <unsigned int K = Configuration::K, std::enable_if_t<(K > 1), int> = 0>
+    void push(Handle handle, value_type const &value) {
+        if (thread_data_[handle.id_].insert_count == 0) {
+            thread_data_[handle.id_].insert_index = thread_data_[handle.id_].get_random_index();
+            thread_data_[handle.id_].insert_count = Configuration::K;
+        }
+        size_type index = thread_data_[handle.id_].insert_index;
+        if (!pq_list_[index].try_lock(
+                handle.id_,
+                !Configuration::WithPheromones || thread_data_[handle.id_].insert_count == Configuration::K)) {
+            do {
+                index = thread_data_[handle.id_].get_random_index();
+            } while (!pq_list_[index].try_lock(handle.id_, true));
+            thread_data_[handle.id_].insert_index = index;
+            thread_data_[handle.id_].insert_count = Configuration::K;
+        }
+        pq_list_[index].pq.push(value);
+        pq_list_[index].unlock(handle.id_);
         --thread_data_[handle.id_].insert_count;
     }
 
+    template <unsigned int K = Configuration::K, std::enable_if_t<(K == 1), int> = 0>
     bool extract_top(Handle handle, value_type &retval) {
-        bool claiming = false;
-        if (thread_data_[handle.id_].extract_count == 0) {
-            refresh_extract_indices(handle);
-            claiming = true;
+        size_type first_index = thread_data_[handle.id_].get_random_index();
+        size_type second_index = thread_data_[handle.id_].get_random_index();
+
+        while (!pq_list_[first_index].try_lock(handle.id_, true)) {
+            first_index = thread_data_[handle.id_].get_random_index();
         }
-        size_type first_index = thread_data_[handle.id_].extract_index[0];
-        size_type second_index = thread_data_[handle.id_].extract_index[1];
-        do {
-            if (pq_list_[first_index].try_lock(handle.id_, claiming)) {
-                /* std::cout << "1 lock " << first_index << '\n'; */
-                if (pq_list_[second_index].try_lock(handle.id_, claiming)) {
-                    /* std::cout << "2 lock " << second_index << '\n'; */
-                    break;
-                }
-                pq_list_[first_index].unlock(handle.id_);
-                /* std::cout << "unlock " << first_index << '\n'; */
-            }
-            refresh_extract_indices(handle);
-            first_index = thread_data_[handle.id_].extract_index[0];
-            second_index = thread_data_[handle.id_].extract_index[1];
-            claiming = true;
-            /* std::cout <<first_index << " " << second_index << '\n'; */
-        } while (true);
-        /* std::cout << "1 lock " << first_index << '\n'; */
-        /* std::cout << "2 lock " << second_index << '\n'; */
-        // When we get here, we hold the lock for both queues
         bool first_empty = !pq_list_[first_index].pq.refresh_top();
         if (first_empty) {
             pq_list_[first_index].unlock(handle.id_);
-            /* std::cout << "1 unlock " << first_index << '\n'; */
+        }
+
+        while (!pq_list_[second_index].try_lock(handle.id_, true)) {
+            second_index = thread_data_[handle.id_].get_random_index();
         }
         bool second_empty = !pq_list_[second_index].pq.refresh_top();
         if (second_empty) {
             pq_list_[second_index].unlock(handle.id_);
-            /* std::cout << "2 unlock " << second_index << '\n'; */
         }
+
+        // We now have selected two queues, which might be empty
+
         if (first_empty && second_empty) {
-            refresh_extract_indices(handle);
             return false;
         }
+
         if (!first_empty && !second_empty) {
             if (comp_(pq_list_[second_index].pq.top().first, pq_list_[first_index].pq.top().first)) {
                 std::swap(first_index, second_index);
             }
             pq_list_[second_index].unlock(handle.id_);
-            /* std::cout << "unlock other " << first_index << '\n'; */
         } else if (first_empty) {
             first_index = second_index;
         }
         pq_list_[first_index].pq.extract_top(retval);
         pq_list_[first_index].unlock(handle.id_);
-        /* std::cout << "unlock best " << first_index << '\n'; */
-        if (first_empty || second_empty) {
-            refresh_extract_indices(handle);
-        }
-        --thread_data_[handle.id_].extract_count;
         return true;
     }
 
-    // threadsafe, but can be inaccurate if multiqueue is accessed
+    template <unsigned int K = Configuration::K, std::enable_if_t<(K > 1), int> = 0>
+    bool extract_top(Handle handle, value_type &retval) {
+        if (thread_data_[handle.id_].extract_count[0] == 0) {
+            thread_data_[handle.id_].extract_index[0] = thread_data_[handle.id_].get_random_index();
+            thread_data_[handle.id_].extract_count[0] = Configuration::K;
+        }
+        if (thread_data_[handle.id_].extract_count[1] == 0) {
+            thread_data_[handle.id_].extract_index[1] = thread_data_[handle.id_].get_random_index();
+            thread_data_[handle.id_].extract_count[1] = Configuration::K;
+        }
+        size_type first_index = thread_data_[handle.id_].extract_index[0];
+        size_type second_index = thread_data_[handle.id_].extract_index[1];
+
+        if (!pq_list_[first_index].try_lock(handle.id_,
+                                            thread_data_[handle.id_].extract_count[0] == Configuration::K)) {
+            do {
+                first_index = thread_data_[handle.id_].get_random_index();
+            } while (!pq_list_[first_index].try_lock(handle.id_, true));
+            thread_data_[handle.id_].extract_index[0] = first_index;
+            thread_data_[handle.id_].extract_count[0] = Configuration::K;
+        }
+        bool first_empty = !pq_list_[first_index].pq.refresh_top();
+        if (first_empty) {
+            pq_list_[first_index].unlock(handle.id_);
+            thread_data_[handle.id_].extract_count[0] = 0;
+        } else {
+            --thread_data_[handle.id_].extract_count[0];
+        }
+
+        if (!pq_list_[second_index].try_lock(
+                handle.id_,
+                !Configuration::WithPheromones || thread_data_[handle.id_].extract_count[1] == Configuration::K)) {
+            do {
+                second_index = thread_data_[handle.id_].get_random_index();
+            } while (!pq_list_[second_index].try_lock(handle.id_, true));
+            thread_data_[handle.id_].extract_index[1] = second_index;
+            thread_data_[handle.id_].extract_count[1] = Configuration::K;
+        }
+        bool second_empty = !pq_list_[second_index].pq.refresh_top();
+        if (second_empty) {
+            pq_list_[second_index].unlock(handle.id_);
+            thread_data_[handle.id_].extract_count[1] = 0;
+        } else {
+            --thread_data_[handle.id_].extract_count[1];
+        }
+
+        // We now have selected two queues, which might be empty
+
+        if (first_empty && second_empty) {
+            return false;
+        }
+
+        if (!first_empty && !second_empty) {
+            if (comp_(pq_list_[second_index].pq.top().first, pq_list_[first_index].pq.top().first)) {
+                std::swap(first_index, second_index);
+            }
+            pq_list_[second_index].unlock(handle.id_);
+        } else if (first_empty) {
+            first_index = second_index;
+        }
+        pq_list_[first_index].pq.extract_top(retval);
+        pq_list_[first_index].unlock(handle.id_);
+        return true;
+    }
+
     bool extract_from_partition(Handle handle, value_type &retval) {
         for (size_type i = Configuration::C * handle.id_; i < Configuration::C * (handle.id_ + 1); ++i) {
             if (!pq_list_[i].try_lock(handle.id_, true)) {
@@ -371,6 +442,9 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
             ss << "But numasupport disabled!\n\t";
 #endif
         }
+#ifdef ABORT_ON_MISALIGNMENT
+        ss << "Abort on misalignment\n\t";
+#endif
         if (Configuration::WithPheromones) {
             ss << "Using pheromones\n\t";
         }

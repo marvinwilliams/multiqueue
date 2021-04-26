@@ -41,14 +41,29 @@ read_throughput <- function(file, name, prefill, dist) {
   }
 }
 
+read_sssp <- function(file, name, graph, threads) {
+  if (file.exists(file)) {
+    data <- read.csv(file = file, header = F, sep = " ")
+    colnames(data) <- c("time", "relaxed")
+    data$threads = threads
+    data$name <- name
+    data$graph <- graph
+    data
+  } else {
+    data <- data.frame(matrix(NA, ncol = 5, nrow = 1))
+    colnames(data) <- c("time", "relaxed", "threads", "name", "graph")
+    data
+  }
+}
 
-plot_histogram <- function(data, names, outdir, plotname, title) {
+
+plot_histogram <- function(data, names, outdir, title) {
   plot_data <- data %>% filter(name %in% names & prefill == "1000000" & dist == "uniform" & sleep == "0")
   plot_data %>%
     group_by(threads) %>%
     do({
       plot <- ggplot(., aes(x = rank, y = cummulated, group = name, color = name)) +
-        labs(x = "Rank", y = "Cummul. Frequency", title = title) +
+        labs(x = title, y = "Cummul. Frequency", title = title) +
         geom_line() +
         scale_color_brewer(palette = "Set1") +
         scale_x_log10()
@@ -235,34 +250,43 @@ plot_throughput_by_ns <- function(data, outdir) {
   ggsave(plot, file = paste(outdir, "/throughput_by_ns.pdf", sep = ""))
 }
 
-plot_sssp <- function(data, names, outdir) {
-  plot_data <- data %>% filter(name %in% names & prefill == "1000000" & dist == "uniform")
-  plot <- ggplot(plot_data, aes(x = threads, y = mean, group = name, color = name)) +
+plot_sssp <- function(data, outdir, graph_name) {
+  plot_data <- data %>% filter(graph == graph_name)
+  plot <- ggplot(plot_data, aes(x = threads, y = time, group = name, color = name)) +
     geom_line() +
     geom_point() +
     scale_color_brewer(palette = "Set1") +
-    geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd),
-      width = .2,
-      position = position_dodge(0.05)
-    ) +
-    labs(x = "p", y = "10^6 Ops/s", title = "Operations per second")
-  ggsave(plot, file = paste(outdir, "/throughput.pdf", sep = ""))
+    labs(x = "p", y = "ms", title = "SSSP time")
+  ggsave(plot, file = paste(outdir, "/sssp_time_", graph_name, ".pdf", sep = ""))
+  plot <- ggplot(plot_data, aes(x = threads, y = relaxed, group = name, color = name)) +
+    geom_line() +
+    geom_point() +
+    scale_color_brewer(palette = "Set1") +
+    labs(x = "p", y = "# Visited nodes", title = "SSSP relaxed")
+  ggsave(plot, file = paste(outdir, "/sssp_nodes_", graph_name, ".pdf", sep = ""))
 }
+
 plot_scenario <- function(data, dir) {
   pq_names <- c("wrapper_capq", "wrapper_klsm256", "wrapper_klsm1024", "fullbufferingmq_c_4_k_1_ibs_16_dbs_16_numa", "fullbufferingmq_c_4_k_8_ibs_16_dbs_16_numa", "fullbufferingmq_c_16_k_64_ibs_16_dbs_16_numa", "mergingmq_c_4_k_8_ns_128_numa")
   variant_names <- c("fullbufferingmq_c_4_k_1_ibs_16_dbs_16_numa", "fullbufferingmq_c_4_k_8_ibs_16_dbs_16_numa", "fullbufferingmq_c_8_k_8_ibs_16_dbs_16_numa", "mergingmq_c_4_k_1_ns_128", "mergingmq_c_4_k_8_ns_128_numa", "wrapper_capq", "wrapper_klsm256", "wrapper_klsm1024")
+
   # plot_histogram(data$rank, pq_names, dir, "rank")
   # plot_histogram_by_stickiness(data$rank, dir, "rank")
   # plot_histogram(data$delay, pq_names, dir, "delay")
   # plot_histogram_by_stickiness(data$delay, dir, "delay")
-  plot_histogram_by_prefill(data$rank, variant_names, dir, "rank")
-  plot_histogram_by_dist(data$rank, variant_names, dir, "rank")
-  plot_histogram_by_sleep(data$rank, variant_names, dir, "rank")
-  # plot_histogram_bar(data$top_delay, dir, "top_delay")
+  # plot_histogram_by_prefill(data$rank, variant_names, dir, "rank")
+  # plot_histogram_by_dist(data$rank, variant_names, dir, "rank")
+  # plot_histogram_by_sleep(data$rank, variant_names, dir, "rank")
+  # # plot_histogram_bar(data$top_delay, dir, "top_delay")
   # plot_throughput_by_thread(data$throughput, pq_names, dir)
   # plot_throughput_by_buffer_size(data$throughput, dir)
   # plot_throughput_by_stickiness(data$throughput, dir)
   # plot_throughput_by_ns(data$throughput, dir)
+  plot_sssp(data$sssp, dir, "NY")
+  plot_sssp(data$sssp, dir, "USA")
+  plot_sssp(data$sssp, dir, "CAL")
+  plot_sssp(data$sssp, dir, "CTR")
+  plot_sssp(data$sssp, dir, "ger")
 }
 
 read_scenario <- function(scenario) {
@@ -271,7 +295,9 @@ read_scenario <- function(scenario) {
   delay_list <- list()
   top_delay_list <- list()
   throughput_list <- list()
+  sssp_list <- list()
   hist_index <- 1
+  sssp_index <- 1
   throughput_index <- 1
   for (pq in list.dirs(path = paste(experiment_dir, scenario, sep = "/"), full.names = T, recursive = F)) {
     name <- gsub(".*/", "", pq)
@@ -284,6 +310,12 @@ read_scenario <- function(scenario) {
 
       top_delay_data <- read_histogram(paste(pq, "/top_delay_", j, ".txt", sep = ""), name, as.integer(j), "1000000", "uniform", "0")
       top_delay_list[[hist_index]] <- top_delay_data
+
+      for (graph in c("NY", "USA", "CTR", "CAL", "ger")) {
+        sssp_data <- read_sssp(paste(pq, "/sssp_", graph, "_", j, ".txt", sep = ""), name, graph, as.integer(j))
+        sssp_list[[sssp_index]] <- sssp_data
+        sssp_index <- sssp_index + 1
+      }
 
       hist_index <- hist_index + 1
 
@@ -344,8 +376,9 @@ read_scenario <- function(scenario) {
   delay_data <- do.call(rbind, delay_list) %>% drop_na()
   top_delay_data <- do.call(rbind, top_delay_list) %>% drop_na()
   throughput_data <- do.call(rbind, throughput_list) %>% drop_na()
-  list("rank" = rank_data, "delay" = delay_data, "top_delay" = top_delay_data, "throughput" = throughput_data)
+  sssp_data <- do.call(rbind, sssp_list) %>% drop_na()
+  list("rank" = rank_data, "delay" = delay_data, "top_delay" = top_delay_data, "throughput" = throughput_data, "sssp" = sssp_data)
 }
 
-data <- read_scenario("i10pc136/results")
-plot_scenario(data, paste(experiment_dir, "i10pc136", sep = "/"))
+data <- read_scenario("i10pc137/results")
+plot_scenario(data, paste(experiment_dir, "i10pc137", sep = "/"))

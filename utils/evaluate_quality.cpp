@@ -11,7 +11,7 @@
 #include "cxxopts.hpp"
 #include "tlx/container/btree_map.hpp"
 
-static constexpr std::size_t num_deletions = 100'000
+static constexpr std::size_t num_deletions = 100'000;
 
 struct log_entry {
     unsigned int thread_id;
@@ -272,9 +272,9 @@ int main(int argc, char* argv[]) {
             std::cerr << "Element\n\t" << deletions[i] << "\nis not in the heap at deletion time" << std::endl;
             return 1;
         }
-        if (i % (deletions.size() / 100) == 0) {
+        if (i % (num_deletions / 100) == 0) {
             std::clog << "\rProcessed " << std::setprecision(3)
-                      << 100. * static_cast<double>(i) / static_cast<double>(deletions.size()) << "%";
+                      << 100. * static_cast<double>(i) / static_cast<double>(num_deletions) << "%";
         }
     }
     std::clog << "\rProcessing done         " << std::endl;

@@ -21,6 +21,7 @@ cmake_dependent_option(${PROJECT_NAME}_INSTALL_DOCS "Add the generated documenta
 option("${PROJECT_NAME}_BUILD_TESTS" "Build tests for ${PROJECT_NAME}" ON)
 option("${PROJECT_NAME}_BUILD_BENCHMARKS" "Build benchmarks" ON)
 option("${PROJECT_NAME}_BUILD_EXAMPLES" "Build examples" OFF)
+option("${PROJECT_NAME}_ABORT_ON_MISALIGNMENT" "Abort if pq seems to be misaligned" ON)
 
 execute_process(COMMAND getconf LEVEL1_DCACHE_LINESIZE OUTPUT_VARIABLE L1_CACHE_LINESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
 execute_process(COMMAND getconf PAGESIZE OUTPUT_VARIABLE PAGESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -65,6 +66,10 @@ find_package(Numa)
 
 if (Numa_FOUND)
   target_compile_definitions("${PROJECT_NAME}_compile_requirements" INTERFACE HAVE_NUMA)
+endif()
+
+if (${PROJECT_NAME}_ABORT_ON_MISALIGNMENT)
+  target_compile_definitions("${PROJECT_NAME}_compile_requirements" INTERFACE ABORT_ON_MISALIGNMENT)
 endif()
 
 target_link_libraries("${PROJECT_NAME}" INTERFACE "${PROJECT_NAME}_compile_requirements")
@@ -122,10 +127,10 @@ generate_mq_target(mergingmq PQ_MQ_MERGING)
 
 function(add_mq_variants priority_queue_target)
   get_property(name TARGET ${priority_queue_target} PROPERTY pq_name)
-  add_library(${name}_pheromone INTERFACE)
-  target_link_libraries(${name}_pheromone INTERFACE ${priority_queue_target})
-  target_compile_definitions(${name}_pheromone INTERFACE MQ_CONFIG_PHEROMONES)
-  set_property(TARGET ${name}_pheromone PROPERTY pq_name ${name}_pheromone)
+  # add_library(${name}_pheromone INTERFACE)
+  # target_link_libraries(${name}_pheromone INTERFACE ${priority_queue_target})
+  # target_compile_definitions(${name}_pheromone INTERFACE MQ_CONFIG_PHEROMONES)
+  # set_property(TARGET ${name}_pheromone PROPERTY pq_name ${name}_pheromone)
 
   if(Numa_FOUND)
     add_library(${name}_numa INTERFACE)
@@ -133,10 +138,10 @@ function(add_mq_variants priority_queue_target)
     target_compile_definitions(${name}_numa INTERFACE ${define} MQ_CONFIG_NUMA)
     set_property(TARGET ${name}_numa PROPERTY pq_name ${name}_numa)
 
-    add_library(${name}_numa_pheromone INTERFACE)
-    target_link_libraries(${name}_numa_pheromone INTERFACE ${priority_queue_target} numa)
-    target_compile_definitions(${name}_numa_pheromone INTERFACE MQ_CONFIG_PHEROMONES MQ_CONFIG_NUMA)
-    set_property(TARGET ${name}_numa_pheromone PROPERTY pq_name ${name}_numa_pheromone)
+    # add_library(${name}_numa_pheromone INTERFACE)
+    # target_link_libraries(${name}_numa_pheromone INTERFACE ${priority_queue_target} numa)
+    # target_compile_definitions(${name}_numa_pheromone INTERFACE MQ_CONFIG_PHEROMONES MQ_CONFIG_NUMA)
+    # set_property(TARGET ${name}_numa_pheromone PROPERTY pq_name ${name}_numa_pheromone)
   endif()
 endfunction()
 
