@@ -11,6 +11,8 @@
 #include "cxxopts.hpp"
 #include "tlx/container/btree_map.hpp"
 
+static constexpr std::size_t num_deletions = 100'000
+
 struct log_entry {
     unsigned int thread_id;
     uint64_t tick;
@@ -212,7 +214,7 @@ int main(int argc, char* argv[]) {
     tlx::btree_map<heap_entry, std::pair<size_t, size_t>> replay_heap{};
     std::vector<size_t> insert_index(insertions.size(), 0);
     std::size_t failed_deletions = 0;
-    for (size_t i = 0; i < deletions.size(); ++i) {
+    for (size_t i = 0; i < std::min(deletions.size(), num_deletions); ++i) {
         // Inserting everything before next deletion
         for (unsigned int t = 0; t < insertions.size(); ++t) {
             while (insert_index[t] < insertions[t].size() && insertions[t][insert_index[t]].tick < deletions[i].tick) {

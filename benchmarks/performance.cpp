@@ -125,7 +125,7 @@ struct Settings {
 #ifdef THROUGHPUT
     std::chrono::milliseconds test_duration = 3s;
 #else
-    std::size_t num_operations = 100'000;
+    std::chrono::milliseconds test_duration = 200ms;
 #endif
     unsigned int num_threads = 4;
     Inserter::Policy insert_policy = Inserter::Policy::Uniform;
@@ -219,9 +219,7 @@ std::atomic_uint64_t num_deletions;
 std::atomic_uint64_t num_failed_deletions;
 
 std::atomic_bool start_flag;
-#ifdef THROUGHPUT
 std::atomic_bool stop_flag;
-#endif
 
 // Assume rdtsc is thread-safe and synchronized on each CPU
 // Assumption false
@@ -279,13 +277,7 @@ struct Task {
         }
         std::atomic_thread_fence(std::memory_order_acquire);
         std::pair<key_type, value_type> retval;
-#ifdef THROUGHPUT
         while (!stop_flag.load(std::memory_order_relaxed)) {
-#else
-        size_t const thread_num_operations = settings.num_operations / settings.num_threads +
-            (ctx.get_id() < settings.num_operations % settings.num_threads ? 1 : 0);
-        for (std::size_t i = 0; i < thread_num_operations; ++i) {
-#endif
             if (inserter()) {
                 key_type const key = key_generator();
 #ifdef QUALITY
@@ -372,12 +364,11 @@ int main(int argc, char* argv[]) {
        "(default: MAX)", cxxopts::value<key_type>(), "NUMBER")
       ("l,min", "Specify the min key "
        "(default: 0)", cxxopts::value<key_type>(), "NUMBER")
-#ifdef THROUGHPUT
       ("t,time", "Specify the test timeout in ms "
+#ifdef THROUGHPUT
        "(default: 3000)", cxxopts::value<unsigned int>(), "NUMBER")
 #else
-      ("o,ops", "Specify the total number of operations"
-       "(default: 100'000)", cxxopts::value<std::size_t>(), "NUMBER")
+       "(default: 200)", cxxopts::value<unsigned int>(), "NUMBER")
 #endif
       ("h,help", "Print this help");
     // clang-format on
@@ -435,15 +426,9 @@ int main(int argc, char* argv[]) {
         if (result.count("min") > 0) {
             settings.min_key = result["min"].as<key_type>();
         }
-#ifdef THROUGHPUT
         if (result.count("time") > 0) {
             settings.test_duration = std::chrono::milliseconds{result["time"].as<unsigned int>()};
         }
-#else
-        if (result.count("ops") > 0) {
-            settings.num_operations = result["ops"].as<std::size_t>();
-        }
-#endif
     } catch (cxxopts::OptionParseException const& e) {
         std::cerr << e.what() << std::endl;
         return 1;
@@ -458,10 +443,6 @@ int main(int argc, char* argv[]) {
         std::cerr << "Too many threads, increase the number of thread bits!" << std::endl;
         return 1;
     }
-    if ((settings.num_operations + settings.prefill_size) / settings.num_threads > value_mask) {
-        std::cerr << "Too many operations, decrease the number of thread bits!" << std::endl;
-        return 1;
-    }
 #endif
 
 #if defined THROUGHPUT
@@ -472,13 +453,8 @@ int main(int argc, char* argv[]) {
 
     std::clog << "Settings: \n\t"
               << "Prefill size: " << settings.prefill_size << "\n\t"
-#ifdef THROUGHPUT
               << "Test duration: " << settings.test_duration.count() << " ms\n\t"
               << "Sleep between operations: " << settings.sleep_between_operations.count() << " ns\n\t"
-#else
-
-              << "Num operations per thread: " << settings.num_operations << "\n\t"
-#endif
               << "Threads: " << settings.num_threads << "\n\t"
               << "Insert policy: " << Inserter::policy_names[static_cast<std::size_t>(settings.insert_policy)] << "\n\t"
               << "Min key: " << settings.min_key << "\n\t"
@@ -503,18 +479,14 @@ int main(int argc, char* argv[]) {
     num_deletions = 0;
     num_failed_deletions = 0;
     start_flag.store(false, std::memory_order_relaxed);
-#ifdef THROUGHPUT
     stop_flag.store(false, std::memory_order_relaxed);
-#endif
     std::atomic_thread_fence(std::memory_order_release);
     thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
     coordinator.run<Task>(std::ref(pq), settings);
     coordinator.wait_until_notified();
     start_flag.store(true, std::memory_order_release);
-#ifdef THROUGHPUT
     std::this_thread::sleep_for(settings.test_duration);
     stop_flag.store(true, std::memory_order_release);
-#endif
     coordinator.join();
 #ifdef THROUGHPUT
     std::cout << "Insertions: " << num_insertions << "\nDeletions: " << num_deletions
