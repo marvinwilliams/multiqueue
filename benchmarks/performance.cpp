@@ -125,7 +125,7 @@ struct Settings {
 #ifdef THROUGHPUT
     std::chrono::milliseconds test_duration = 3s;
 #else
-    std::chrono::milliseconds test_duration = 200ms;
+    std::size_t min_num_delete_operations = 10'000'000;
 #endif
     unsigned int num_threads = 4;
     Inserter::Policy insert_policy = Inserter::Policy::Uniform;
@@ -219,7 +219,12 @@ std::atomic_uint64_t num_deletions;
 std::atomic_uint64_t num_failed_deletions;
 
 std::atomic_bool start_flag;
+
+#ifdef THROUGHPUT
 std::atomic_bool stop_flag;
+#else
+std::atomic_size_t num_delete_operations;
+#endif
 
 // Assume rdtsc is thread-safe and synchronized on each CPU
 // Assumption false
@@ -277,7 +282,11 @@ struct Task {
         }
         std::atomic_thread_fence(std::memory_order_acquire);
         std::pair<key_type, value_type> retval;
+#ifdef THROUGHPUT
         while (!stop_flag.load(std::memory_order_relaxed)) {
+#else
+        while (num_delete_operations.load(std::memory_order_relaxed) < settings.min_num_delete_operations) {
+#endif
             if (inserter()) {
                 key_type const key = key_generator();
 #ifdef QUALITY
@@ -297,6 +306,7 @@ struct Task {
                 auto tick = get_tick();
                 if (success) {
                     local_deletions.push_back(LogEntry{tick, retval.first, retval.second});
+                    num_delete_operations.fetch_add(1, std::memory_order_relaxed);
                 } else {
                     local_failed_deletions.push_back(tick);
                     ++num_local_failed_deletions;
@@ -364,11 +374,12 @@ int main(int argc, char* argv[]) {
        "(default: MAX)", cxxopts::value<key_type>(), "NUMBER")
       ("l,min", "Specify the min key "
        "(default: 0)", cxxopts::value<key_type>(), "NUMBER")
-      ("t,time", "Specify the test timeout in ms "
 #ifdef THROUGHPUT
+      ("t,time", "Specify the test timeout in ms "
        "(default: 3000)", cxxopts::value<unsigned int>(), "NUMBER")
 #else
-       "(default: 200)", cxxopts::value<unsigned int>(), "NUMBER")
+      ("o,deletions", "Specify the minimum number of deletions "
+       "(default: 10'000'000)", cxxopts::value<std::size_t>(), "NUMBER")
 #endif
       ("h,help", "Print this help");
     // clang-format on
@@ -382,8 +393,8 @@ int main(int argc, char* argv[]) {
         if (result.count("prefill") > 0) {
             settings.prefill_size = result["prefill"].as<size_t>();
         }
-        if (result.count("policy") > 0) {
-            std::string policy = result["policy"].as<std::string>();
+        if (result.count("insert") > 0) {
+            std::string policy = result["insert"].as<std::string>();
             if (policy == "uniform") {
                 settings.insert_policy = Inserter::Policy::Uniform;
             } else if (policy == "split") {
@@ -426,9 +437,15 @@ int main(int argc, char* argv[]) {
         if (result.count("min") > 0) {
             settings.min_key = result["min"].as<key_type>();
         }
+#ifdef THROUGHPUT
         if (result.count("time") > 0) {
             settings.test_duration = std::chrono::milliseconds{result["time"].as<unsigned int>()};
         }
+#else
+        if (result.count("deletions") > 0) {
+            settings.min_num_delete_operations = result["deletions"].as<std::size_t>();
+        }
+#endif
     } catch (cxxopts::OptionParseException const& e) {
         std::cerr << e.what() << std::endl;
         return 1;
@@ -453,7 +470,11 @@ int main(int argc, char* argv[]) {
 
     std::clog << "Settings: \n\t"
               << "Prefill size: " << settings.prefill_size << "\n\t"
+#ifdef THROUGHPUT
               << "Test duration: " << settings.test_duration.count() << " ms\n\t"
+#else
+              << "Min deletions: " << settings.min_num_delete_operations << "\n\t"
+#endif
               << "Sleep between operations: " << settings.sleep_between_operations.count() << " ns\n\t"
               << "Threads: " << settings.num_threads << "\n\t"
               << "Insert policy: " << Inserter::policy_names[static_cast<std::size_t>(settings.insert_policy)] << "\n\t"
@@ -472,6 +493,7 @@ int main(int argc, char* argv[]) {
     insertions = new std::vector<LogEntry>[settings.num_threads];
     deletions = new std::vector<LogEntry>[settings.num_threads];
     failed_deletions = new std::vector<tick_type>[settings.num_threads];
+    num_delete_operations = 0;
 #else
     dummy_result = new DummyResult[settings.num_threads];
 #endif
@@ -479,14 +501,18 @@ int main(int argc, char* argv[]) {
     num_deletions = 0;
     num_failed_deletions = 0;
     start_flag.store(false, std::memory_order_relaxed);
+#ifdef THROUGHPUT
     stop_flag.store(false, std::memory_order_relaxed);
+#endif
     std::atomic_thread_fence(std::memory_order_release);
     thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
     coordinator.run<Task>(std::ref(pq), settings);
     coordinator.wait_until_notified();
     start_flag.store(true, std::memory_order_release);
+#ifdef THROUGHPUT
     std::this_thread::sleep_for(settings.test_duration);
     stop_flag.store(true, std::memory_order_release);
+#endif
     coordinator.join();
 #ifdef THROUGHPUT
     std::cout << "Insertions: " << num_insertions << "\nDeletions: " << num_deletions

@@ -11,7 +11,7 @@
 #include "cxxopts.hpp"
 #include "tlx/container/btree_map.hpp"
 
-static constexpr std::size_t num_deletions = 100'000;
+static constexpr std::size_t num_deletions = 10'000'000;
 
 struct log_entry {
     unsigned int thread_id;
@@ -202,6 +202,9 @@ int main(int argc, char* argv[]) {
     if (verify_only) {
         std::clog << "Log is consistent" << std::endl;
         return 0;
+    }
+    if (deletions.size() < num_deletions) {
+        std::clog << "Too few deletions!" << std::endl;
     }
     std::clog << "Sorting deletions..." << std::flush;
     std::sort(deletions.begin(), deletions.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });

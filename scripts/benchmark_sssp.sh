@@ -4,8 +4,6 @@ set -uo pipefail
 
 hostname=$(cat /proc/sys/kernel/hostname)
 bin_dir="./build_${hostname}"
-reps=5
-timeout=3
 
 name="$1"
 
@@ -24,10 +22,13 @@ mkdir -p ${result_dir}
 
 if [[ -x ${sssp_bin} ]]; then
 	echo Starting sssp benchmark >&2
-	for ((j=1;j<=$(nproc);j=2*j)); do
-		echo "${sssp_bin} -j ${j} -t 200" >&2
-		timeout 120 ${sssp_bin} -j ${j} -f data/data/USA-road-t.NY.gr -c data/data/NY_solution.txt 2> "${log_dir}/sssp_ny_${j}_stderr.txt" > "${result_dir}/sssp_ny_${j}.txt"
-		timeout 120 ${sssp_bin} -j ${j} -f data/data/USA-road-t.USA.gr -c data/data/USA_solution.txt 2> "${log_dir}/sssp_usa_${j}_stderr.txt" > "${result_dir}/sssp_usa_${j}.txt"
+	for graph in NY USA CAL CTR GER rhg_20 rhg_22 rhg_24; do
+		echo ${sssp_bin} -j $(nproc) -f data/${graph}_graph.gr -c data/${graph}_solution.txt >&2
+		if [[ -f  "${result_dir}/sssp_${graph}.txt" ]]; then
+			echo SSSP benchmark ${graph} exists, skipping... >&2
+		else
+			timeout 600 ${sssp_bin} -j $(nproc) -f data/${graph}_graph.gr -c data/${graph}_solution.txt 2> "${log_dir}/sssp_${graph}_stderr.txt" > "${result_dir}/sssp_${graph}.txt"
+		fi
 	done
 else
 	echo SSSP binary not executable, skipping >&2

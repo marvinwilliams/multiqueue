@@ -129,8 +129,8 @@ struct Task {
                                 continue;
                             }
                             unsigned int thread_state = 2;
-                            while (!idle_state[i].state.compare_exchange_weak(thread_state, 3,
-                                                                              std::memory_order_acq_rel, std::memory_order_acquire) &&
+                            while (!idle_state[i].state.compare_exchange_weak(
+                                       thread_state, 3, std::memory_order_acq_rel, std::memory_order_acquire) &&
                                    thread_state != 0 && thread_state != 3) {
                                 thread_state = 2;
                                 std::this_thread::yield();
@@ -283,37 +283,38 @@ int main(int argc, char* argv[]) {
         std::cerr << "Graph and solution size does not match\n";
         return 1;
     }
-    std::vector<Distance> distances(graph.nodes.size() - 1);
-    for (std::size_t i = 0; i + 1 < graph.nodes.size(); ++i) {
-        distances[i].distance = std::numeric_limits<std::uint32_t>::max();
-    }
     std::clog << "done\n";
-    idle_counter = 0;
-    idle_state = new IdleState[settings.num_threads]();
-    num_processed_nodes = 0;
-    PriorityQueue pq{settings.num_threads};
-    start_flag.store(false, std::memory_order_relaxed);
-    std::atomic_thread_fence(std::memory_order_release);
-    thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
-    coordinator.run<Task>(std::ref(pq), graph, std::ref(distances));
-    coordinator.wait_until_notified();
-    start_flag.store(true, std::memory_order_release);
-    auto start_tick = clock_type::now();
-    __asm__ __volatile__("" ::: "memory");
-    coordinator.join();
-    __asm__ __volatile__("" ::: "memory");
-    auto end_tick = clock_type::now();
-    std::clog << "Done\n";
-    std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(end_tick - start_tick).count() << ' '
-              << num_processed_nodes << '\n';
-    for (std::size_t i = 0; i + 1 < graph.nodes.size(); ++i) {
-        /* std::cout << distances[i].distance.load(std::memory_order_relaxed) << '\n'; */
-        if (distances[i].distance.load(std::memory_order_relaxed) != solution[i]) {
-            std::cerr << "Solution invalid!\n";
-            return 1;
+    std::vector<Distance> distances(graph.nodes.size() - 1);
+    for (unsigned int threads = 1; threads <= settings.num_threads; threads = 2 * threads) {
+        for (std::size_t i = 0; i + 1 < graph.nodes.size(); ++i) {
+            distances[i].distance = std::numeric_limits<std::uint32_t>::max();
         }
-    }
+        idle_counter = 0;
+        idle_state = new IdleState[threads]();
+        num_processed_nodes = 0;
+        PriorityQueue pq{threads};
+        start_flag.store(false, std::memory_order_relaxed);
+        std::atomic_thread_fence(std::memory_order_release);
+        thread_coordination::ThreadCoordinator coordinator{threads};
+        coordinator.run<Task>(std::ref(pq), graph, std::ref(distances));
+        coordinator.wait_until_notified();
+        start_flag.store(true, std::memory_order_release);
+        auto start_tick = clock_type::now();
+        __asm__ __volatile__("" ::: "memory");
+        coordinator.join();
+        __asm__ __volatile__("" ::: "memory");
+        auto end_tick = clock_type::now();
+        for (std::size_t i = 0; i + 1 < graph.nodes.size(); ++i) {
+            if (distances[i].distance.load(std::memory_order_relaxed) != solution[i]) {
+                std::cerr << "Solution invalid!\n";
+                return 1;
+            }
+        }
+        std::cout << threads << ' ' << std::chrono::duration_cast<std::chrono::milliseconds>(end_tick - start_tick).count() << ' '
+                  << num_processed_nodes << '\n';
 
-    delete[] idle_state;
+        delete[] idle_state;
+    }
+    std::clog << "Done\n";
     return 0;
 }

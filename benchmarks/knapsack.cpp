@@ -51,7 +51,7 @@ struct KnapsackInstance {
 std::vector<std::vector<KnapsackInstance::Item>> prefix_sums;
 
 static value_type get_upper_bound(KnapsackInstance const& instance, unsigned int index, weight_type used_capacity) {
-    assert(index < items.size());
+    assert(index < instance.items.size());
     auto last_to_include =
         std::lower_bound(prefix_sums[index].begin(), prefix_sums[index].end(),
                          KnapsackInstance::Item{instance.max_capacity - used_capacity, 0},
