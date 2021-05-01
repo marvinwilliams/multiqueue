@@ -13,26 +13,39 @@
 
 static constexpr std::size_t num_deletions = 10'000'000;
 
-struct log_entry {
-    unsigned int thread_id;
+struct InsertionLogEntry {
     uint64_t tick;
-    bool failed;
     uint32_t key;
-    unsigned int insert_thread_id;
-    uint32_t value;
     bool deleted;
 };
 
-std::istream& operator>>(std::istream& in, log_entry& entry) {
-    in >> entry.thread_id >> entry.tick >> entry.key >> entry.insert_thread_id >> entry.value;
-    entry.failed = false;
+struct DeletionLogEntry {
+    unsigned int thread_id;
+    uint64_t tick;
+    bool failed;
+    unsigned int insert_thread_id;
+    uint32_t value;
+};
+
+std::istream& operator>>(std::istream& in, InsertionLogEntry& entry) {
+    in >> entry.tick >> entry.key;
     entry.deleted = false;
     return in;
 }
 
-std::ostream& operator<<(std::ostream& out, log_entry const& entry) {
-    out << entry.thread_id << ' ' << entry.tick << ' ' << entry.key << ' ' << entry.insert_thread_id << ' '
-        << entry.value;
+std::istream& operator>>(std::istream& in, DeletionLogEntry& entry) {
+    in >> entry.thread_id >> entry.tick >> entry.insert_thread_id >> entry.value;
+    entry.failed = false;
+    return in;
+}
+
+std::ostream& operator<<(std::ostream& out, InsertionLogEntry const& entry) {
+    out << entry.tick << ' ' << entry.key;
+    return out;
+}
+
+std::ostream& operator<<(std::ostream& out, DeletionLogEntry const& entry) {
+    out << entry.thread_id << ' ' << entry.tick << ' ' << entry.insert_thread_id << ' ' << entry.value;
     return out;
 }
 
@@ -90,8 +103,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::vector<std::vector<log_entry>> insertions;
-    std::vector<log_entry> deletions;
+    std::vector<std::vector<InsertionLogEntry>> insertions;
+    std::vector<DeletionLogEntry> deletions;
 
     std::clog << "Reading quality log file from stdin..." << std::endl;
     unsigned int num_threads;
@@ -114,35 +127,26 @@ int main(int argc, char* argv[]) {
                           << "Insertion following a deletion" << std::endl;
                 return 1;
             }
-            log_entry entry;
-            std::cin >> entry;
-            if (entry.thread_id >= num_threads) {
+            unsigned int thread_id;
+            std::cin >> thread_id;
+            if (thread_id >= num_threads) {
                 std::cerr << "Line " << line << ": "
-                          << "Thread id " << entry.thread_id << " too high (Max: " << num_threads - 1 << ')'
+                          << "Thread id " << thread_id << " too high (Max: " << num_threads - 1 << ')'
                           << std::endl;
                 return 1;
             }
-            if (entry.insert_thread_id >= num_threads) {
-                std::cerr << "Line " << line << ": "
-                          << "Insert thread id " << entry.insert_thread_id << " too high (Max: " << num_threads - 1
-                          << ')' << std::endl;
-                return 1;
-            }
-            if (!insertions[entry.thread_id].empty() && entry.tick < insertions[entry.thread_id].back().tick) {
+            InsertionLogEntry entry;
+            std::cin >> entry;
+            if (!insertions[thread_id].empty() && entry.tick < insertions[thread_id].back().tick) {
                 std::cerr << "Line " << line << ": "
                           << "Insertion\n\t" << entry << "\nhappens before previous insertion of same thread"
                           << std::endl;
                 return 1;
             }
-            if (entry.value != insertions[entry.thread_id].size() || entry.thread_id != entry.insert_thread_id) {
-                std::cerr << "Line " << line << ": "
-                          << "Inconsistent insertion:\n\t" << entry << std::endl;
-                return 1;
-            }
-            insertions[entry.thread_id].push_back(entry);
+            insertions[thread_id].push_back(entry);
         } else if (op == 'd') {
             deleting = true;
-            log_entry entry;
+            DeletionLogEntry entry;
             std::cin >> entry;
             if (entry.thread_id >= num_threads) {
                 std::cerr << "Line " << line << ": "
@@ -161,12 +165,6 @@ int main(int argc, char* argv[]) {
                           << "No insertion corresponding to deletion\n\t" << entry << std::endl;
                 return 1;
             }
-            if (entry.key != insertions[entry.insert_thread_id][entry.value].key) {
-                std::cerr << "Line " << line << ": "
-                          << "Deletion \n\t" << entry << "\ninconsistent to insertion\n\t"
-                          << insertions[entry.insert_thread_id][entry.value] << std::endl;
-                return 1;
-            }
             if (entry.tick < insertions[entry.insert_thread_id][entry.value].tick) {
                 std::cerr << "Line " << line << ": "
                           << "Deletion of \n\t" << entry << "\nhappens before its insertion" << std::endl;
@@ -182,7 +180,7 @@ int main(int argc, char* argv[]) {
             insertions[entry.insert_thread_id][entry.value].deleted = true;
         } else if (op == 'f') {
             deleting = true;
-            log_entry entry;
+            DeletionLogEntry entry;
             std::cin >> entry.thread_id >> entry.tick;
             if (entry.thread_id >= num_threads) {
                 std::cerr << "Line " << line << ": "
@@ -205,6 +203,7 @@ int main(int argc, char* argv[]) {
     }
     if (deletions.size() < num_deletions) {
         std::clog << "Too few deletions!" << std::endl;
+        return 1;
     }
     std::clog << "Sorting deletions..." << std::flush;
     std::sort(deletions.begin(), deletions.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
@@ -217,7 +216,7 @@ int main(int argc, char* argv[]) {
     tlx::btree_map<heap_entry, std::pair<size_t, size_t>> replay_heap{};
     std::vector<size_t> insert_index(insertions.size(), 0);
     std::size_t failed_deletions = 0;
-    for (size_t i = 0; i < std::min(deletions.size(), num_deletions); ++i) {
+    for (size_t i = 0; i < num_deletions; ++i) {
         // Inserting everything before next deletion
         for (unsigned int t = 0; t < insertions.size(); ++t) {
             while (insert_index[t] < insertions[t].size() && insertions[t][insert_index[t]].tick < deletions[i].tick) {
@@ -246,7 +245,7 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
-        auto key = deletions[i].key;
+        auto key = insertions[deletions[i].insert_thread_id][deletions[i].value].key;
 
         if (auto it = replay_heap.find({key, deletions[i].insert_thread_id, deletions[i].value});
             it != replay_heap.end()) {

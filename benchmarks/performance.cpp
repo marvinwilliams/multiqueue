@@ -14,6 +14,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <time.h>
 
 #include "cxxopts.hpp"
 #include "priority_queue_factory.hpp"
@@ -41,14 +42,24 @@ using PriorityQueue = typename util::PriorityQueueFactory<key_type, value_type>:
 using namespace std::chrono_literals;
 using clock_type = std::chrono::steady_clock;
 using time_point_type = clock_type::time_point;
-using tick_type = clock_type::rep;
+using tick_type = std::uint64_t;
 
 static inline time_point_type get_time_point() noexcept {
     return clock_type::now();
 }
 
-static inline tick_type get_tick() noexcept {
-    return clock_type::now().time_since_epoch().count();
+static inline tick_type get_tick_steady() noexcept {
+    return static_cast<tick_type>(clock_type::now().time_since_epoch().count());
+}
+
+static inline tick_type get_tick_realtime() noexcept {
+  timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  return static_cast<tick_type>(ts.tv_sec * 1000000000 + ts.tv_nsec);
+}
+
+static inline tick_type get_tick_rdtsc() noexcept {
+  return __rdtsc();
 }
 
 struct Settings;
@@ -59,6 +70,7 @@ struct Inserter {
 
     Policy policy;
 
+    std::seed_seq seq;
     std::mt19937 gen;
     std::uniform_int_distribution<std::uint64_t> dist;
     std::uint64_t random_bits;
@@ -66,7 +78,7 @@ struct Inserter {
 
     bool insert;
 
-    explicit Inserter(unsigned int id, Settings const& settings);
+    explicit Inserter(unsigned int id, Settings const& settings, std::uint32_t seed);
 
     inline bool operator()() {
         switch (policy) {
@@ -94,12 +106,13 @@ struct KeyGenerator {
 
     Distribution distribution;
 
+    std::seed_seq seq;
     std::mt19937 gen;
     std::uniform_int_distribution<key_type> dist;
 
     key_type current;
 
-    explicit KeyGenerator(unsigned int id, Settings const& settings);
+    explicit KeyGenerator(unsigned int id, Settings const& settings, std::uint32_t seed);
 
     inline key_type operator()() {
         switch (distribution) {
@@ -134,10 +147,11 @@ struct Settings {
     value_type max_key = std::numeric_limits<value_type>::max();
     value_type dijkstra_min_increase = 1;
     value_type dijkstra_max_increase = 100;
+    std::uint32_t seed;
 };
 
-Inserter::Inserter(unsigned int id, Settings const& settings)
-    : policy{settings.insert_policy}, gen{id}, random_bits{0}, bit_pos{0} {
+Inserter::Inserter(unsigned int id, Settings const& settings, std::uint32_t seed)
+    : policy{settings.insert_policy}, seq{seed}, gen(seq), random_bits{0}, bit_pos{0} {
     switch (policy) {
         case Policy::Split:
         case Policy::Alternating:
@@ -150,8 +164,8 @@ Inserter::Inserter(unsigned int id, Settings const& settings)
     }
 }
 
-KeyGenerator::KeyGenerator(unsigned int id, Settings const& settings)
-    : distribution{settings.key_distribution}, gen(id) {
+KeyGenerator::KeyGenerator(unsigned int id, Settings const& settings, std::uint32_t seed)
+    : distribution{settings.key_distribution}, seq{seed}, gen(seq)   {
     switch (distribution) {
         case Distribution::Uniform:
             dist = std::uniform_int_distribution<key_type>(settings.min_key, settings.max_key);
@@ -192,14 +206,18 @@ static constexpr value_type get_elem_id(value_type value) noexcept {
     return value & value_mask;
 }
 
-struct LogEntry {
+struct InsertionLogEntry {
     tick_type tick;
     key_type key;
+};
+
+struct DeletionLogEntry {
+    tick_type tick;
     value_type value;
 };
 
-std::vector<LogEntry>* insertions;
-std::vector<LogEntry>* deletions;
+std::vector<InsertionLogEntry>* insertions;
+std::vector<DeletionLogEntry>* deletions;
 std::vector<tick_type>* failed_deletions;
 
 #else
@@ -213,6 +231,8 @@ struct alignas(2 * L1_CACHE_LINESIZE) DummyResult {
 DummyResult* dummy_result;
 
 #endif
+
+std::uint32_t* thread_seeds;
 
 std::atomic_uint64_t num_insertions;
 std::atomic_uint64_t num_deletions;
@@ -232,10 +252,10 @@ std::atomic_size_t num_delete_operations;
 struct Task {
     static void run(thread_coordination::Context ctx, PriorityQueue& pq, Settings const& settings) {
 #ifdef QUALITY
-        std::vector<LogEntry> local_insertions;
-        local_insertions.reserve(settings.prefill_size + 1'000'000);
-        std::vector<LogEntry> local_deletions;
-        local_deletions.reserve(1'000'000);
+        std::vector<InsertionLogEntry> local_insertions;
+        local_insertions.reserve(settings.prefill_size + settings.min_num_delete_operations);
+        std::vector<DeletionLogEntry> local_deletions;
+        local_deletions.reserve(settings.min_num_delete_operations);
         std::vector<tick_type> local_failed_deletions;
         local_failed_deletions.reserve(1'000'000);
 #endif
@@ -246,16 +266,16 @@ struct Task {
 #ifdef PQ_SPRAYLIST
         pq.init_thread(ctx.get_num_threads());
 #endif
-
-        auto gen = std::mt19937(ctx.get_id());
-        auto dist = std::uniform_int_distribution<long>(0, settings.sleep_between_operations.count());
+        std::seed_seq seq{thread_seeds[ctx.get_id()]};
+        auto gen = std::mt19937(seq);
+        auto dist = std::uniform_int_distribution<long>(100, settings.sleep_between_operations.count());
 
         unsigned int stage = 0;
 
         auto handle = pq.get_handle(ctx.get_id());
 
-        auto inserter = Inserter{ctx.get_id(), settings};
-        auto key_generator = KeyGenerator{ctx.get_id(), settings};
+        auto inserter = Inserter{ctx.get_id(), settings, thread_seeds[ctx.get_id()] + 1};
+        auto key_generator = KeyGenerator{ctx.get_id(), settings, thread_seeds[ctx.get_id()] + 2};
 
         if (settings.prefill_size > 0) {
             ctx.synchronize(stage++, []() { std::clog << "Prefilling..." << std::flush; });
@@ -266,7 +286,7 @@ struct Task {
 #ifdef QUALITY
                 value_type const value = to_value(ctx.get_id(), static_cast<value_type>(local_insertions.size()));
                 pq.push(handle, {key, value});
-                local_insertions.push_back(LogEntry{0, key, value});
+                local_insertions.push_back(InsertionLogEntry{0, key});
 #else
                 pq.push(handle, {key, key});
 #endif
@@ -291,10 +311,11 @@ struct Task {
                 key_type const key = key_generator();
 #ifdef QUALITY
                 value_type const value = to_value(ctx.get_id(), static_cast<value_type>(local_insertions.size()));
-                auto tick = get_tick();
-                __asm__ __volatile__("" ::: "memory");
+                _mm_lfence();
+                auto tick = get_tick_realtime();
+                _mm_lfence();
                 pq.push(handle, {key, value});
-                local_insertions.push_back(LogEntry{tick, key, value});
+                local_insertions.push_back(InsertionLogEntry{tick, key});
 #else
                 pq.push(handle, {key, key});
 #endif
@@ -302,10 +323,11 @@ struct Task {
             } else {
                 bool success = pq.extract_top(handle, retval);
 #ifdef QUALITY
-                __asm__ __volatile__("" ::: "memory");
-                auto tick = get_tick();
+                _mm_lfence();
+                auto tick = get_tick_realtime();
+                _mm_lfence();
                 if (success) {
-                    local_deletions.push_back(LogEntry{tick, retval.first, retval.second});
+                    local_deletions.push_back(DeletionLogEntry{tick, retval.second});
                     num_delete_operations.fetch_add(1, std::memory_order_relaxed);
                 } else {
                     local_failed_deletions.push_back(tick);
@@ -322,15 +344,7 @@ struct Task {
                 ++num_local_deletions;
             }
             if (settings.sleep_between_operations > 0us) {
-                auto dest = std::chrono::nanoseconds{dist(gen)};
-#ifdef THROUGHPUT
-                auto now = get_time_point();
-                do {
-                    _mm_pause();
-                } while ((get_time_point() - now) < dest);
-#else
-                std::this_thread::sleep_for(dest);
-#endif
+                std::this_thread::sleep_for(std::chrono::nanoseconds{dist(gen)});
             }
         }
         ctx.synchronize(stage++, []() { std::clog << "done" << std::endl; });
@@ -366,7 +380,7 @@ int main(int argc, char* argv[]) {
        "(default: uniform)", cxxopts::value<std::string>(), "ARG")
       ("j,threads", "Specify the number of threads "
        "(default: 4)", cxxopts::value<unsigned int>(), "NUMBER")
-      ("s,sleep", "Specify the sleep time between operations in ns"
+      ("w,sleep", "Specify the sleep time between operations in ns"
        "(default: 0)", cxxopts::value<unsigned int>(), "NUMBER")
       ("d,distribution", "Specify the key distribution as one of \"uniform\", \"dijkstra\", \"ascending\", \"descending\", \"threadid\" "
        "(default: uniform)", cxxopts::value<std::string>(), "ARG")
@@ -374,6 +388,8 @@ int main(int argc, char* argv[]) {
        "(default: MAX)", cxxopts::value<key_type>(), "NUMBER")
       ("l,min", "Specify the min key "
        "(default: 0)", cxxopts::value<key_type>(), "NUMBER")
+      ("s,seed", "Specify the initial seed"
+       "(default: 0)", cxxopts::value<std::uint32_t>(), "NUMBER")
 #ifdef THROUGHPUT
       ("t,time", "Specify the test timeout in ms "
        "(default: 3000)", cxxopts::value<unsigned int>(), "NUMBER")
@@ -446,6 +462,9 @@ int main(int argc, char* argv[]) {
             settings.min_num_delete_operations = result["deletions"].as<std::size_t>();
         }
 #endif
+        if (result.count("seed") > 0) {
+            settings.seed = result["seed"].as<std::uint32_t>();
+        }
     } catch (cxxopts::OptionParseException const& e) {
         std::cerr << e.what() << std::endl;
         return 1;
@@ -483,20 +502,28 @@ int main(int argc, char* argv[]) {
               << "Key distribution: "
               << KeyGenerator::distribution_names[static_cast<std::size_t>(settings.key_distribution)] << "\n\t"
               << "Dijkstra min increase: " << settings.dijkstra_min_increase << "\n\t"
-              << "Dijkstra max increase: " << settings.dijkstra_max_increase;
+              << "Dijkstra max increase: " << settings.dijkstra_max_increase << "\n\t"
+              << "Seed: " << settings.seed;
     std::clog << "\n\n";
 
     std::clog << "Using priority queue: " << PriorityQueue::description() << '\n';
+#ifdef PQ_IS_WRAPPER
     PriorityQueue pq{settings.num_threads};
+#else
+    PriorityQueue pq{settings.num_threads, settings.seed};
+#endif
 
 #ifdef QUALITY
-    insertions = new std::vector<LogEntry>[settings.num_threads];
-    deletions = new std::vector<LogEntry>[settings.num_threads];
+    insertions = new std::vector<InsertionLogEntry>[settings.num_threads];
+    deletions = new std::vector<DeletionLogEntry>[settings.num_threads];
     failed_deletions = new std::vector<tick_type>[settings.num_threads];
     num_delete_operations = 0;
 #else
     dummy_result = new DummyResult[settings.num_threads];
 #endif
+    std::seed_seq seq{settings.seed + 1};
+    thread_seeds = new std::uint32_t[settings.num_threads];
+    seq.generate(thread_seeds, thread_seeds + settings.num_threads);
     num_insertions = 0;
     num_deletions = 0;
     num_failed_deletions = 0;
@@ -525,15 +552,14 @@ int main(int argc, char* argv[]) {
 #else
     std::cout << settings.num_threads << '\n';
     for (unsigned int t = 0; t < settings.num_threads; ++t) {
-        for (auto const& [tick, key, value] : insertions[t]) {
-            std::cout << "i " << t << ' ' << tick << ' ' << key << ' ' << get_thread_id(value) << ' '
-                      << get_elem_id(value) << '\n';
+        for (auto const& [tick, key] : insertions[t]) {
+            std::cout << "i " << t << ' ' << tick << ' ' << key << '\n';
         }
     }
 
     for (unsigned int t = 0; t < settings.num_threads; ++t) {
-        for (auto const& [tick, key, value] : deletions[t]) {
-            std::cout << "d " << t << ' ' << tick << ' ' << key << ' ' << get_thread_id(value) << ' '
+        for (auto const& [tick, value] : deletions[t]) {
+            std::cout << "d " << t << ' ' << tick << ' ' << get_thread_id(value) << ' '
                       << get_elem_id(value) << '\n';
         }
     }
@@ -550,5 +576,6 @@ int main(int argc, char* argv[]) {
     delete[] deletions;
     delete[] failed_deletions;
 #endif
+    delete[] thread_seeds;
     return 0;
 }
