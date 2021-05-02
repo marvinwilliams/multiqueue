@@ -124,6 +124,7 @@ generate_mq_target(deletebufferingmq PQ_MQ_DELETE_BUFFERING)
 generate_mq_target(insertbufferingmq PQ_MQ_INSERT_BUFFERING)
 generate_mq_target(fullbufferingmq PQ_MQ_FULL_BUFFERING)
 generate_mq_target(mergingmq PQ_MQ_MERGING)
+generate_mq_target(intmq PQ_MQ_INT)
 
 function(add_mq_variants priority_queue_target)
   get_property(name TARGET ${priority_queue_target} PROPERTY pq_name)
@@ -150,6 +151,7 @@ add_mq_variants(deletebufferingmq)
 add_mq_variants(insertbufferingmq)
 add_mq_variants(fullbufferingmq)
 add_mq_variants(mergingmq)
+add_mq_variants(intmq)
 
 set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/external")
 

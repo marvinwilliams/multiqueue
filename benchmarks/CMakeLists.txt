@@ -116,6 +116,26 @@ function(add_fullbufferingmq_configuration c k ibs dbs)
   # add_benchmarks_for(${target_name}_numa_pheromone)
 endfunction()
 
+function(add_intmq_configuration c k ibs dbs)
+  get_property(name TARGET intmq PROPERTY pq_name)
+  set(target_name ${name}_c_${c}_k_${k}_ibs_${ibs}_dbs_${dbs})
+  add_library(${target_name} INTERFACE)
+  target_link_libraries(${target_name} INTERFACE intmq)
+  target_compile_definitions(${target_name}
+    INTERFACE
+      MQ_CONFIG_C=${c}
+      MQ_CONFIG_K=${k}
+      MQ_CONFIG_DELETION_BUFFER_SIZE=${dbs}
+      MQ_CONFIG_INSERTION_BUFFER_SIZE=${ibs}
+      )
+  set_property(TARGET ${target_name} PROPERTY pq_name ${target_name})
+  add_mq_variants(${target_name})
+  # add_benchmarks_for(${target_name})
+  # add_benchmarks_for(${target_name}_pheromone)
+  add_benchmarks_for(${target_name}_numa)
+  # add_benchmarks_for(${target_name}_numa_pheromone)
+endfunction()
+
 function(add_mergingmq_configuration c k ns)
   get_property(name TARGET mergingmq PROPERTY pq_name)
   set(target_name ${name}_c_${c}_k_${k}_ns_${ns})
@@ -144,6 +164,14 @@ add_nobufferingmq_configuration(4 8)
 add_nobufferingmq_configuration(4 16)
 
 add_fullbufferingmq_configuration(2 1 16 16)
+
+add_intmq_configuration(4 1 4 4)
+add_intmq_configuration(4 8 4 4)
+add_intmq_configuration(8 1 4 4)
+add_intmq_configuration(8 16 4 4)
+add_intmq_configuration(16 1 4 4)
+add_intmq_configuration(16 64 4 4)
+add_intmq_configuration(4 1 16 16)
 
 add_fullbufferingmq_configuration(4 1 4 4)
 add_fullbufferingmq_configuration(4 1 8 8)
