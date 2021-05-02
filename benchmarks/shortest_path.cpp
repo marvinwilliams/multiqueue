@@ -287,7 +287,7 @@ int main(int argc, char* argv[]) {
     std::vector<Distance> distances(graph.nodes.size() - 1);
     for (unsigned int threads = 1; threads <= settings.num_threads; threads = 2 * threads) {
         for (std::size_t i = 0; i + 1 < graph.nodes.size(); ++i) {
-            distances[i].distance = std::numeric_limits<std::uint32_t>::max();
+            distances[i].distance = std::numeric_limits<std::uint32_t>::max() - 1;
         }
         idle_counter = 0;
         idle_state = new IdleState[threads]();

@@ -98,12 +98,11 @@ struct alignas(Configuration::NumaFriendly ? PAGESIZE : 2 * L1_CACHE_LINESIZE) L
                                    typename Configuration::SiftStrategy, typename Configuration::HeapAllocator>;
     static constexpr uint32_t lock_mask = static_cast<uint32_t>(1) << 31;
     static constexpr uint32_t pheromone_mask = lock_mask - 1;
-    static constexpr auto max_key = std::numeric_limits<Key>::max();
+    static constexpr Key max_key = std::numeric_limits<Key>::max();
 
     mutable std::atomic_uint32_t guard = Configuration::WithPheromones ? pheromone_mask : 0;
     std::atomic<Key> top_key;
-    alignas(L1_CACHE_LINESIZE)
-        util::buffer<typename heap_type::value_type, Configuration::InsertionBufferSize> insertion_buffer;
+    util::buffer<typename heap_type::value_type, Configuration::InsertionBufferSize> insertion_buffer;
     util::ring_buffer<typename heap_type::value_type, Configuration::DeletionBufferSize> deletion_buffer;
 
     heap_type heap;
@@ -126,11 +125,6 @@ struct alignas(Configuration::NumaFriendly ? PAGESIZE : 2 * L1_CACHE_LINESIZE) L
             heap.extract_top(tmp);
             deletion_buffer.push_back(std::move(tmp));
         }
-        if (deletion_buffer.empty()) {
-            top_key.store(max_key, std::memory_order_release);
-        } else {
-            top_key.store(deletion_buffer.front().first, std::memory_order_release);
-        }
     }
 
     bool extract_top(typename heap_type::value_type &retval) {
@@ -141,6 +135,11 @@ struct alignas(Configuration::NumaFriendly ? PAGESIZE : 2 * L1_CACHE_LINESIZE) L
         deletion_buffer.pop_front();
         if (deletion_buffer.empty()) {
             refresh_top();
+        }
+        if (deletion_buffer.empty()) {
+            top_key.store(max_key, std::memory_order_release);
+        } else {
+            top_key.store(deletion_buffer.front().first, std::memory_order_release);
         }
         return true;
     };
@@ -257,11 +256,6 @@ struct alignas(Configuration::NumaFriendly ? PAGESIZE
             std::move(insertion_buffer.begin(), insertion_buffer.end(), std::back_inserter(deletion_buffer));
             insertion_buffer.clear();
         }
-        if (deletion_buffer.empty()) {
-            top_key.store(max_key, std::memory_order_release);
-        } else {
-            top_key.store(deletion_buffer.front().first, std::memory_order_release);
-        }
     }
 
     bool extract_top(typename heap_type::value_type &retval) {
@@ -272,6 +266,11 @@ struct alignas(Configuration::NumaFriendly ? PAGESIZE
         deletion_buffer.pop_front();
         if (deletion_buffer.empty()) {
             refresh_top();
+        }
+        if (deletion_buffer.empty()) {
+            top_key.store(max_key, std::memory_order_release);
+        } else {
+            top_key.store(deletion_buffer.front().first, std::memory_order_release);
         }
         return true;
     };
@@ -428,18 +427,12 @@ class int_multiqueue : private int_multiqueue_base<Key, T> {
 
     template <unsigned int K = Configuration::K, std::enable_if_t<(K > 1), int> = 0>
     void push(Handle handle, value_type const &value) {
-        if (thread_data_[handle.id_].insert_count == 0) {
-            thread_data_[handle.id_].insert_index = thread_data_[handle.id_].get_random_index();
-            thread_data_[handle.id_].insert_count = Configuration::K;
-        }
-        size_type index = thread_data_[handle.id_].insert_index;
-        if (!pq_list_[index].try_lock(
-                handle.id_,
-                !Configuration::WithPheromones || thread_data_[handle.id_].insert_count == Configuration::K)) {
+        auto& index = thread_data_[handle.id_].insert_index;
+        if (thread_data_[handle.id_].insert_count == 0 ||
+            !pq_list_[index].try_lock(handle.id_, false)) {
             do {
                 index = thread_data_[handle.id_].get_random_index();
             } while (!pq_list_[index].try_lock(handle.id_, true));
-            thread_data_[handle.id_].insert_index = index;
             thread_data_[handle.id_].insert_count = Configuration::K;
         }
         pq_list_[index].push(value);
@@ -457,8 +450,8 @@ class int_multiqueue : private int_multiqueue_base<Key, T> {
         do {
             first_index = thread_data_[handle.id_].get_random_index();
             second_index = thread_data_[handle.id_].get_random_index();
-            first_key = pq_list_[first_index].top_key.load(std::memory_order_acquire);
-            second_key = pq_list_[second_index].top_key.load(std::memory_order_acquire);
+            first_key = pq_list_[first_index].top_key.load(std::memory_order_relaxed);
+            second_key = pq_list_[second_index].top_key.load(std::memory_order_relaxed);
             if (second_key < first_key) {
                 first_index = second_index;
                 first_key = second_key;
@@ -481,8 +474,8 @@ class int_multiqueue : private int_multiqueue_base<Key, T> {
         }
         auto &first_index = thread_data_[handle.id_].extract_index[0];
         auto &second_index = thread_data_[handle.id_].extract_index[1];
-        Key first_key = pq_list_[first_index].top_key.load(std::memory_order_acquire);
-        Key second_key = pq_list_[second_index].top_key.load(std::memory_order_acquire);
+        Key first_key = pq_list_[first_index].top_key.load(std::memory_order_relaxed);
+        Key second_key = pq_list_[second_index].top_key.load(std::memory_order_relaxed);
 
         if (first_key == max_key && second_key == max_key) {
             thread_data_[handle.id_].extract_count = 0;
@@ -495,12 +488,11 @@ class int_multiqueue : private int_multiqueue_base<Key, T> {
         }
 
         if (!pq_list_[first_index].try_lock(handle.id_, thread_data_[handle.id_].extract_count == Configuration::K)) {
-            thread_data_[handle.id_].extract_count = Configuration::K;
             do {
                 first_index = thread_data_[handle.id_].get_random_index();
                 second_index = thread_data_[handle.id_].get_random_index();
-                first_key = pq_list_[first_index].top_key.load(std::memory_order_acquire);
-                second_key = pq_list_[second_index].top_key.load(std::memory_order_acquire);
+                first_key = pq_list_[first_index].top_key.load(std::memory_order_relaxed);
+                second_key = pq_list_[second_index].top_key.load(std::memory_order_relaxed);
                 if (first_key == max_key && second_key == max_key) {
                     thread_data_[handle.id_].extract_count = 0;
                     return false;
@@ -510,6 +502,7 @@ class int_multiqueue : private int_multiqueue_base<Key, T> {
                     std::swap(first_key, second_key);
                 }
             } while (!pq_list_[first_index].try_lock(handle.id_, true));
+            thread_data_[handle.id_].extract_count = Configuration::K;
         }
 
         bool success = pq_list_[first_index].extract_top(retval);

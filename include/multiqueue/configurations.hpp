@@ -45,7 +45,7 @@ struct Default {
     // Make multiqueue numa friendly (induces more overhead)
     static constexpr bool NumaFriendly = false;
     // degree of the heap tree (effect only if merge heap deactivated)
-    static constexpr unsigned int HeapDegree = 4;
+    static constexpr unsigned int HeapDegree = 8;
     // Number of elements to preallocate in each queue
     static constexpr std::size_t ReservePerQueue = 1'000'000;
     using HeapAllocator = std::allocator<int>;

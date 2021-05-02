@@ -70,7 +70,6 @@ struct Inserter {
 
     Policy policy;
 
-    std::seed_seq seq;
     std::mt19937 gen;
     std::uniform_int_distribution<std::uint64_t> dist;
     std::uint64_t random_bits;
@@ -106,11 +105,12 @@ struct KeyGenerator {
 
     Distribution distribution;
 
-    std::seed_seq seq;
     std::mt19937 gen;
     std::uniform_int_distribution<key_type> dist;
 
     key_type current;
+    key_type min_key;
+    key_type max_key;
 
     explicit KeyGenerator(unsigned int id, Settings const& settings, std::uint32_t seed);
 
@@ -120,11 +120,11 @@ struct KeyGenerator {
             case Distribution::ThreadId:
                 return dist(gen);
             case Distribution::Dijkstra:
-                return current++ + dist(gen);
+                return current + dist.b() <= max_key ? current++ + dist(gen) : max_key;
             case Distribution::Ascending:
-                return current++;
+                return current < max_key ? current++ : max_key;
             case Distribution::Descending:
-                return current--;
+                return current > min_key ? current-- : min_key;
             default:
                 assert(false);
                 return key_type{};
@@ -144,14 +144,16 @@ struct Settings {
     Inserter::Policy insert_policy = Inserter::Policy::Uniform;
     KeyGenerator::Distribution key_distribution = KeyGenerator::Distribution::Uniform;
     value_type min_key = std::numeric_limits<value_type>::min();
-    value_type max_key = std::numeric_limits<value_type>::max();
+    value_type max_key = std::numeric_limits<value_type>::max() - 1;
     value_type dijkstra_min_increase = 1;
     value_type dijkstra_max_increase = 100;
     std::uint32_t seed;
 };
 
 Inserter::Inserter(unsigned int id, Settings const& settings, std::uint32_t seed)
-    : policy{settings.insert_policy}, seq{seed}, gen(seq), random_bits{0}, bit_pos{0} {
+    : policy{settings.insert_policy},  random_bits{0}, bit_pos{0} {
+    std::seed_seq seq{seed};
+    gen.seed(seq);
     switch (policy) {
         case Policy::Split:
         case Policy::Alternating:
@@ -165,7 +167,9 @@ Inserter::Inserter(unsigned int id, Settings const& settings, std::uint32_t seed
 }
 
 KeyGenerator::KeyGenerator(unsigned int id, Settings const& settings, std::uint32_t seed)
-    : distribution{settings.key_distribution}, seq{seed}, gen(seq)   {
+    : distribution{settings.key_distribution}   {
+    std::seed_seq seq{seed};
+    gen.seed(seq);
     switch (distribution) {
         case Distribution::Uniform:
             dist = std::uniform_int_distribution<key_type>(settings.min_key, settings.max_key);
