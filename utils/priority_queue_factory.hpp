@@ -21,7 +21,7 @@
 #include "linden.hpp"
 #elif defined PQ_SPRAYLIST
 #include "spraylist.hpp"
-#elif defined PQ_MQ_INT
+#elif defined PQ_MQ_INT || defined PQ_MQ_INT_MERGING
 #include "multiqueue/configurations.hpp"
 #include "multiqueue/int_multiqueue.hpp"
 #else
@@ -83,7 +83,7 @@ using BaseConfig = multiqueue::configuration::DeleteBuffering;
 using BaseConfig = multiqueue::configuration::InsertBuffering;
 #elif defined PQ_MQ_FULL_BUFFERING || defined PQ_MQ_INT
 using BaseConfig = multiqueue::configuration::FullBuffering;
-#elif defined PQ_MQ_MERGING
+#elif defined PQ_MQ_MERGING || defined PQ_MQ_INT_MERGING
 using BaseConfig = multiqueue::configuration::Merging;
 #else
 #error No multiqueue variant selected
@@ -118,7 +118,7 @@ struct Config : BaseConfig {
 
 template <typename KeyType, typename ValueType>
 struct PriorityQueueFactory {
-#ifdef PQ_MQ_INT
+#if defined PQ_MQ_INT || defined PQ_MQ_INT_MERGING
     using type = multiqueue::int_multiqueue<KeyType, ValueType, Config>;
 #else
     using type = multiqueue::multiqueue<KeyType, ValueType, std::less<KeyType>, Config>;

@@ -90,6 +90,243 @@ struct int_multiqueue_base {
     }
 };
 
+template <typename Key, typename T, typename Configuration, bool UseMergeHeap>
+struct alignas(Configuration::NumaFriendly ? PAGESIZE : 2 * L1_CACHE_LINESIZE) LocalPriorityQueue {
+    using allocator_type = typename Configuration::HeapAllocator;
+    using heap_type =
+        sequential::key_value_heap<Key, T, std::less<Key>, Configuration::HeapDegree,
+                                   typename Configuration::SiftStrategy, typename Configuration::HeapAllocator>;
+    static constexpr uint32_t lock_mask = static_cast<uint32_t>(1) << 31;
+    static constexpr uint32_t pheromone_mask = lock_mask - 1;
+    static constexpr auto max_key = std::numeric_limits<Key>::max();
+
+    mutable std::atomic_uint32_t guard = Configuration::WithPheromones ? pheromone_mask : 0;
+    std::atomic<Key> top_key;
+    alignas(L1_CACHE_LINESIZE)
+        util::buffer<typename heap_type::value_type, Configuration::InsertionBufferSize> insertion_buffer;
+    util::ring_buffer<typename heap_type::value_type, Configuration::DeletionBufferSize> deletion_buffer;
+
+    heap_type heap;
+
+    explicit LocalPriorityQueue(allocator_type const &alloc = allocator_type()) : top_key(max_key), heap(alloc) {
+    }
+
+    inline void flush_insertion_buffer() {
+        for (auto &v : insertion_buffer) {
+            heap.insert(v);
+        }
+        insertion_buffer.clear();
+    }
+
+    void refresh_top() {
+        assert(deletion_buffer.empty());
+        flush_insertion_buffer();
+        typename heap_type::value_type tmp;
+        for (std::size_t i = 0; i < Configuration::DeletionBufferSize && !heap.empty(); ++i) {
+            heap.extract_top(tmp);
+            deletion_buffer.push_back(std::move(tmp));
+        }
+        if (deletion_buffer.empty()) {
+            top_key.store(max_key, std::memory_order_release);
+        } else {
+            top_key.store(deletion_buffer.front().first, std::memory_order_release);
+        }
+    }
+
+    bool extract_top(typename heap_type::value_type &retval) {
+        if (deletion_buffer.empty()) {
+            return false;
+        }
+        retval = std::move(deletion_buffer.front());
+        deletion_buffer.pop_front();
+        if (deletion_buffer.empty()) {
+            refresh_top();
+        }
+        return true;
+    };
+
+    void push(typename heap_type::value_type const &value) {
+        if (deletion_buffer.empty() || value.first < deletion_buffer.back().first) {
+            if (deletion_buffer.full()) {
+                if (insertion_buffer.full()) {
+                    flush_insertion_buffer();
+                    heap.insert(std::move(deletion_buffer.back()));
+                } else {
+                    insertion_buffer.push_back(std::move(deletion_buffer.back()));
+                }
+                deletion_buffer.pop_back();
+            }
+            std::size_t pos = deletion_buffer.size();
+            for (; pos > 0 && value.first < deletion_buffer[pos - 1].first; --pos) {
+            }
+            deletion_buffer.insert_at(pos, value);
+            if (pos == 0) {
+                top_key.store(deletion_buffer.front().first, std::memory_order_release);
+            }
+            return;
+        }
+        if (insertion_buffer.full()) {
+            flush_insertion_buffer();
+            heap.insert(value);
+            return;
+        } else {
+            insertion_buffer.push_back(value);
+        }
+    }
+
+    inline bool empty() const noexcept {
+        return deletion_buffer.empty();
+    }
+
+    inline bool try_lock(uint32_t id, bool claiming) const noexcept {
+        uint32_t lock_status = guard.load(std::memory_order_relaxed);
+        if ((lock_status >> 31) == 1) {
+            return false;
+        }
+        if (Configuration::WithPheromones && !claiming && lock_status != static_cast<uint32_t>(id)) {
+            return false;
+        }
+        uint32_t const locked = Configuration::WithPheromones ? (lock_mask | static_cast<uint32_t>(id)) : lock_mask;
+        return guard.compare_exchange_strong(lock_status, locked, std::memory_order_acquire, std::memory_order_relaxed);
+    }
+
+    inline void unlock(uint32_t id) const noexcept {
+        assert(guard == (Configuration::WithPheromones ? (lock_mask | static_cast<uint32_t>(id)) : lock_mask));
+        guard.store(Configuration::WithPheromones ? static_cast<uint32_t>(id) : 0, std::memory_order_release);
+    }
+};
+
+template <typename Key, typename T, typename Configuration>
+struct alignas(Configuration::NumaFriendly ? PAGESIZE
+                                           : 2 * L1_CACHE_LINESIZE) LocalPriorityQueue<Key, T, Configuration, true> {
+    using heap_type = sequential::key_value_merge_heap<Key, T, std::less<Key>, Configuration::NodeSize,
+                                                       typename Configuration::HeapAllocator>;
+    using allocator_type = typename Configuration::HeapAllocator;
+
+    static constexpr uint32_t lock_mask = static_cast<uint32_t>(1) << 31;
+    static constexpr uint32_t pheromone_mask = lock_mask - 1;
+    static constexpr auto max_key = std::numeric_limits<Key>::max();
+
+    mutable std::atomic_uint32_t guard = Configuration::WithPheromones ? pheromone_mask : 0;
+    std::atomic<Key> top_key;
+    alignas(L1_CACHE_LINESIZE) util::buffer<typename heap_type::value_type, Configuration::NodeSize> insertion_buffer;
+    util::ring_buffer<typename heap_type::value_type, Configuration::NodeSize * 2> deletion_buffer;
+    heap_type heap;
+
+    explicit LocalPriorityQueue(allocator_type const &alloc = allocator_type()) : heap(alloc) {
+    }
+
+    inline void flush_insertion_buffer() {
+        assert(insertion_buffer.full());
+        std::sort(insertion_buffer.begin(), insertion_buffer.end(),
+                  [&](auto const &lhs, auto const &rhs) { return lhs.first < rhs.first; });
+        for (std::size_t i = 0; i < insertion_buffer.size(); i += Configuration::NodeSize) {
+            heap.insert(insertion_buffer.begin() + (i * Configuration::NodeSize),
+                        insertion_buffer.begin() + ((i + 1) * Configuration::NodeSize));
+        }
+        insertion_buffer.clear();
+    }
+
+    void refresh_top() {
+        assert(deletion_buffer.empty());
+        if (insertion_buffer.full()) {
+            flush_insertion_buffer();
+        }
+        if (!heap.empty()) {
+            if (!insertion_buffer.empty()) {
+                auto insert_it = std::partition(insertion_buffer.begin(), insertion_buffer.end(),
+                                                [&](auto const &v) { return heap.top_node().back().first < v.first; });
+                std::sort(insert_it, insertion_buffer.end(),
+                          [&](auto const &lhs, auto const &rhs) { return rhs.first < lhs.first; });
+                auto heap_it = heap.top_node().begin();
+                for (auto current = insert_it; current != insertion_buffer.end(); ++current) {
+                    while (heap_it->first < current->first) {
+                        deletion_buffer.push_back(std::move(*heap_it++));
+                    }
+                    deletion_buffer.push_back(std::move(*current));
+                }
+                insertion_buffer.set_size(static_cast<std::size_t>(insert_it - insertion_buffer.begin()));
+                std::move(heap_it, heap.top_node().end(), std::back_inserter(deletion_buffer));
+            } else {
+                std::move(heap.top_node().begin(), heap.top_node().end(), std::back_inserter(deletion_buffer));
+            }
+            heap.pop_node();
+        } else if (!insertion_buffer.empty()) {
+            std::sort(insertion_buffer.begin(), insertion_buffer.end(),
+                      [&](auto const &lhs, auto const &rhs) { return lhs.first < rhs.first; });
+            std::move(insertion_buffer.begin(), insertion_buffer.end(), std::back_inserter(deletion_buffer));
+            insertion_buffer.clear();
+        }
+        if (deletion_buffer.empty()) {
+            top_key.store(max_key, std::memory_order_release);
+        } else {
+            top_key.store(deletion_buffer.front().first, std::memory_order_release);
+        }
+    }
+
+    bool extract_top(typename heap_type::value_type &retval) {
+        if (deletion_buffer.empty()) {
+            return false;
+        }
+        retval = std::move(deletion_buffer.front());
+        deletion_buffer.pop_front();
+        if (deletion_buffer.empty()) {
+            refresh_top();
+        }
+        return true;
+    };
+
+    void push(typename heap_type::value_type const &value) {
+        if (deletion_buffer.empty() || value.first < deletion_buffer.back().first) {
+            if (deletion_buffer.full()) {
+                if (insertion_buffer.full()) {
+                    flush_insertion_buffer();
+                }
+                insertion_buffer.push_back(std::move(deletion_buffer.back()));
+                deletion_buffer.pop_back();
+            }
+            std::size_t pos = deletion_buffer.size();
+            for (; pos > 0 && heap.get_comparator()(value.first, deletion_buffer[pos - 1].first); --pos) {
+            }
+            deletion_buffer.insert_at(pos, value);
+            if (pos == 0) {
+                top_key.store(deletion_buffer.front().first, std::memory_order_release);
+            }
+            return;
+        }
+        if (insertion_buffer.full()) {
+            flush_insertion_buffer();
+        }
+        insertion_buffer.push_back(value);
+    }
+
+    void pop() {
+        assert(!deletion_buffer.empty());
+        deletion_buffer.pop_front();
+    }
+
+    inline bool empty() const noexcept {
+        return deletion_buffer.empty();
+    }
+
+    inline bool try_lock(uint32_t id, bool claiming) const noexcept {
+        uint32_t lock_status = guard.load(std::memory_order_relaxed);
+        if ((lock_status >> 31) == 1) {
+            return false;
+        }
+        if (Configuration::WithPheromones && !claiming && lock_status != static_cast<uint32_t>(id)) {
+            return false;
+        }
+        uint32_t const locked = Configuration::WithPheromones ? (lock_mask | static_cast<uint32_t>(id)) : lock_mask;
+        return guard.compare_exchange_strong(lock_status, locked, std::memory_order_acquire, std::memory_order_relaxed);
+    }
+
+    inline void unlock(uint32_t id) const noexcept {
+        assert(guard == (Configuration::WithPheromones ? (lock_mask | static_cast<uint32_t>(id)) : lock_mask));
+        guard.store(Configuration::WithPheromones ? static_cast<uint32_t>(id) : 0, std::memory_order_release);
+    }
+};
+
 template <typename Key, typename T, typename Configuration = configuration::Default,
           typename Allocator = std::allocator<Key>>
 class int_multiqueue : private int_multiqueue_base<Key, T> {
@@ -97,7 +334,8 @@ class int_multiqueue : private int_multiqueue_base<Key, T> {
 
    private:
     using base_type = int_multiqueue_base<Key, T>;
-    static constexpr auto max_key = std::numeric_limits<Key>::max();
+    using local_queue_type = LocalPriorityQueue<Key, T, Configuration, Configuration::UseMergeHeap>;
+    static constexpr auto max_key = local_queue_type::max_key;
 
    public:
     using allocator_type = Allocator;
@@ -118,117 +356,14 @@ class int_multiqueue : private int_multiqueue_base<Key, T> {
     };
 
    private:
-    struct alignas(Configuration::NumaFriendly ? PAGESIZE : 2 * L1_CACHE_LINESIZE) LocalPriorityQueue {
-        using allocator_type = typename Configuration::HeapAllocator;
-        using heap_type =
-            sequential::key_value_heap<Key, T, std::less<Key>, Configuration::HeapDegree,
-                                       typename Configuration::SiftStrategy, typename Configuration::HeapAllocator>;
-        static constexpr uint32_t lock_mask = static_cast<uint32_t>(1) << 31;
-        static constexpr uint32_t pheromone_mask = lock_mask - 1;
-        mutable std::atomic_uint32_t guard = Configuration::WithPheromones ? pheromone_mask : 0;
-        std::atomic<Key> top_key;
-        util::buffer<typename heap_type::value_type, Configuration::InsertionBufferSize> insertion_buffer;
-        util::ring_buffer<typename heap_type::value_type, Configuration::DeletionBufferSize> deletion_buffer;
+    static_assert(std::is_same_v<value_type, typename local_queue_type::heap_type::value_type>);
 
-        heap_type heap;
-
-        inline void flush_insertion_buffer() {
-            for (auto &v : insertion_buffer) {
-                heap.insert(v);
-            }
-            insertion_buffer.clear();
-        }
-
-        void refresh_top() {
-            assert(deletion_buffer.empty());
-            flush_insertion_buffer();
-            typename heap_type::value_type tmp;
-            for (std::size_t i = 0; i < Configuration::DeletionBufferSize && !heap.empty(); ++i) {
-                heap.extract_top(tmp);
-                deletion_buffer.push_back(std::move(tmp));
-            }
-        }
-
-        bool extract_top(typename heap_type::value_type &retval) {
-            if (deletion_buffer.empty()) {
-                return false;
-            }
-            retval = std::move(deletion_buffer.front());
-            deletion_buffer.pop_front();
-            if (deletion_buffer.empty()) {
-                refresh_top();
-            }
-            if (deletion_buffer.empty()) {
-                top_key.store(max_key, std::memory_order_release);
-            } else {
-                top_key.store(deletion_buffer.front().first, std::memory_order_release);
-            }
-            return true;
-        };
-
-        void push(typename heap_type::value_type const &value) {
-            if (deletion_buffer.empty() || value.first < deletion_buffer.back().first) {
-                if (deletion_buffer.full()) {
-                    if (insertion_buffer.full()) {
-                        flush_insertion_buffer();
-                        heap.insert(std::move(deletion_buffer.back()));
-                    } else {
-                        insertion_buffer.push_back(std::move(deletion_buffer.back()));
-                    }
-                    deletion_buffer.pop_back();
-                }
-                std::size_t pos = deletion_buffer.size();
-                for (; pos > 0 && value.first < deletion_buffer[pos - 1].first; --pos) {
-                }
-                deletion_buffer.insert_at(pos, value);
-                if (pos == 0) {
-                    top_key.store(deletion_buffer.front().first, std::memory_order_release);
-                }
-                return;
-            }
-            if (insertion_buffer.full()) {
-                flush_insertion_buffer();
-                heap.insert(value);
-                return;
-            } else {
-                insertion_buffer.push_back(value);
-            }
-        }
-
-        inline bool empty() const noexcept {
-            return deletion_buffer.empty();
-        }
-
-        explicit LocalPriorityQueue(allocator_type const &alloc = allocator_type()) : top_key(max_key), heap(alloc) {
-        }
-
-        inline bool try_lock(uint32_t id, bool claiming) const noexcept {
-            uint32_t lock_status = guard.load(std::memory_order_relaxed);
-            if ((lock_status >> 31) == 1) {
-                return false;
-            }
-            if (Configuration::WithPheromones && !claiming && lock_status != static_cast<uint32_t>(id)) {
-                return false;
-            }
-            uint32_t const locked = Configuration::WithPheromones ? (lock_mask | static_cast<uint32_t>(id)) : lock_mask;
-            return guard.compare_exchange_strong(lock_status, locked, std::memory_order_acquire,
-                                                 std::memory_order_relaxed);
-        }
-
-        inline void unlock(uint32_t id) const noexcept {
-            assert(guard == (Configuration::WithPheromones ? (lock_mask | static_cast<uint32_t>(id)) : lock_mask));
-            guard.store(Configuration::WithPheromones ? static_cast<uint32_t>(id) : 0, std::memory_order_release);
-        }
-    };
-
-    static_assert(std::is_same_v<value_type, typename LocalPriorityQueue::heap_type::value_type>);
-
-    using queue_alloc_type = typename allocator_type::template rebind<LocalPriorityQueue>::other;
+    using queue_alloc_type = typename allocator_type::template rebind<local_queue_type>::other;
     using alloc_traits = std::allocator_traits<queue_alloc_type>;
     using base_type::thread_data_;
 
    private:
-    LocalPriorityQueue *pq_list_;
+    local_queue_type *pq_list_;
     size_type pq_list_size_;
     queue_alloc_type alloc_;
 
@@ -407,13 +542,17 @@ class int_multiqueue : private int_multiqueue_base<Key, T> {
         ss << "int multiqueue\n\t";
         ss << "C: " << Configuration::C << "\n\t";
         ss << "K: " << Configuration::K << "\n\t";
-        if (Configuration::WithDeletionBuffer) {
-            ss << "Using deletion buffer with size: " << Configuration::DeletionBufferSize << "\n\t";
+        if (Configuration::UseMergeHeap) {
+            ss << "Using merge heap, node size: " << Configuration::NodeSize << "\n\t";
+        } else {
+            if (Configuration::WithDeletionBuffer) {
+                ss << "Using deletion buffer with size: " << Configuration::DeletionBufferSize << "\n\t";
+            }
+            if (Configuration::WithInsertionBuffer) {
+                ss << "Using insertion buffer with size: " << Configuration::InsertionBufferSize << "\n\t";
+            }
+            ss << "Heap degree: " << Configuration::HeapDegree << "\n\t";
         }
-        if (Configuration::WithInsertionBuffer) {
-            ss << "Using insertion buffer with size: " << Configuration::InsertionBufferSize << "\n\t";
-        }
-        ss << "Heap degree: " << Configuration::HeapDegree << "\n\t";
         if (Configuration::NumaFriendly) {
             ss << "Numa friendly\n\t";
 #ifndef HAVE_NUMA

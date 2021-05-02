@@ -136,6 +136,25 @@ function(add_intmq_configuration c k ibs dbs)
   # add_benchmarks_for(${target_name}_numa_pheromone)
 endfunction()
 
+function(add_intmergingmq_configuration c k ns)
+  get_property(name TARGET intmergingmq PROPERTY pq_name)
+  set(target_name ${name}_c_${c}_k_${k}_ns_${ns})
+  add_library(${target_name} INTERFACE)
+  target_link_libraries(${target_name} INTERFACE intmergingmq)
+  target_compile_definitions(${target_name}
+    INTERFACE
+      MQ_CONFIG_C=${c}
+      MQ_CONFIG_K=${k}
+      MQ_CONFIG_NODE_SIZE=${ns}
+      )
+  set_property(TARGET ${target_name} PROPERTY pq_name ${target_name})
+  add_mq_variants(${target_name})
+  # add_benchmarks_for(${target_name})
+  # add_benchmarks_for(${target_name}_pheromone)
+  add_benchmarks_for(${target_name}_numa)
+  # add_benchmarks_for(${target_name}_numa_pheromone)
+endfunction()
+
 function(add_mergingmq_configuration c k ns)
   get_property(name TARGET mergingmq PROPERTY pq_name)
   set(target_name ${name}_c_${c}_k_${k}_ns_${ns})
@@ -233,6 +252,28 @@ add_mergingmq_configuration(16 4 128)
 add_mergingmq_configuration(16 8 128)
 add_mergingmq_configuration(16 16 128)
 add_mergingmq_configuration(16 64 128)
+
+add_intmergingmq_configuration(4 1 8)
+add_intmergingmq_configuration(4 1 64)
+add_intmergingmq_configuration(4 1 128)
+add_intmergingmq_configuration(4 1 512)
+
+add_intmergingmq_configuration(4 4 128)
+add_intmergingmq_configuration(4 8 128)
+add_intmergingmq_configuration(4 16 128)
+add_intmergingmq_configuration(4 64 128)
+
+add_intmergingmq_configuration(8 1 128)
+add_intmergingmq_configuration(8 4 128)
+add_intmergingmq_configuration(8 8 128)
+add_intmergingmq_configuration(8 16 128)
+add_intmergingmq_configuration(8 64 128)
+
+add_intmergingmq_configuration(16 1 128)
+add_intmergingmq_configuration(16 4 128)
+add_intmergingmq_configuration(16 8 128)
+add_intmergingmq_configuration(16 16 128)
+add_intmergingmq_configuration(16 64 128)
 
 add_benchmarks_for(capq_wrapper)
 add_benchmarks_for(klsm256_wrapper)
