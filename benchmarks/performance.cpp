@@ -1,3 +1,4 @@
+#include <time.h>
 #include <x86intrin.h>
 #include <array>
 #include <atomic>
@@ -14,7 +15,6 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-#include <time.h>
 
 #include "cxxopts.hpp"
 #include "priority_queue_factory.hpp"
@@ -53,13 +53,13 @@ static inline tick_type get_tick_steady() noexcept {
 }
 
 static inline tick_type get_tick_realtime() noexcept {
-  timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);
-  return static_cast<tick_type>(ts.tv_sec * 1000000000 + ts.tv_nsec);
+    timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return static_cast<tick_type>(ts.tv_sec * 1000000000 + ts.tv_nsec);
 }
 
 static inline tick_type get_tick_rdtsc() noexcept {
-  return __rdtsc();
+    return __rdtsc();
 }
 
 struct Settings;
@@ -151,7 +151,7 @@ struct Settings {
 };
 
 Inserter::Inserter(unsigned int id, Settings const& settings, std::uint32_t seed)
-    : policy{settings.insert_policy},  random_bits{0}, bit_pos{0} {
+    : policy{settings.insert_policy}, random_bits{0}, bit_pos{0} {
     std::seed_seq seq{seed};
     gen.seed(seq);
     switch (policy) {
@@ -167,7 +167,7 @@ Inserter::Inserter(unsigned int id, Settings const& settings, std::uint32_t seed
 }
 
 KeyGenerator::KeyGenerator(unsigned int id, Settings const& settings, std::uint32_t seed)
-    : distribution{settings.key_distribution}   {
+    : distribution{settings.key_distribution} {
     std::seed_seq seq{seed};
     gen.seed(seq);
     switch (distribution) {
@@ -563,8 +563,7 @@ int main(int argc, char* argv[]) {
 
     for (unsigned int t = 0; t < settings.num_threads; ++t) {
         for (auto const& [tick, value] : deletions[t]) {
-            std::cout << "d " << t << ' ' << tick << ' ' << get_thread_id(value) << ' '
-                      << get_elem_id(value) << '\n';
+            std::cout << "d " << t << ' ' << tick << ' ' << get_thread_id(value) << ' ' << get_elem_id(value) << '\n';
         }
     }
 

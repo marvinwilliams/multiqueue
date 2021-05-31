@@ -80,7 +80,8 @@ struct multiqueue_base {
         }
     }
 
-    explicit multiqueue_base(unsigned int const num_threads, unsigned int const C, key_comparator const &comp, std::uint32_t seed)
+    explicit multiqueue_base(unsigned int const num_threads, unsigned int const C, key_comparator const &comp,
+                             std::uint32_t seed)
         : comp_(comp) {
         thread_data_ = new ThreadData[num_threads]();
         auto params = typename std::uniform_int_distribution<size_type>::param_type{0, num_threads * C - 1};
@@ -189,7 +190,8 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
     }
 
    public:
-    explicit multiqueue(unsigned int const num_threads, std::uint32_t seed = 0, allocator_type const &alloc = allocator_type())
+    explicit multiqueue(unsigned int const num_threads, std::uint32_t seed = 0,
+                        allocator_type const &alloc = allocator_type())
         : base_type{num_threads, Configuration::C, seed}, pq_list_size_{num_threads * Configuration::C}, alloc_(alloc) {
         assert(num_threads >= 1);
 #ifdef HAVE_NUMA
@@ -227,7 +229,9 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
 
     explicit multiqueue(unsigned int const num_threads, key_comparator const &comp, std::uint32_t seed = 0,
                         allocator_type const &alloc = allocator_type())
-        : base_type{num_threads, Configuration::C, comp, seed}, pq_list_size_{num_threads * Configuration::C}, alloc_(alloc) {
+        : base_type{num_threads, Configuration::C, comp, seed},
+          pq_list_size_{num_threads * Configuration::C},
+          alloc_(alloc) {
         assert(num_threads >= 1);
 #ifdef HAVE_NUMA
         if (Configuration::NumaFriendly) {

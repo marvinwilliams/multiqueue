@@ -59,7 +59,7 @@ struct int_multiqueue_base {
         std::mt19937 gen;
         std::uniform_int_distribution<size_type> dist;
         unsigned int insert_count = 0;
-        unsigned int extract_count = 0;
+        std::array<unsigned int, 2> extract_count = {0, 0};
         size_type insert_index;
         std::array<size_type, 2> extract_index;
 
@@ -467,10 +467,13 @@ class int_multiqueue : private int_multiqueue_base<Key, T> {
 
     template <unsigned int K = Configuration::K, std::enable_if_t<(K > 1), int> = 0>
     bool extract_top(Handle handle, value_type &retval) {
-        if (thread_data_[handle.id_].extract_count == 0) {
+        if (thread_data_[handle.id_].extract_count[0] == 0) {
             thread_data_[handle.id_].extract_index[0] = thread_data_[handle.id_].get_random_index();
+            thread_data_[handle.id_].extract_count[0] = Configuration::K;
+        }
+        if (thread_data_[handle.id_].extract_count[1] == 0) {
             thread_data_[handle.id_].extract_index[1] = thread_data_[handle.id_].get_random_index();
-            thread_data_[handle.id_].extract_count = Configuration::K;
+            thread_data_[handle.id_].extract_count[0] = Configuration::K;
         }
         auto &first_index = thread_data_[handle.id_].extract_index[0];
         auto &second_index = thread_data_[handle.id_].extract_index[1];
@@ -478,39 +481,49 @@ class int_multiqueue : private int_multiqueue_base<Key, T> {
         Key second_key = pq_list_[second_index].top_key.load(std::memory_order_relaxed);
 
         if (first_key == max_key && second_key == max_key) {
-            thread_data_[handle.id_].extract_count = 0;
+            thread_data_[handle.id_].extract_count[0] = 0;
+            thread_data_[handle.id_].extract_count[1] = 0;
             return false;
         }
 
         if (second_key < first_key) {
-            first_index = second_index;
+            std::swap(first_index, second_index);
             std::swap(first_key, second_key);
+            std::swap(thread_data_[handle.id_].extract_count[0], thread_data_[handle.id_].extract_count[1]);
         }
 
-        if (!pq_list_[first_index].try_lock(handle.id_, thread_data_[handle.id_].extract_count == Configuration::K)) {
+        if (!pq_list_[first_index].try_lock(handle.id_, thread_data_[handle.id_].extract_count[0] == Configuration::K)) {
             do {
                 first_index = thread_data_[handle.id_].get_random_index();
                 second_index = thread_data_[handle.id_].get_random_index();
                 first_key = pq_list_[first_index].top_key.load(std::memory_order_relaxed);
                 second_key = pq_list_[second_index].top_key.load(std::memory_order_relaxed);
                 if (first_key == max_key && second_key == max_key) {
-                    thread_data_[handle.id_].extract_count = 0;
+                    thread_data_[handle.id_].extract_count[0] = 0;
+                    thread_data_[handle.id_].extract_count[1] = 0;
                     return false;
                 }
                 if (second_key < first_key) {
-                    first_index = second_index;
-                    std::swap(first_key, second_key);
+                  std::swap(first_index, second_index);
+                  std::swap(first_key, second_key);
+                  std::swap(thread_data_[handle.id_].extract_count[0], thread_data_[handle.id_].extract_count[1]);
                 }
             } while (!pq_list_[first_index].try_lock(handle.id_, true));
-            thread_data_[handle.id_].extract_count = Configuration::K;
+            thread_data_[handle.id_].extract_count[0] = Configuration::K;
+            thread_data_[handle.id_].extract_count[1] = Configuration::K;
         }
 
         bool success = pq_list_[first_index].extract_top(retval);
         pq_list_[first_index].unlock(handle.id_);
-        if (success && second_key != max_key) {
-            --thread_data_[handle.id_].extract_count;
+        if (success) {
+            --thread_data_[handle.id_].extract_count[0];
         } else {
-            thread_data_[handle.id_].extract_count = 0;
+            thread_data_[handle.id_].extract_count[0] = 0;
+        }
+        if (second_key != max_key) {
+            --thread_data_[handle.id_].extract_count[1];
+        } else {
+            thread_data_[handle.id_].extract_count[1] = 0;
         }
         return success;
     }

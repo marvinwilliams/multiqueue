@@ -96,7 +96,7 @@ int main(int argc, char* argv[]) {
     }
     distances.resize(graph.nodes.size() - 1);
     for (std::size_t i = 0; i + 1 < graph.nodes.size(); ++i) {
-        distances[i] = std::numeric_limits<std::uint32_t>::max();
+        distances[i] = std::numeric_limits<std::uint32_t>::max() - 1;
     }
     std::clog << "done\n";
     std::clog << "Calculating shortest paths..." << std::flush;
