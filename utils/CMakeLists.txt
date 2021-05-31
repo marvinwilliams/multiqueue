@@ -29,7 +29,8 @@ target_compile_features(
 
 add_executable(evaluate_quality evaluate_quality.cpp)
 target_link_libraries(evaluate_quality PRIVATE multiqueue_internal)
-target_link_libraries_system(evaluate_quality PRIVATE cxxopts tlx)
+target_link_libraries_system(evaluate_quality PRIVATE cxxopts)
+target_compile_definitions(evaluate_quality PRIVATE TLX_BTREE_DEBUG)
 target_compile_features(
   evaluate_quality PRIVATE
   cxx_std_17
