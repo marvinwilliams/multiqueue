@@ -9,6 +9,3 @@
 	path = external/cxxopts
 	url = https://github.com/jarro2783/cxxopts.git
 	branch = v2.2.1
-[submodule "external/tlx"]
-	path = external/tlx
-	url = https://github.com/tlx/tlx.git
