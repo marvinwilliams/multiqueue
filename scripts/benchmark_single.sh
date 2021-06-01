@@ -23,22 +23,23 @@ mkdir -p ${result_dir}
 
 if [[ -x ${quality_bin} ]]; then
 	echo Starting quality benchmark >&2
-	for ((j=1;j<=$(nproc);j=2*j)); do
-		if [[ -f  "${log_dir}/evaluate_quality_${j}_stderr.txt" ]]; then
-			echo Quality benchmark exists, skipping... >&2
-		else
+	#for ((j=1;j<=$(nproc);j=2*j)); do
+	j=16
+		#if [[ -f  "${log_dir}/evaluate_quality_${j}_stderr.txt" ]]; then
+		#	echo Quality benchmark exists, skipping... >&2
+		#else
 			echo "${quality_bin} -j ${j}" >&2
 			${quality_bin} -j ${j} 2> "${log_dir}/quality_${j}_stderr.txt" | ${bin_dir}/utils/evaluate_quality -r "${result_dir}/rank_${j}.txt" -d "${result_dir}/delay_${j}.txt" -t "${result_dir}/top_delay_${j}.txt" 2> "${log_dir}/evaluate_quality_${j}_stderr.txt"
-		fi
-	done
+		#fi
+	#done
 else
 	echo Quality binary not executable, skipping >&2
 fi
 
 if [[ -x ${throughput_bin} ]]; then
-	if [[ -f "${result_dir}/throughput.txt" ]]; then
-		echo Throughput benchmark exists, skipping... >&2
-	else
+#	if [[ -f "${result_dir}/throughput.txt" ]]; then
+#		echo Throughput benchmark exists, skipping... >&2
+#	else
 		echo Starting throughput benchmarks >&2
 		{
 			echo "threads rep throughput"
@@ -51,7 +52,7 @@ if [[ -x ${throughput_bin} ]]; then
 				done
 			done
 		} > "${result_dir}/throughput.txt"
-	fi
+	#fi
 else
 	echo Throughput binary not executable, skipping >&2
 fi
