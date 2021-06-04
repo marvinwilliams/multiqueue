@@ -509,283 +509,49 @@ plot_throughput_icx <- function(data, outdir) {
     ggsave(plot, file = paste(outdir, "/throughput_buffer_size.pdf", sep = ""), width = 6, height = 5)
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-plot_rank <- function(data, names, outdir) {
+plot_rank_with_old_theory <- function(data, outdir) {
+  names <- c("old_c_4", "orig_c_4_bb", "orig_c_4_ba", "orig_c_4_ab", "orig_c_4_aa", "theo 4")
+  labels <- c("original", "before insert, before delete", "before insert, after delete", "after insert, before delete", "after insert, after delete", "theory")
   plot_data <- data %>% filter(name %in% names & prefill == "1000000" & dist == "uniform" & sleep == "0")
-  # plot_data$name <- factor(plot_data$name, levels = c("nobufferingmq_numa", "fullbufferingmq_c_4_k_1_ibs_4_dbs_4_numa", "fullbufferingmq_c_4_k_1_ibs_8_dbs_8_numa", "fullbufferingmq_c_4_k_1_ibs_16_dbs_16_numa",  "fullbufferingmq_c_4_k_1_ibs_64_dbs_64_numa", "theo 4"))
-  theory <- plot_data %>%
-    mutate(cumulated_4 = (1 - 2 / (4 * threads))^(rank ))
   plot_data %>%
-    group_by(threads) %>%
     do({
       plot <- ggplot(., aes(x = rank + 1, y = cumulated, color = name, linetype = name)) +
         geom_line() +
-        geom_line(aes(y = cumulated_4, color = "theo 4", linetype = "theo 4"), data = theory[theory$threads == .$threads[1],]) +
+        # stat_function(fun = function(x) (1 - 2 / (2 * .$threads[1]))^(x - 1), aes(color = "theo 2", linetype = "theo 2")) +
+        stat_function(fun = function(x) (1 - 2 / (4 * 56))^(x - 1), aes(color = "theo 4", linetype = "theo 4")) +
+        # stat_function(fun = function(x) (1 - 2 / (8 * .$threads[1]))^(x - 1), aes(color = "theo 8", linetype = "theo 8")) +
         scale_x_log10() +
-        coord_cartesian(xlim = c(1, 20000)) +
+        coord_cartesian(xlim = c(1, 5000)) +
         labs(x = "Rank", y = "Cumulative Frequency") +
-        scale_color_manual(breaks = c("nobufferingmq_numa", "fullbufferingmq_c_4_k_1_ibs_4_dbs_4_numa", "fullbufferingmq_c_4_k_1_ibs_8_dbs_8_numa", "fullbufferingmq_c_4_k_1_ibs_16_dbs_16_numa",  "fullbufferingmq_c_4_k_1_ibs_64_dbs_64_numa", "theo 4"), labels = c("no buffering", "b = 4", "b = 8", "b = 16",  "b = 64", "Theoretical C = 4"), values = c(2, 3, 4, 6, 7, 8)) +
-        scale_linetype_manual(breaks = c("nobufferingmq_numa", "fullbufferingmq_c_4_k_1_ibs_4_dbs_4_numa", "fullbufferingmq_c_4_k_1_ibs_8_dbs_8_numa", "fullbufferingmq_c_4_k_1_ibs_16_dbs_16_numa",  "fullbufferingmq_c_4_k_1_ibs_64_dbs_64_numa", "theo 4"), labels = c("no buffering", "b = 4", "b = 8", "b = 16",  "b = 64", "Theoretical C = 4"), values = c(1, 1, 1, 1, 1, 8)) +
+        scale_color_manual(breaks = names, values = c(1, 2, 3, 4, 5, 6), labels = labels) +
+        scale_linetype_manual(breaks = names, values = c(1, 2, 3, 4, 5, 6), labels = labels) +
         guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL)) +
-        theme_bw() + 
-        theme(legend.position = c(0.85, 0.80))
-        ggsave(plot, file = paste(outdir, "/", "delay_" , .$threads[1], ".pdf", sep = ""), width = 6, height = 5)
+        theme_bw() +
+        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = c(0.80, 0.80))
+      ggsave(plot, file = paste(outdir, "/", "rank_with_old_theory_c_4.pdf", sep = ""), width = 6, height = 5)
       .
     })
-  return()
-}
-
-plot_delay <- function(data, names, outdir) {
-  plot_data <- data %>% filter(name %in% names & prefill == "1000000" & dist == "uniform" & sleep == "0" & threads %in% c(16, 64, 128))
-  # plot_data$name <- factor(plot_data$name, levels = c("nobufferingmq_numa", "fullbufferingmq_c_4_k_1_ibs_4_dbs_4_numa", "fullbufferingmq_c_4_k_1_ibs_8_dbs_8_numa", "fullbufferingmq_c_4_k_1_ibs_16_dbs_16_numa",  "fullbufferingmq_c_4_k_1_ibs_64_dbs_64_numa", "theo 4"))
+  names <- c("old_c_2", "orig_c_2_bb", "orig_c_2_ba", "orig_c_2_ab", "orig_c_2_aa", "theo 2")
+  labels <- c("original", "before insert, before delete", "before insert, after delete", "after insert, before delete", "after insert, after delete", "theory")
+  plot_data <- data %>% filter(name %in% names & prefill == "1000000" & dist == "uniform" & sleep == "0")
   plot_data %>%
-    group_by(threads) %>%
     do({
-      plot <- ggplot(., aes(x = rank + 1, y = cumulated, color = name)) +
+      plot <- ggplot(., aes(x = rank + 1, y = cumulated, color = name, linetype = name)) +
         geom_line() +
+        # stat_function(fun = function(x) (1 - 2 / (2 * .$threads[1]))^(x - 1), aes(color = "theo 2", linetype = "theo 2")) +
+        stat_function(fun = function(x) (1 - 2 / (2 * 56))^(x - 1), aes(color = "theo 2", linetype = "theo 2")) +
+        # stat_function(fun = function(x) (1 - 2 / (8 * .$threads[1]))^(x - 1), aes(color = "theo 8", linetype = "theo 8")) +
         scale_x_log10() +
-        coord_cartesian(xlim = c(1, 20000)) +
-        labs(x = "Delay", y = "Cumulative Frequency") +
-        scale_color_manual(breaks = c("nobufferingmq_numa", "fullbufferingmq_c_4_k_1_ibs_4_dbs_4_numa", "fullbufferingmq_c_4_k_1_ibs_8_dbs_8_numa", "fullbufferingmq_c_4_k_1_ibs_16_dbs_16_numa",  "fullbufferingmq_c_4_k_1_ibs_64_dbs_64_numa"), labels = c("no buffering", "b = 4", "b = 8", "b = 16",  "b = 64"), values = c(2, 3, 4, 6, 7)) +
-        guides(color = guide_legend(title = NULL)) +
-        theme_bw() + 
-        theme(legend.position = c(0.85, 0.80))
-      ggsave(plot, file = paste(outdir, "/", "delay_", .$threads[1], ".pdf", sep = ""), width = 6, height = 5)
+        coord_cartesian(xlim = c(1, 5000)) +
+        labs(x = "Rank", y = "Cumulative Frequency") +
+        scale_color_manual(breaks = names, values = c(1, 2, 3, 4, 5, 6), labels = labels) +
+        scale_linetype_manual(breaks = names, values = c(1, 2, 3, 4, 5, 6), labels = labels) +
+        guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL)) +
+        theme_bw() +
+        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = c(0.80, 0.80))
+      ggsave(plot, file = paste(outdir, "/", "rank_with_old_theory_c_2.pdf", sep = ""), width = 6, height = 5)
       .
     })
-  return()
-}
-
-c_labeller <- function(variable, value) {
-  paste("C =", value)
-}
-
-plot_histogram_by_buffer_size <- function(data, outdir, title) {
-  plot_data <- data %>% filter((name == "nobufferingmq_numa" | str_detect(name, "fullbufferingmq_c_4_k_1_ibs_\\d+_dbs_\\d+_numa")) & prefill == "1000000" & dist == "uniform" & sleep == "0")
-
-  plot_data$ibs <- as.factor(str_extract(plot_data$name, "(?<=_ibs_)\\d+"))
-  ibs_order <- paste(sort(unique(as.integer(levels(plot_data$ibs)))))
-  plot_data$ibs <- factor(plot_data$ibs, levels = ibs_order)
-
-  plot_data$dbs <- as.factor(str_extract(plot_data$name, "(?<=_dbs_)\\d+"))
-  dbs_order <- paste(sort(unique(as.integer(levels(plot_data$dbs)))))
-  plot_data$dbs <- factor(plot_data$dbs, levels = dbs_order)
-
-  plot_data %>%
-    group_by(threads) %>%
-    do({
-      plot <- ggplot(., aes(x = rank, y = cumulated, group = dbs, color = dbs)) +
-        labs(x = title, y = "Cumulative Frequency", title = title) +
-        geom_line() +
-        scale_x_log10()
-      save_plot(plot, paste(outdir, "/", tolower(title), "_by_buffer_size_", .$threads[1], ".pdf", sep = ""))
-      .
-    })
-}
-
-plot_histogram_by_stickiness <- function(data, outdir, title) {
-  plot_data <- data %>% filter(str_detect(name, "(fullbuffering|merging)mq_c_\\d+_k_\\d+_ibs_16_dbs_16_numa") & prefill == "1000000" & dist == "uniform" & sleep == "0")
-  plot_data$c <- as.factor(str_extract(plot_data$name, "(?<=_c_)\\d+"))
-  c_order <- paste(sort(unique(as.integer(levels(plot_data$c)))))
-  plot_data$c <- factor(plot_data$c, levels = c_order)
-  plot_data$k <- as.factor(str_extract(plot_data$name, "(?<=_k_)\\d+"))
-  k_order <- paste(sort(unique(as.integer(levels(plot_data$k)))))
-  plot_data$k <- factor(plot_data$k, levels = k_order)
-  plot_data$type <- str_extract(plot_data$name, "(fullbuffering|merging)mq")
-  plot_data %>%
-    group_by(threads) %>%
-    do({
-      plot <- ggplot(., aes(x = rank, y = cumulated, group = interaction(type, c, k), color = interaction(type, k))) +
-        labs(x = title, y = "Cumulative Frequency", title = title) +
-        geom_line() +
-        facet_wrap(~c, ncol = 1, labeller = c_labeller) +
-        scale_x_log10()
-      save_plot(plot, paste(outdir, "/", tolower(title), "_by_stickiness_", .$threads[1], ".pdf", sep = ""))
-      .
-    })
-}
-
-prefill_labeller <- function(variable, value) {
-  paste("n =", value)
-}
-
-plot_histogram_by_prefill <- function(data, names, outdir, title) {
-  plot_data <- data %>% filter(name %in% names & dist == "uniform" & sleep == "0")
-
-  plot_data %>%
-    group_by(threads) %>%
-    do({
-      plot <- ggplot(., aes(x = rank, y = cumulated, group = interaction(name, prefill), color = name)) +
-        labs(x = title, y = "Cumulative Frequency", title = title) +
-        geom_line() +
-        facet_wrap(~prefill, ncol = 1, labeller = prefill_labeller) +
-        scale_x_log10()
-      save_plot(plot, paste(outdir, "/", tolower(title), "_by_prefill_", .$threads[1], ".pdf", sep = ""))
-      .
-    })
-}
-
-dist_labeller <- function(variable, value) {
-  paste("Key distribution:", value)
-}
-
-plot_histogram_by_dist <- function(data, names, outdir, title) {
-  plot_data <- data %>% filter(name %in% names & prefill == "1000000" & sleep == "0")
-
-  plot_data %>%
-    group_by(threads) %>%
-    do({
-      plot <- ggplot(., aes(x = rank, y = cumulated, group = interaction(name, dist), color = name)) +
-        labs(x = title, y = "Cumulative Frequency", title = title) +
-        geom_line() +
-        facet_wrap(~dist, ncol = 1, labeller = dist_labeller) +
-        scale_x_log10()
-      save_plot(plot, paste(outdir, "/", tolower(title), "_by_dist_", .$threads[1], ".pdf", sep = ""))
-      .
-    })
-}
-
-sleep_labeller <- function(variable, value) {
-  paste("s =", as.numeric(value) / 1000, "us")
-}
-
-plot_histogram_by_sleep <- function(data, names, outdir, title) {
-  plot_data <- data %>% filter(name %in% names & prefill == "1000000" & dist == "uniform")
-
-  plot_data %>%
-    group_by(threads) %>%
-    do({
-      plot <- ggplot(., aes(x = rank, y = cumulated, group = interaction(name, sleep), color = name)) +
-        labs(x = title, y = "Cumulative Frequency", title = title) +
-        geom_line() +
-        facet_wrap(~sleep, ncol = 1, labeller = sleep_labeller) +
-        scale_x_log10()
-      save_plot(plot, paste(outdir, "/", tolower(title), "_by_sleep_", .$threads[1], ".pdf", sep = ""))
-      .
-    })
-}
-
-# plot_histogram_bar <- function(data, outdir, plotname) {
-#   plot_data <- data[data$name %in% c("nobufferingmq", "fullbufferingmq", "insertionbuffermq", "deletionbuffermq", "mergingmq", "numamq", "numamergingmq", "wrapper_linden", "wrapper_capq", "wrapper_dlsm", "wrapper_spraylist"), ] %>%
-#   group_by(threads, name) %>%
-#     summarize(mean = weighted.mean(rank, frequency), max = max(rank), .groups = "keep") %>%
-#     do ({
-#       print(.)
-#   transformed = melt(., measure.vars = c("mean", "max"))
-#   plot <- ggplot(transformed, aes(x = as.factor(name), y = value, fill = name)) +
-#     labs(x = "Priority Queue", y = "Top Delay", title = "Top Delay") +
-#     geom_bar(stat = "identity") +
-#     # facet_grid(cols = vars(variable), rows = vars(prefill, dist), scales = "free") +
-#     facet_grid(rows = vars(variable), scales = "free") +
-#     theme(axis.ticks.x = element_blank(), axis.text.x = element_blank())
-#   save_plot(plot,  paste(outdir, "/", plotname, "_", .$threads[1], ".pdf", sep = ""))
-#   .
-#   })
-# }
-
-plot_throughput_by_thread <- function(data, names, outdir) {
-  plot_data <- data %>% filter(name %in% names & prefill == "1000000" & dist == "uniform")
-  plot_data$name <- factor(plot_data$name, levels = c("nobufferingmq_numa", "fullbufferingmq_c_4_k_1_ibs_4_dbs_4_numa", "fullbufferingmq_c_4_k_1_ibs_8_dbs_8_numa", "fullbufferingmq_c_4_k_1_ibs_16_dbs_16_numa",  "fullbufferingmq_c_4_k_1_ibs_64_dbs_64_numa"))
-  plot <- ggplot(plot_data, aes(x = threads, y = mean, color = name)) +
-    geom_line() +
-    geom_point() +
-    geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd),
-      width = .2,
-      position = position_dodge(0.05)
-    ) +
-    labs(x = "p", y = "10^6 Ops/s") +
-    scale_x_continuous("p", labels = c("1", "2", "4", "8", "16", "32", "64", "64 ht"), breaks =c(1, 2, 4, 8, 16, 32, 64, 80) , minor_breaks = NULL, limits=c(1, 80), oob = squish) +
-    scale_color_manual(values = c(2, 3, 4, 6, 7), labels = c("no buffering", "b = 4", "b = 8", "b = 16", "b = 64")) +
-    guides(color = guide_legend(title = NULL)) +
-    theme_bw() +
-    theme(legend.position = c(0.15, 0.82))
-    ggsave(plot, file = paste(outdir, "/throughput.pdf", sep = ""), width = 6, height = 5)
-}
-
-plot_throughput_by_buffer_size <- function(data, outdir) {
-  plot_data <- data %>% filter(str_detect(name, "fullbufferingmq_c_4_k_1_ibs_\\d+_dbs_\\d+_numa") & prefill == "1000000" & dist == "uniform")
-
-  plot_data$ibs <- as.factor(str_extract(plot_data$name, "(?<=_ibs_)\\d+"))
-  ibs_order <- paste(sort(unique(as.integer(levels(plot_data$ibs)))))
-  plot_data$ibs <- factor(plot_data$ibs, levels = ibs_order)
-
-  plot_data$dbs <- as.factor(str_extract(plot_data$name, "(?<=_dbs_)\\d+"))
-  dbs_order <- paste(sort(unique(as.integer(levels(plot_data$dbs)))))
-  plot_data$dbs <- factor(plot_data$dbs, levels = dbs_order)
-
-  plot <- ggplot(plot_data, aes(x = threads, y = mean, group = interaction(ibs, dbs), color = dbs)) +
-    geom_line() +
-    geom_point() +
-    # scale_shape_manual(values = rep(1:5, length.out = 24)) +
-    geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd),
-      width = .2,
-      position = position_dodge(0.05)
-    ) +
-    scale_x_continuous("p", labels = as.character(plot_data$threads), breaks = plot_data$threads, minor_breaks = NULL) +
-    labs(x = "p", y = "10^6 Ops/s", color = "Buffer size", title = "Throughput")
-  save_plot(plot, paste(outdir, "/throughput_by_buffer_size.pdf", sep = ""))
-}
-
-plot_throughput_by_stickiness <- function(data, outdir) {
-  plot_data <- data %>% filter(str_detect(name, "(fullbuffering|merging)mq_c_\\d+_k_\\d+_ibs_16_dbs_16_numa") & prefill == "1000000" & dist == "uniform")
-
-  plot_data$c <- as.factor(str_extract(plot_data$name, "(?<=_c_)\\d+"))
-  c_order <- paste(sort(unique(as.integer(levels(plot_data$c)))))
-  plot_data$c <- factor(plot_data$c, levels = c_order)
-
-  plot_data$k <- as.factor(str_extract(plot_data$name, "(?<=_k_)\\d+"))
-  k_order <- paste(sort(unique(as.integer(levels(plot_data$k)))))
-  plot_data$k <- factor(plot_data$k, levels = k_order)
-
-  plot_data$type <- str_extract(plot_data$name, "(fullbuffering|merging)mq")
-  plot <- ggplot(plot_data, aes(x = threads, y = mean, group = interaction(type, c, k), color = k)) +
-    geom_line() +
-    geom_point() +
-    # scale_shape_manual(values = rep(1:5, length.out = 24)) +
-    geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd),
-      width = .2,
-      position = position_dodge(0.05)
-    ) +
-    facet_wrap(~c, ncol = 1, labeller = c_labeller) +
-    scale_x_continuous("p", labels = as.character(plot_data$threads), breaks = plot_data$threads, minor_breaks = NULL) +
-    labs(x = "p", y = "10^6 Ops/s", color = "Stickiness", title = "Throughput")
-  save_plot(plot, paste(outdir, "/throughput_by_stickiness.pdf", sep = ""))
-}
-
-plot_throughput_by_ns <- function(data, outdir) {
-  plot_data <- data %>% filter(str_detect(name, "mergingmq_c_4_k_1_ns_\\d+_numa") & prefill == "1000000" & dist == "uniform")
-
-  plot_data$ns <- as.factor(str_extract(plot_data$name, "(?<=_ns_)\\d+"))
-  ns_order <- paste(sort(unique(as.integer(levels(plot_data$ns)))))
-  plot_data$ns <- factor(plot_data$ns, levels = ns_order)
-
-  plot <- ggplot(plot_data, aes(x = threads, y = mean, group = ns, color = ns)) +
-    geom_line() +
-    geom_point() +
-    # scale_shape_manual(values = rep(1:5, length.out = 24)) +
-    geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd),
-      width = .2,
-      position = position_dodge(0.05)
-    ) +
-    labs(x = "p", y = "10^6 Ops/s", title = "Throughput", color = "Node size")
-  save_plot(plot, paste(outdir, "/throughput_by_ns.pdf", sep = ""))
 }
 
 read_scenario <- function(scenario) {
@@ -884,7 +650,8 @@ plot_scenario <- function(data, dir) {
 
   # plot_rank_histogram_int(data$rank, dir)
   # plot_rank_histogram_theory_wrapped(data$rank, dir)
-  plot_throughput_buffer_size(data$throughput, dir)
+  # plot_throughput_buffer_size(data$throughput, dir)
+  plot_rank_with_old_theory(data$rank, dir)
   # plot_delay(data$delay, c("nobufferingmq_numa", "fullbufferingmq_c_4_k_1_ibs_4_dbs_4_numa", "fullbufferingmq_c_4_k_1_ibs_8_dbs_8_numa", "fullbufferingmq_c_4_k_1_ibs_16_dbs_16_numa",  "fullbufferingmq_c_4_k_1_ibs_64_dbs_64_numa"), dir)
   # plot_rank(data$rank, c("steady", "realtime", "rdtsc", "long_sleep"), dir)
   # plot_histogram_by_stickiness(data$rank, dir, "Rank")

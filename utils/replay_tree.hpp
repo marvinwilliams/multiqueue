@@ -57,14 +57,14 @@ struct btree_default_traits {
 
     //! Number of slots in each inner node of the tree. Estimated so that each
     //! node has a size of about 256 bytes.
-    static const int inner_slots = 8 > (256 / (sizeof(Key) + sizeof(void*))) ? 8
+    static constexpr int inner_slots = 8 > (256 / (sizeof(Key) + sizeof(void*))) ? 8
                                                                              : (256 / (sizeof(Key) + sizeof(void*)));
 
     //! As of stx-btree-0.9, the code does linear search in find_lower() and
     //! find_upper() instead of binary_search, unless the node size is larger
     //! than this threshold. See notes at
     //! http://panthema.net/2013/0504-STX-B+Tree-Binary-vs-Linear-Search
-    static const size_t binsearch_threshold = 256;
+    static constexpr size_t binsearch_threshold = 256;
 };
 
 template <typename Node, bool IsConst>
