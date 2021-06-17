@@ -16,12 +16,12 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
 endif()
 
-option(${PROJECT_NAME}_GENERATE_DOCS "Add a target to generate the documentation with doxygen" OFF)
-cmake_dependent_option(${PROJECT_NAME}_INSTALL_DOCS "Add the generated documentation to the install list" ON, ${PROJECT_NAME}_GENERATE_DOCS OFF)
-option("${PROJECT_NAME}_BUILD_TESTS" "Build tests for ${PROJECT_NAME}" ON)
-option("${PROJECT_NAME}_BUILD_BENCHMARKS" "Build benchmarks" ON)
-option("${PROJECT_NAME}_BUILD_EXAMPLES" "Build examples" OFF)
-option("${PROJECT_NAME}_ABORT_ON_MISALIGNMENT" "Abort if pq seems to be misaligned" ON)
+option("multiqueue_BUILD_TESTS" "Build unit tests for multiqueue" OFF)
+option("multiqueue_BUILD_BENCHMARKS" "Build micro benchmarks" OFF)
+option("multiqueue_BUILD_EXAMPLES" "Build examples" OFF)
+option(multiqueue_GENERATE_DOCS "Add a target to generate the documentation with doxygen" OFF)
+cmake_dependent_option(multiqueue_INSTALL_DOCS "Add the generated documentation to the install list" ON, multiqueue_GENERATE_DOCS OFF)
+option("multiqueue_ABORT_MISALIGNED" "Abort if assumptions about alignment are violated" ON)
 
 execute_process(COMMAND getconf LEVEL1_DCACHE_LINESIZE OUTPUT_VARIABLE L1_CACHE_LINESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
 execute_process(COMMAND getconf PAGESIZE OUTPUT_VARIABLE PAGESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -41,46 +41,47 @@ configure_file(
 # The target to be linked against by other targets. This library is an
 # interface target and as such does not generate any artefacts. It rather sets
 # include directories and required compiler flags.
-add_library("${PROJECT_NAME}" INTERFACE)
+add_library("multiqueue" INTERFACE)
 
 # Include sources generated at build time. When installing the headers/library,
 # these sources will be copied to appropriate locations such that no additional
 # directories have to be included.
 target_include_directories(
-  "${PROJECT_NAME}" INTERFACE
+  "multiqueue" INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-# This interface reflects the compile requirements for targets linking against this project.
-add_library("${PROJECT_NAME}_compile_requirements" INTERFACE)
+# This interface reflects the compile requirements for targets linking against the multiqueue.
+add_library("multiqueue_compile_requirements" INTERFACE)
 
 # We just want c++17 or above
 target_compile_features(
-  "${PROJECT_NAME}_compile_requirements" INTERFACE
+  "multiqueue_compile_requirements" INTERFACE
   cxx_std_17
 )
 
 find_package(Numa)
 
 if (Numa_FOUND)
-  target_compile_definitions("${PROJECT_NAME}_compile_requirements" INTERFACE HAVE_NUMA)
+  target_compile_definitions("multiqueue_compile_requirements" INTERFACE HAVE_NUMA)
+  target_link_libraries("multiqueue_compile_requirements" INTERFACE "numa")
 endif()
 
-if (${PROJECT_NAME}_ABORT_ON_MISALIGNMENT)
-  target_compile_definitions("${PROJECT_NAME}_compile_requirements" INTERFACE ABORT_ON_MISALIGNMENT)
+if (multiqueue_ABORT_MISALIGNED)
+  target_compile_definitions("multiqueue_compile_requirements" INTERFACE ABORT_MISALIGNED)
 endif()
 
-target_link_libraries("${PROJECT_NAME}" INTERFACE "${PROJECT_NAME}_compile_requirements")
+target_link_libraries("multiqueue" INTERFACE "multiqueue_compile_requirements")
 
 # The namespace alias can be used as link target if this project is a
 # subproject.
-add_library("${PROJECT_NAME}::${PROJECT_NAME}" ALIAS "${PROJECT_NAME}")
+add_library("multiqueue::multiqueue" ALIAS "multiqueue")
 
 # Not added as link target to avoid propagation of
-# flags.  Is used only by internal targets that compile the library.
-add_library("${PROJECT_NAME}_internal" INTERFACE)
+# flags.  Is used only by internal targets.
+add_library("multiqueue_internal" INTERFACE)
 
 string(
   CONCAT WARNING_FLAGS
@@ -104,87 +105,27 @@ string(
 )
 
 target_compile_options(
-  "${PROJECT_NAME}_internal" INTERFACE
+  "multiqueue_internal" INTERFACE
   $<BUILD_INTERFACE:${WARNING_FLAGS}>
 )
 
-# Find the pthread library
-set(THREADS_PREFER_PTHREAD_FLAG ON)
-find_package(Threads)
-
-function(generate_mq_target name compiler_define)
-  add_library(${name} INTERFACE)
-  target_compile_definitions(${name} INTERFACE ${compiler_define})
-  target_link_libraries(${name} INTERFACE multiqueue::multiqueue)
-  set_property(TARGET ${name} PROPERTY pq_name ${name})
-endfunction()
-
-generate_mq_target(nobufferingmq PQ_MQ_NO_BUFFERING)
-generate_mq_target(deletebufferingmq PQ_MQ_DELETE_BUFFERING)
-generate_mq_target(insertbufferingmq PQ_MQ_INSERT_BUFFERING)
-generate_mq_target(fullbufferingmq PQ_MQ_FULL_BUFFERING)
-generate_mq_target(mergingmq PQ_MQ_MERGING)
-generate_mq_target(intmq PQ_MQ_INT)
-generate_mq_target(intmergingmq PQ_MQ_INT_MERGING)
-
-function(add_mq_variants priority_queue_target)
-  get_property(name TARGET ${priority_queue_target} PROPERTY pq_name)
-  # add_library(${name}_pheromone INTERFACE)
-  # target_link_libraries(${name}_pheromone INTERFACE ${priority_queue_target})
-  # target_compile_definitions(${name}_pheromone INTERFACE MQ_CONFIG_PHEROMONES)
-  # set_property(TARGET ${name}_pheromone PROPERTY pq_name ${name}_pheromone)
-
-  if(Numa_FOUND)
-    add_library(${name}_numa INTERFACE)
-    target_link_libraries(${name}_numa INTERFACE ${priority_queue_target} numa)
-    target_compile_definitions(${name}_numa INTERFACE ${define} MQ_CONFIG_NUMA)
-    set_property(TARGET ${name}_numa PROPERTY pq_name ${name}_numa)
-
-    # add_library(${name}_numa_pheromone INTERFACE)
-    # target_link_libraries(${name}_numa_pheromone INTERFACE ${priority_queue_target} numa)
-    # target_compile_definitions(${name}_numa_pheromone INTERFACE MQ_CONFIG_PHEROMONES MQ_CONFIG_NUMA)
-    # set_property(TARGET ${name}_numa_pheromone PROPERTY pq_name ${name}_numa_pheromone)
-  endif()
-endfunction()
-
-add_mq_variants(nobufferingmq)
-add_mq_variants(deletebufferingmq)
-add_mq_variants(insertbufferingmq)
-add_mq_variants(fullbufferingmq)
-add_mq_variants(mergingmq)
-add_mq_variants(intmq)
-add_mq_variants(intmergingmq)
-
 set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/external")
 
-set(CATCH_BUILD_TESTING OFF CACHE BOOL "Build SelfTest project" FORCE)
-set(CATCH_BUILD_EXAMPLES OFF CACHE BOOL "Build documentation examples" FORCE)
-set(CATCH_BUILD_EXTRA_TESTS OFF CACHE BOOL "Build extra tests" FORCE)
 if(IS_DIRECTORY "${EXTERNAL_DIR}/Catch2")
   add_subdirectory("${EXTERNAL_DIR}/Catch2" EXCLUDE_FROM_ALL)
-  list(APPEND CMAKE_MODULE_PATH "${EXTERNAL_DIR}/Catch2/contrib")
+  list(APPEND CMAKE_MODULE_PATH "${EXTERNAL_DIR}/Catch2/extras")
   set(Catch2_FOUND TRUE)
 else()
   message(WARNING "Could not find Catch2 in ${EXTERNAL_DIR}")
   set(Catch2_FOUND FALSE)
 endif()
 
-set(CXXOPTS_BUILD_EXAMPLES OFF CACHE BOOL "Set to ON to build examples" FORCE)
-set(CXXOPTS_BUILD_TESTS OFF CACHE BOOL "Set to ON to build tests" FORCE)
-if(IS_DIRECTORY "${EXTERNAL_DIR}/cxxopts")
-  add_subdirectory("${EXTERNAL_DIR}/cxxopts" EXCLUDE_FROM_ALL)
-  set(cxxopts_FOUND TRUE)
-else()
-  message(WARNING "Could not find cxxopts in ${EXTERNAL_DIR}")
-  set(cxxopts_FOUND FALSE)
-endif()
-
-if(${PROJECT_NAME}_GENERATE_DOCS)
+if(multiqueue_GENERATE_DOCS)
   find_package(Doxygen)
   if(DOXYGEN_FOUND)
     doxygen_add_docs(
       doxygen
-      "${CMAKE_CURRENT_LIST_DIR}/include/${PROJECT_NAME}"
+      "${CMAKE_CURRENT_LIST_DIR}/include/multiqueue"
       COMMENT "Generate documentation"
     )
   else()
@@ -192,25 +133,16 @@ if(${PROJECT_NAME}_GENERATE_DOCS)
   endif()
 endif()
 
-if(${PROJECT_NAME}_BUILD_TESTS OR ${PROJECT_NAME}_BUILD_BENCHMARKS)
-  if(NOT Threads_FOUND OR NOT Catch2_FOUND)
-    message(SEND_ERROR "Cannot build tests and benchmarks because dependencies are not fulfilled")
-  else()
-    add_subdirectory(utils)
-    add_subdirectory(wrapper)
-  endif()
-endif()
-
-if(${PROJECT_NAME}_BUILD_TESTS)
+if(multiqueue_BUILD_TESTS)
   set(TEST_RUNNER_PARAMS "" CACHE STRING "Options added to the test runner")
-  add_subdirectory(tests)
+  add_subdirectory(unit_tests)
 endif()
 
-if(${PROJECT_NAME}_BUILD_BENCHMARKS)
-  add_subdirectory(benchmarks)
+if(multiqueue_BUILD_BENCHMARKS)
+  add_subdirectory(micro_benchmarks)
 endif()
 
-if(${PROJECT_NAME}_BUILD_EXAMPLES)
+if(multiqueue_BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()
 
@@ -221,17 +153,17 @@ set(CPACK_RESOURCE_FILE_README ${CMAKE_CURRENT_LIST_DIR}/README.md)
 include(CPack)
 
 set(INSTALL_MODULEDIR "${CMAKE_INSTALL_LIBDIR}/cmake")
-set(INSTALL_CMAKEDIR "${INSTALL_MODULEDIR}/${PROJECT_NAME}")
+set(INSTALL_CMAKEDIR "${INSTALL_MODULEDIR}/multiqueue")
 
 configure_package_config_file(
-  "${CMAKE_CURRENT_LIST_DIR}/cmake/${PROJECT_NAME}Config.cmake.in"
-  "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
+  "${CMAKE_CURRENT_LIST_DIR}/cmake/multiqueueConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/multiqueueConfig.cmake"
   INSTALL_DESTINATION "${INSTALL_CMAKEDIR}"
   PATH_VARS INSTALL_MODULEDIR
   )
 
 write_basic_package_version_file(
-  "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/multiqueueConfigVersion.cmake"
   VERSION ${PROJECT_VERSION}
   COMPATIBILITY
   SameMajorVersion
@@ -240,8 +172,8 @@ write_basic_package_version_file(
 
 # On install, copy the header files to the appropriate location.
 install(
-  DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/"
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}"
+  DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/multiqueue/"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/multiqueue"
   COMPONENT Development
   FILES_MATCHING PATTERN "*.hpp"
   )
@@ -249,28 +181,28 @@ install(
 # Also copy the artefacts generated at build time into the include directory.
 install(
   FILES "${CMAKE_CURRENT_BINARY_DIR}/version.hpp" "${CMAKE_CURRENT_BINARY_DIR}/system_config.hpp"
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/multiqueue"
   )
 
-install(TARGETS "${PROJECT_NAME}" "${PROJECT_NAME}_compile_requirements" EXPORT "${PROJECT_NAME}Export")
+install(TARGETS "multiqueue" "multiqueue_compile_requirements" EXPORT "multiqueueExport")
 
 install(
   FILES
-  "${CMAKE_CURRENT_BINARY_DIR}/cmake/${PROJECT_NAME}Config.cmake"
-  "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/cmake/multiqueueConfig.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/multiqueueConfigVersion.cmake"
   DESTINATION
   "${INSTALL_CMAKEDIR}"
   )
 
 
 install(
-  EXPORT "${PROJECT_NAME}Export"
+  EXPORT "multiqueueExport"
   DESTINATION "${INSTALL_MODULEDIR}"
-  NAMESPACE "${PROJECT_NAME}::"
-  FILE "${PROJECT_NAME}Targets.cmake"
+  NAMESPACE "multiqueue::"
+  FILE "multiqueueTargets.cmake"
   )
 
-if(${PROJECT_NAME}_INSTALL_DOCS)
+if(multiqueue_INSTALL_DOCS)
   install(
     DIRECTORY docs/
     DESTINATION "${CMAKE_INSTALL_DOCDIR}"

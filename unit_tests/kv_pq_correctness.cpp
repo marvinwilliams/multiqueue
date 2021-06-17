@@ -1,4 +1,6 @@
-#include "catch2/catch.hpp"
+#include "catch2/catch_test_macros.hpp"
+#include "catch2/catch_template_test_macros.hpp"
+
 #include "multiqueue/sequential/heap/heap.hpp"
 #include "multiqueue/sequential/kv_pq.hpp"
 #include "multiqueue/util/extractors.hpp"

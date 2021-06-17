@@ -1,4 +1,0 @@
-add_executable(micro_benchmarks main.cpp heap.cpp)
-target_link_libraries(micro_benchmarks PRIVATE basic_benchmark Threads::Threads multiqueue::multiqueue)
-target_link_libraries_system(micro_benchmarks PRIVATE Catch2::Catch2)
-target_compile_definitions(micro_benchmarks PRIVATE CATCH_CONFIG_ENABLE_BENCHMARKING)

@@ -27,6 +27,7 @@
 #include <random>
 #include <sstream>
 #include <type_traits>
+#include <vector>
 
 namespace multiqueue {
 
@@ -47,6 +48,9 @@ struct multiqueue_base {
                                                               util::get_nth<value_type>{}(rhs));
         }
     };
+
+    multiqueue_base(multiqueue_base const &other) = delete;
+    multiqueue_base &operator=(multiqueue_base const &other) = delete;
 
    protected:
     struct alignas(2 * L1_CACHE_LINESIZE) ThreadData {
@@ -122,7 +126,7 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
         uint32_t id_;
 
        private:
-        explicit Handle(unsigned int id) : id_{static_cast<uint32_t>(id)} {
+        explicit Handle(unsigned int id) noexcept : id_{static_cast<uint32_t>(id)} {
         }
     };
 
@@ -273,7 +277,7 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
         alloc_traits::deallocate(alloc_, pq_list_, pq_list_size_);
     }
 
-    Handle get_handle(unsigned int id) const noexcept {
+    static Handle get_handle(unsigned int id) noexcept {
         return Handle{id};
     }
 

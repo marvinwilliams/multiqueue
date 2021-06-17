@@ -1,4 +1,7 @@
-#include "catch2/catch.hpp"
+#include "catch2/catch_test_macros.hpp"
+#include "catch2/catch_template_test_macros.hpp"
+#include "catch2/generators/catch_generators_all.hpp"
+#include "catch2/generators/catch_generators_random.hpp"
 #include "definitions.hpp"
 #include "multiqueue/sequential/pq.hpp"
 
@@ -32,9 +35,8 @@ TEMPLATE_TEST_CASE("pq basic operations with different types", "[pq][basic]", in
 
     SECTION("Assignment") {
         auto q = pq<TestType>();
-        auto q2 = q;
         q.push(TestType());
-        q2 = q;
+        auto q2 = q;
         q2.push(TestType());
         REQUIRE(q.size() == 1);
         REQUIRE(q2.size() == 2);

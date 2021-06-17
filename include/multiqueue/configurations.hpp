@@ -122,6 +122,10 @@ struct PriorityQueueConfiguration<false, false, false, Key, T, Comparator, Confi
     inline bool empty() const noexcept {
         return heap.empty();
     }
+
+    inline std::size_t size() const noexcept {
+      return heap.size();
+    }
 };
 
 template <typename Key, typename T, typename Comparator, typename Configuration>
@@ -177,6 +181,10 @@ struct PriorityQueueConfiguration<false, true, false, Key, T, Comparator, Config
 
     inline bool empty() const noexcept {
         return insertion_buffer.empty() && heap.empty();
+    }
+
+    inline std::size_t size() const noexcept {
+      return heap.size() + insertion_buffer.size();
     }
 };
 
@@ -244,6 +252,10 @@ struct PriorityQueueConfiguration<false, false, true, Key, T, Comparator, Config
 
     inline bool empty() const noexcept {
         return deletion_buffer.empty() && heap.empty();
+    }
+
+    inline std::size_t size() const noexcept {
+      return heap.size() + deletion_buffer.size();
     }
 };
 
@@ -322,6 +334,10 @@ struct PriorityQueueConfiguration<false, true, true, Key, T, Comparator, Configu
 
     inline bool empty() const noexcept {
         return insertion_buffer.empty() && deletion_buffer.empty() && heap.empty();
+    }
+
+    inline std::size_t size() const noexcept {
+      return heap.size() + insertion_buffer.size() + deletion_buffer.size();
     }
 };
 
@@ -431,6 +447,10 @@ struct PriorityQueueConfiguration<true, true, true, Key, T, Comparator, Configur
 
     inline bool empty() const noexcept {
         return insertion_buffer.empty() && deletion_buffer.empty() && heap.empty();
+    }
+
+    inline std::size_t size() const noexcept {
+      return heap.size() + insertion_buffer.size() + deletion_buffer.size();
     }
 };
 

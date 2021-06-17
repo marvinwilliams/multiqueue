@@ -1,0 +1,8 @@
+add_executable(micro_benchmarks heap.cpp)
+target_link_libraries(micro_benchmarks PRIVATE multiqueue::multiqueue multiqueue_internal Threads::Threads)
+target_compile_options(micro_benchmarks PRIVATE $<$<CONFIG:Release>:-march=native>)
+if(CMAKE_COMPILER_IS_GNUCXX)
+  target_link_options(micro_benchmarks PRIVATE $<$<CONFIG:Release>:-flto>)
+endif()
+target_link_libraries_system(micro_benchmarks PRIVATE Catch2::Catch2 Catch2::Catch2WithMain)
+target_compile_definitions(micro_benchmarks PRIVATE CATCH_CONFIG_ENABLE_BENCHMARKING)

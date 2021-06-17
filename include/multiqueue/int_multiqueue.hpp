@@ -38,6 +38,7 @@ namespace multiqueue {
 
 template <typename Key, typename T>
 struct int_multiqueue_base {
+    static_assert(std::is_unsigned_v<Key>, "Key must be unsigned integer");
     using key_type = Key;
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
@@ -90,8 +91,79 @@ struct int_multiqueue_base {
     }
 };
 
-template <typename Key, typename T, typename Configuration, bool UseMergeHeap>
-struct alignas(Configuration::NumaFriendly ? PAGESIZE : 2 * L1_CACHE_LINESIZE) LocalPriorityQueue {
+template <typename Key, typename T, typename Configuration, bool UseMergeHeap, bool UseBuffering>
+struct LocalPriorityQueue;
+
+template <typename Key, typename T, typename Configuration>
+struct alignas(Configuration::NumaFriendly
+                   ? PAGESIZE
+                   : 2 * L1_CACHE_LINESIZE) LocalPriorityQueue<Key, T, Configuration, false, false> {
+    using allocator_type = typename Configuration::HeapAllocator;
+    using heap_type =
+        sequential::key_value_heap<Key, T, std::less<Key>, Configuration::HeapDegree,
+                                   typename Configuration::SiftStrategy, typename Configuration::HeapAllocator>;
+    static constexpr uint32_t lock_mask = static_cast<uint32_t>(1) << 31;
+    static constexpr uint32_t pheromone_mask = lock_mask - 1;
+    static constexpr Key max_key = std::numeric_limits<Key>::max();
+
+    mutable std::atomic_uint32_t guard = Configuration::WithPheromones ? pheromone_mask : 0;
+    std::atomic<Key> top_key;
+
+    heap_type heap;
+
+    explicit LocalPriorityQueue(allocator_type const &alloc = allocator_type()) : top_key(max_key), heap(alloc) {
+    }
+
+    bool extract_top(typename heap_type::value_type &retval) {
+        if (heap.empty()) {
+            return false;
+        }
+        heap.extract_top(retval);
+        if (heap.empty()) {
+            top_key.store(max_key, std::memory_order_release);
+        } else {
+            top_key.store(heap.top().first, std::memory_order_release);
+        }
+        return true;
+    };
+
+    void push(typename heap_type::value_type const &value) {
+        heap.insert(value);
+        if (heap.top().first == value.first) {
+            top_key.store(value.first, std::memory_order_release);
+        }
+    }
+
+    inline bool empty() const noexcept {
+        return heap.empty();
+    }
+
+    inline std::size_t size() const noexcept {
+        return heap.size();
+    }
+
+    inline bool try_lock(uint32_t id, bool claiming) const noexcept {
+        uint32_t lock_status = guard.load(std::memory_order_relaxed);
+        if ((lock_status >> 31) == 1) {
+            return false;
+        }
+        if (Configuration::WithPheromones && !claiming && lock_status != static_cast<uint32_t>(id)) {
+            return false;
+        }
+        uint32_t const locked = Configuration::WithPheromones ? (lock_mask | static_cast<uint32_t>(id)) : lock_mask;
+        return guard.compare_exchange_strong(lock_status, locked, std::memory_order_acquire, std::memory_order_relaxed);
+    }
+
+    inline void unlock(uint32_t id) const noexcept {
+        assert(guard == (Configuration::WithPheromones ? (lock_mask | static_cast<uint32_t>(id)) : lock_mask));
+        guard.store(Configuration::WithPheromones ? static_cast<uint32_t>(id) : 0, std::memory_order_release);
+    }
+};
+
+template <typename Key, typename T, typename Configuration>
+struct alignas(Configuration::NumaFriendly
+                   ? PAGESIZE
+                   : 2 * L1_CACHE_LINESIZE) LocalPriorityQueue<Key, T, Configuration, false, true> {
     using allocator_type = typename Configuration::HeapAllocator;
     using heap_type =
         sequential::key_value_heap<Key, T, std::less<Key>, Configuration::HeapDegree,
@@ -177,6 +249,10 @@ struct alignas(Configuration::NumaFriendly ? PAGESIZE : 2 * L1_CACHE_LINESIZE) L
         return deletion_buffer.empty();
     }
 
+    inline std::size_t size() const noexcept {
+        return insertion_buffer.size() + deletion_buffer.size() + heap.size();
+    }
+
     inline bool try_lock(uint32_t id, bool claiming) const noexcept {
         uint32_t lock_status = guard.load(std::memory_order_relaxed);
         if ((lock_status >> 31) == 1) {
@@ -196,8 +272,9 @@ struct alignas(Configuration::NumaFriendly ? PAGESIZE : 2 * L1_CACHE_LINESIZE) L
 };
 
 template <typename Key, typename T, typename Configuration>
-struct alignas(Configuration::NumaFriendly ? PAGESIZE
-                                           : 2 * L1_CACHE_LINESIZE) LocalPriorityQueue<Key, T, Configuration, true> {
+struct alignas(Configuration::NumaFriendly
+                   ? PAGESIZE
+                   : 2 * L1_CACHE_LINESIZE) LocalPriorityQueue<Key, T, Configuration, true, true> {
     using heap_type = sequential::key_value_merge_heap<Key, T, std::less<Key>, Configuration::NodeSize,
                                                        typename Configuration::HeapAllocator>;
     using allocator_type = typename Configuration::HeapAllocator;
@@ -308,6 +385,10 @@ struct alignas(Configuration::NumaFriendly ? PAGESIZE
         return deletion_buffer.empty();
     }
 
+    inline std::size_t size() const noexcept {
+        return insertion_buffer.size() + deletion_buffer.size() + heap.size();
+    }
+
     inline bool try_lock(uint32_t id, bool claiming) const noexcept {
         uint32_t lock_status = guard.load(std::memory_order_relaxed);
         if ((lock_status >> 31) == 1) {
@@ -329,11 +410,13 @@ struct alignas(Configuration::NumaFriendly ? PAGESIZE
 template <typename Key, typename T, typename Configuration = configuration::Default,
           typename Allocator = std::allocator<Key>>
 class int_multiqueue : private int_multiqueue_base<Key, T> {
-    static_assert(std::is_unsigned_v<Key>, "Key must be unsigned integer");
+    static_assert(Configuration::WithDeletionBuffer == Configuration::WithInsertionBuffer,
+                  "Must use either both or no buffers");
 
    private:
     using base_type = int_multiqueue_base<Key, T>;
-    using local_queue_type = LocalPriorityQueue<Key, T, Configuration, Configuration::UseMergeHeap>;
+    using local_queue_type =
+        LocalPriorityQueue<Key, T, Configuration, Configuration::UseMergeHeap, Configuration::WithDeletionBuffer>;
     static constexpr auto max_key = local_queue_type::max_key;
 
    public:
@@ -427,9 +510,8 @@ class int_multiqueue : private int_multiqueue_base<Key, T> {
 
     template <unsigned int K = Configuration::K, std::enable_if_t<(K > 1), int> = 0>
     void push(Handle handle, value_type const &value) {
-        auto& index = thread_data_[handle.id_].insert_index;
-        if (thread_data_[handle.id_].insert_count == 0 ||
-            !pq_list_[index].try_lock(handle.id_, false)) {
+        auto &index = thread_data_[handle.id_].insert_index;
+        if (thread_data_[handle.id_].insert_count == 0 || !pq_list_[index].try_lock(handle.id_, false)) {
             do {
                 index = thread_data_[handle.id_].get_random_index();
             } while (!pq_list_[index].try_lock(handle.id_, true));
@@ -492,7 +574,8 @@ class int_multiqueue : private int_multiqueue_base<Key, T> {
             std::swap(thread_data_[handle.id_].extract_count[0], thread_data_[handle.id_].extract_count[1]);
         }
 
-        if (!pq_list_[first_index].try_lock(handle.id_, thread_data_[handle.id_].extract_count[0] == Configuration::K)) {
+        if (!pq_list_[first_index].try_lock(handle.id_,
+                                            thread_data_[handle.id_].extract_count[0] == Configuration::K)) {
             do {
                 first_index = thread_data_[handle.id_].get_random_index();
                 second_index = thread_data_[handle.id_].get_random_index();
@@ -504,9 +587,9 @@ class int_multiqueue : private int_multiqueue_base<Key, T> {
                     return false;
                 }
                 if (second_key < first_key) {
-                  std::swap(first_index, second_index);
-                  std::swap(first_key, second_key);
-                  std::swap(thread_data_[handle.id_].extract_count[0], thread_data_[handle.id_].extract_count[1]);
+                    std::swap(first_index, second_index);
+                    std::swap(first_key, second_key);
+                    std::swap(thread_data_[handle.id_].extract_count[0], thread_data_[handle.id_].extract_count[1]);
                 }
             } while (!pq_list_[first_index].try_lock(handle.id_, true));
             thread_data_[handle.id_].extract_count[0] = Configuration::K;
@@ -541,6 +624,42 @@ class int_multiqueue : private int_multiqueue_base<Key, T> {
             }
         }
         return false;
+    }
+
+    std::vector<std::size_t> get_distribution() const {
+        std::vector<std::size_t> distribution(pq_list_size_);
+        std::transform(pq_list_, pq_list_ + pq_list_size_, distribution.begin(),
+                       [](auto const &pq_wrapper) { return pq_wrapper.size(); });
+        return distribution;
+    }
+
+    std::vector<std::size_t> get_top_distribution(std::size_t k) {
+        std::vector<std::pair<value_type, std::size_t>> removed_elements;
+        removed_elements.reserve(k);
+        std::vector<std::size_t> distribution(pq_list_size_, 0);
+        for (std::size_t i = 0; i < k; ++i) {
+            auto min = std::min_element(
+                pq_list_, pq_list_ + pq_list_size_, [](local_queue_type const &lhs, local_queue_type const &rhs) {
+                    return lhs.top_key.load(std::memory_order_relaxed) < rhs.top_key.load(std::memory_order_relaxed);
+                });
+            if (min->top_key.load(std::memory_order_relaxed) == max_key) {
+                break;
+            }
+            assert(!min->empty());
+            std::pair<value_type, std::size_t> result;
+            [[maybe_unused]] bool success = min->extract_top(result.first);
+            assert(success);
+            result.second = static_cast<std::size_t>(std::distance(pq_list_, min));
+            removed_elements.push_back(result);
+            ++distribution[result.second];
+        }
+        for (auto [val, index] : removed_elements) {
+            pq_list_[index].push(val);
+        }
+        return distribution;
+    }
+
+    void push_in_queue(value_type const &value, std::size_t index) {
     }
 
     static std::string description() {

@@ -23,7 +23,7 @@
 namespace multiqueue {
 namespace sequential {
 
-template <typename Key, typename T, typename Comparator = std::less<Key>, unsigned int HeapDegree = 4,
+template <typename Key, typename T, typename Comparator = std::less<Key>, unsigned int HeapDegree = 8,
           typename SiftStrategy = sift_strategy::FullDown, typename Allocator = std::allocator<T>>
 class kv_pq {
    private:

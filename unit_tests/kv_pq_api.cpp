@@ -1,4 +1,9 @@
-#include "catch2/catch.hpp"
+#include "catch2/catch_test_macros.hpp"
+#include "catch2/catch_template_test_macros.hpp"
+#include "catch2/generators/catch_generators.hpp"
+#include "catch2/generators/catch_generators_random.hpp"
+#include "catch2/generators/catch_generators_adapters.hpp"
+
 #include "definitions.hpp"
 #include "multiqueue/sequential/kv_pq.hpp"
 
@@ -34,9 +39,8 @@ TEMPLATE_PRODUCT_TEST_CASE("kv_pq basic operations with different types", "[kv_p
 
     SECTION("Assignment") {
         auto q = kv_pq<Key, Value>();
-        auto q2 = q;
         q.push({});
-        q2 = q;
+        auto q2 = q;
         q2.push({});
         REQUIRE(q.size() == 1);
         REQUIRE(q2.size() == 2);

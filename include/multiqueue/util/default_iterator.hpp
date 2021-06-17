@@ -50,7 +50,7 @@ class default_iterator {
         return *this;
     }
 
-    constexpr default_iterator& operator++(int) noexcept {
+    constexpr default_iterator operator++(int) noexcept {
         return default_iterator{current_++};
     }
 
@@ -59,7 +59,7 @@ class default_iterator {
         return *this;
     }
 
-    constexpr default_iterator& operator--(int) noexcept {
+    constexpr default_iterator operator--(int) noexcept {
         return default_iterator{current_--};
     }
 
@@ -68,7 +68,7 @@ class default_iterator {
         return *this;
     }
 
-    constexpr default_iterator& operator+(difference_type n) noexcept {
+    constexpr default_iterator operator+(difference_type n) noexcept {
         return default_iterator{current_ + n};
     }
 
@@ -77,7 +77,7 @@ class default_iterator {
         return *this;
     }
 
-    constexpr default_iterator& operator-(difference_type n) noexcept {
+    constexpr default_iterator operator-(difference_type n) noexcept {
         return default_iterator{current_ - n};
     }
 
