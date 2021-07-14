@@ -1,3 +1,6 @@
+#include "multiqueue/sequential/heap/merge_heap.hpp"
+#include "multiqueue/util/extractors.hpp"
+
 #include "catch2/catch_test_macros.hpp"
 
 #include <algorithm>
@@ -5,9 +8,6 @@
 #include <functional>
 #include <queue>
 #include <random>
-
-#include "multiqueue/sequential/heap/merge_heap.hpp"
-#include "multiqueue/util/extractors.hpp"
 
 TEST_CASE("merge_heap simple", "[merge_heap]") {
     multiqueue::sequential::merge_heap<

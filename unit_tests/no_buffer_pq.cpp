@@ -1,8 +1,8 @@
-#include "catch2/catch_test_macros.hpp"
-#include "catch2/catch_template_test_macros.hpp"
-
 #include "multiqueue/configurations.hpp"
 #include "multiqueue/multiqueue.hpp"
+
+#include "catch2/catch_test_macros.hpp"
+#include "catch2/catch_template_test_macros.hpp"
 
 #include <algorithm>   // std::generate_n, std::min_element
 #include <functional>  // std::greater

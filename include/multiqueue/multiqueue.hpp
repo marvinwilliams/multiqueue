@@ -14,7 +14,7 @@
 #include "multiqueue/configurations.hpp"
 #include "system_config.hpp"
 
-#ifdef HAVE_NUMA
+#ifdef MULTIQUEUE_HAVE_NUMA
 #include <numa.h>
 #endif
 #include <algorithm>
@@ -76,7 +76,7 @@ struct multiqueue_base {
             std::seed_seq seq{seed + i};
             thread_data_[i].gen.seed(seq);
             thread_data_[i].dist.param(params);
-#ifdef ABORT_ON_MISALIGNMENT
+#ifdef MULTIQUEUE_ABORT_MISALIGNED
             if (reinterpret_cast<std::uintptr_t>(&thread_data_[i]) % (2 * L1_CACHE_LINESIZE) != 0) {
                 std::abort();
             }
@@ -93,7 +93,7 @@ struct multiqueue_base {
             std::seed_seq seq{seed + i};
             thread_data_[i].gen.seed(seq);
             thread_data_[i].dist.param(params);
-#ifdef ABORT_ON_MISALIGNMENT
+#ifdef MULTIQUEUE_ABORT_MISALIGNED
             if (reinterpret_cast<std::uintptr_t>(&thread_data_[i]) % (2 * L1_CACHE_LINESIZE) != 0) {
                 std::abort();
             }
@@ -198,7 +198,7 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
                         allocator_type const &alloc = allocator_type())
         : base_type{num_threads, Configuration::C, seed}, pq_list_size_{num_threads * Configuration::C}, alloc_(alloc) {
         assert(num_threads >= 1);
-#ifdef HAVE_NUMA
+#ifdef MULTIQUEUE_HAVE_NUMA
         if (Configuration::NumaFriendly) {
             numa_set_interleave_mask(numa_all_nodes_ptr);
         }
@@ -206,19 +206,19 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
         pq_list_ = alloc_traits::allocate(alloc_, pq_list_size_);
         for (std::size_t i = 0; i < pq_list_size_; ++i) {
             alloc_traits::construct(alloc_, pq_list_ + i);
-#ifdef ABORT_ON_MISALIGNMENT
+#ifdef MULTIQUEUE_ABORT_MISALIGNED
             if (reinterpret_cast<std::uintptr_t>(&pq_list_[i]) % (2 * L1_CACHE_LINESIZE) != 0) {
                 std::abort();
             }
 #endif
         }
-#ifdef HAVE_NUMA
+#ifdef MULTIQUEUE_HAVE_NUMA
         if (Configuration::NumaFriendly) {
             numa_set_interleave_mask(numa_no_nodes_ptr);
         }
 #endif
         for (std::size_t i = 0; i < pq_list_size_; ++i) {
-#ifdef HAVE_NUMA
+#ifdef MULTIQUEUE_HAVE_NUMA
             if (Configuration::NumaFriendly) {
                 numa_set_preferred(
                     static_cast<int>(i / (pq_list_size_ / (static_cast<std::size_t>(numa_max_node()) + 1))));
@@ -237,7 +237,7 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
           pq_list_size_{num_threads * Configuration::C},
           alloc_(alloc) {
         assert(num_threads >= 1);
-#ifdef HAVE_NUMA
+#ifdef MULTIQUEUE_HAVE_NUMA
         if (Configuration::NumaFriendly) {
             numa_set_interleave_mask(numa_all_nodes_ptr);
         }
@@ -245,19 +245,19 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
         pq_list_ = std::allocator_traits<allocator_type>::allocate(alloc_, pq_list_size_);
         for (std::size_t i = 0; i < pq_list_size_; ++i) {
             std::allocator_traits<allocator_type>::construct(alloc_, pq_list_ + i, comp);
-#ifdef ABORT_ON_MISALIGNMENT
+#ifdef MULTIQUEUE_ABORT_MISALIGNED
             if (reinterpret_cast<std::uintptr_t>(&pq_list_[i]) % (2 * L1_CACHE_LINESIZE) != 0) {
                 std::abort();
             }
 #endif
         }
-#ifdef HAVE_NUMA
+#ifdef MULTIQUEUE_HAVE_NUMA
         if (Configuration::NumaFriendly) {
             numa_set_interleave_mask(numa_no_nodes_ptr);
         }
 #endif
         for (std::size_t i = 0; i < pq_list_.size(); ++i) {
-#ifdef HAVE_NUMA
+#ifdef MULTIQUEUE_HAVE_NUMA
             if (Configuration::NumaFriendly) {
                 numa_set_preferred(
                     static_cast<int>(i / (pq_list_.size() / (static_cast<std::size_t>(numa_max_node()) + 1))));
@@ -450,11 +450,11 @@ class multiqueue : private multiqueue_base<Key, T, Comparator> {
         }
         if (Configuration::NumaFriendly) {
             ss << "Numa friendly\n\t";
-#ifndef HAVE_NUMA
+#ifndef MULTIQUEUE_HAVE_NUMA
             ss << "But numasupport disabled!\n\t";
 #endif
         }
-#ifdef ABORT_ON_MISALIGNMENT
+#ifdef MULTIQUEUE_ABORT_MISALIGNED
         ss << "Abort on misalignment\n\t";
 #endif
         if (Configuration::WithPheromones) {

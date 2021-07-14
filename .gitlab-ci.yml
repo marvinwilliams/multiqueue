@@ -21,26 +21,17 @@ generate-build:
     paths:
       - build/
 
-build-tests:
+build:
   stage: build
   dependencies:
     - generate-build
   script:
-    - cmake --build build --target all_tests
-    - cmake --build build --target evaluate_quality
+    - cmake --build build --target all
+    - cmake --build build --target
   artifacts:
     name: built_tests
     paths:
       - build/
-  variables:
-    GIT_SUBMODULE_STRATEGY: normal
-
-build-examples:
-  stage: build
-  dependencies:
-    - generate-build
-  script:
-    - echo "Skipping examples for now"
   variables:
     GIT_SUBMODULE_STRATEGY: normal
 
@@ -49,11 +40,11 @@ test-ci-only:
   rules:
     - if: '$CI_COMMIT_BRANCH != "master"'
   needs:
-    - build-tests
+    - build
   dependencies:
-    - build-tests
+    - build
   script:
-    - ctest --test-dir build -E "performance_large"
+    - ctest --test-dir build
 
 build-and-test-cdash:
   stage: test

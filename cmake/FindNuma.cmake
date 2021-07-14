@@ -2,7 +2,8 @@
 FindNuma
 -------
 
-Finds the Numa library.
+Adopted from cmake example https://cmake.org/cmake/help/v3.21/manual/cmake-developer.7.html#id6
+Finds the numa library.
 
 Imported Targets
 ^^^^^^^^^^^^^^^^
@@ -17,7 +18,7 @@ Result Variables
 This will define the following variables:
 
 ``Numa_FOUND``
-  True if the system has the Numa library.
+  True if the system has the numa library.
 ``Numa_INCLUDE_DIRS``
   Include directories needed to use libnuma.
 ``Numa_LIBRARIES``
@@ -28,10 +29,10 @@ Cache Variables
 
 The following cache variables may also be set:
 
-``Foo_INCLUDE_DIR``
+``Numa_INCLUDE_DIR``
   The directory containing ``numa.h``.
-``Foo_LIBRARY``
-  The path to the Foo library.
+``Numa_LIBRARY``
+The path to the numa library.
 
 #]=======================================================================]
 
@@ -41,7 +42,6 @@ pkg_check_modules(PC_Numa QUIET numa)
 find_path(Numa_INCLUDE_DIR
   NAMES numa.h
   PATHS ${PC_Numa_INCLUDE_DIRS}
-  PATH_SUFFIXES Numa
 )
 
 find_library(Numa_LIBRARY

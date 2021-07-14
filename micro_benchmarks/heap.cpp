@@ -1,19 +1,15 @@
-#include "catch2/benchmark/catch_benchmark.hpp"
-#include "catch2/catch_template_test_macros.hpp"
-#include "catch2/catch_test_macros.hpp"
-
 #include "multiqueue/sequential/heap/full_down_strategy.hpp"
 #include "multiqueue/sequential/heap/full_up_strategy.hpp"
 #include "multiqueue/sequential/heap/heap.hpp"
 #include "multiqueue/util/extractors.hpp"
 
+#include "catch2/benchmark/catch_benchmark.hpp"
+#include "catch2/catch_template_test_macros.hpp"
+#include "catch2/catch_test_macros.hpp"
+
 #include <iterator>
 #include <queue>
 #include <random>
-
-#ifndef NDEBUG
-#error "Benchmarks must not be compiled in debug build!"
-#endif
 
 static constexpr int reps = 100'000;
 
