@@ -1,8 +1,8 @@
 # Multiqueue
 
 The multiqueue is a concurrent, relaxed priority queue.
-The idea is that internally there are $`c*p`$ priority queues, where $`p`$ is the
-number of threads and $`c`$ is a tuning parameter. Elements are inserted into a
+The idea is that internally there are `c*p` priority queues, where `p` is the
+number of threads and `c` is a tuning parameter. Elements are inserted into a
 random queue while deletions delete the minimum of two random queues.
 
 # Usage
