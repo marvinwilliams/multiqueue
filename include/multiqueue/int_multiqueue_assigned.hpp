@@ -335,7 +335,7 @@ class int_multiqueue_assigned : private int_multiqueue_assigned_base<Key, T> {
             index = dist(thread_data_[handle.id_].gen);
         } while (!pq_list_[index].try_lock());
         pq_list_[index].push(value);
-        pq_list_[index].unlock(handle.id_);
+        pq_list_[index].unlock();
     }
 
     template <unsigned int K = Configuration::K, std::enable_if_t<(K > 1), int> = 0>
@@ -435,11 +435,11 @@ class int_multiqueue_assigned : private int_multiqueue_assigned_base<Key, T> {
     bool extract_from_partition(Handle handle, value_type &retval) {
         for (size_type i = Configuration::C * handle.id_; i < Configuration::C * (handle.id_ + 1); ++i) {
             if (pq_list_[i].top_key.load(std::memory_order_acquire) == max_key ||
-                !pq_list_[i].try_lock(handle.id_, true)) {
+                !pq_list_[i].try_lock()) {
                 continue;
             }
             bool success = pq_list_[i].extract_top(retval);
-            pq_list_[i].unlock(handle.id_);
+            pq_list_[i].unlock();
             if (success) {
                 return true;
             }
