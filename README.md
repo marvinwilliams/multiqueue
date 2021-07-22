@@ -24,7 +24,7 @@ cmake --install build --prefix <prefix>
 and include it in your cmake project with
 ```cmake
 find_package(multiqueue)
-target_link_libaries(target PRIVATE multiqueue::multiqueue)
+target_link_libraries(target PRIVATE multiqueue::multiqueue)
 ```
 
 ## (b) Subdirectory
