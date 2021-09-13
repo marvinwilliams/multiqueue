@@ -9,7 +9,7 @@ random queue while deletions delete the minimum of two random queues.
 
 Clone the repository with
 ```bash
-git clone https://github.com/marvinwilliams/multiqueue
+git clone --recurse-submodules https://github.com/marvinwilliams/multiqueue
 ```
 
 You have two options on how to use this library
@@ -18,7 +18,7 @@ Then you can either build and install with
 ```bash
 cmake -B build
 cmake --build build
-cmake --install build --prefix <prefix>
+cmake --install build --prefix <prefix> # default: /usr
 ```
 
 and include it in your cmake project with
@@ -36,5 +36,6 @@ target_link_libraries(target PRIVATE multiqueue::multiqueue)
 
 # Remarks
 
+For usage examples, see the `examples` folder.
 The implementation is subject of experimantation and thus has more
 customization points than practically desireable.
