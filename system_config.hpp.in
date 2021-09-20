@@ -1,0 +1,18 @@
+#include <cstddef>
+#cmakedefine L1_CACHE_LINESIZE @L1_CACHE_LINESIZE@
+#ifndef L1_CACHE_LINESIZE
+#define L1_CACHE_LINESIZE 64
+#endif
+
+#cmakedefine PAGESIZE @PAGESIZE@
+#ifndef PAGESIZE
+#define PAGESIZE 4096
+#endif
+
+#ifdef MULTIQUEUE_HAVE_NUMA
+template <bool want_numa>
+static constexpr bool use_numa = want_numa;
+#else
+template <typename>
+static constexpr bool use_numa = false;
+#endif
