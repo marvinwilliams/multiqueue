@@ -8,11 +8,3 @@
 #ifndef PAGESIZE
 #define PAGESIZE 4096
 #endif
-
-#ifdef MULTIQUEUE_HAVE_NUMA
-template <bool want_numa>
-static constexpr bool use_numa = want_numa;
-#else
-template <typename>
-static constexpr bool use_numa = false;
-#endif

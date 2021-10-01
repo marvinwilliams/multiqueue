@@ -1,6 +1,6 @@
 /**
 ******************************************************************************
-* @file:   buffered_spq.hpp
+* @file:   buffered_pq.hpp
 *
 * @author: Marvin Williams
 * @date:   2021/09/14 17:54
@@ -9,8 +9,8 @@
 **/
 
 #pragma once
-#ifndef BUFFERED_SPQ_HPP_INCLUDED
-#define BUFFERED_SPQ_HPP_INCLUDED
+#ifndef BUFFERED_PQ_HPP_INCLUDED
+#define BUFFERED_PQ_HPP_INCLUDED
 
 #include "multiqueue/heap.hpp"
 #include "multiqueue/ring_buffer.hpp"
@@ -22,27 +22,28 @@
 
 namespace multiqueue {
 
-template <bool want_numa>
-static constexpr bool spq_alignment = use_numa<want_numa> ? PAGESIZE : 2 * L1_CACHE_LINESIZE;
-
 template <typename Key, typename T, typename Configuration>
-class alignas(spq_alignment<Configuration::NumaFriendly>) buffered_spq {
-   private:
+class alignas(PAGESIZE) BufferedPQ {
+   public:
+    using value_type = multiqueue::Value<Key, T>;
     using allocator_type = typename Configuration::HeapAllocator;
-    using heap_type = heap<Key, T, Configuration::HeapDegree, typename Configuration::HeapAllocator>;
+
+   private:
+    using heap_type = Heap<Key, T, Configuration::HeapDegree, allocator_type>;
 
    public:
-    using value_type = typename heap_type::value_type;
-    static constexpr Key max_key = std::numeric_limits<Key>::max() >> 1;
+    static constexpr Key min_valid_key = 0;
+    static constexpr Key max_valid_key = (std::numeric_limits<Key>::max() >> 1) - 1;
+    static constexpr Key empty_key = max_valid_key + 1;
 
    private:
-    static constexpr Key lock_mask = ~max_key;
+    static constexpr Key lock_mask = ~empty_key;
 
     // The highest bit of min_key also functions as lock
     std::atomic<Key> min_key;
     alignas(L1_CACHE_LINESIZE) std::array<value_type, Configuration::InsertionBufferSize> insertion_buffer;
     typename decltype(insertion_buffer)::iterator insertion_buffer_end;
-    util::ring_buffer<value_type, Configuration::DeletionBufferSize> deletion_buffer;
+    ring_buffer<value_type, Configuration::DeletionBufferSize> deletion_buffer;
 
     heap_type heap;
 
@@ -67,8 +68,8 @@ class alignas(spq_alignment<Configuration::NumaFriendly>) buffered_spq {
     }
 
    public:
-    explicit buffered_spq(allocator_type const &alloc = allocator_type())
-        : min_key(max_key), insertion_buffer_end(insertion_buffer.begin()), heap(alloc) {
+    explicit BufferedPQ(allocator_type const &alloc = allocator_type())
+        : min_key(empty_key), insertion_buffer_end(insertion_buffer.begin()), heap(alloc) {
     }
 
     // Lock must be held
@@ -81,14 +82,14 @@ class alignas(spq_alignment<Configuration::NumaFriendly>) buffered_spq {
         if (deletion_buffer.empty()) {
             refresh_min();
         }
-        min_key.store(deletion_buffer.empty() ? max_key : deletion_buffer.front().key, std::memory_order_release);
+        min_key.store(deletion_buffer.empty() ? empty_key : deletion_buffer.front().key, std::memory_order_release);
         return retval;
     };
 
     void push_and_unlock(value_type value) {
         assert(min_key & lock_mask);
         auto pos = deletion_buffer.size();
-        while (pos > 0 && value.first < deletion_buffer[pos - 1].key) {
+        while (pos > 0 && value.key < deletion_buffer[pos - 1].key) {
             --pos;
         }
         if (!deletion_buffer.empty() && pos == deletion_buffer.size()) {
@@ -99,11 +100,13 @@ class alignas(spq_alignment<Configuration::NumaFriendly>) buffered_spq {
                 flush_insertion_buffer();
                 heap.insert(value);
             }
+            auto current_min = get_min_key();
+            min_key.store(current_min, std::memory_order_release);
         } else {
             // Insert into deletion buffer
             if (deletion_buffer.full()) {
                 if (insertion_buffer_end != insertion_buffer.end()) {
-                    *insertion_buffer++ = deletion_buffer.back();
+                    *insertion_buffer_end++ = deletion_buffer.back();
                 } else {
                     flush_insertion_buffer();
                     heap.insert(deletion_buffer.back());
@@ -111,10 +114,9 @@ class alignas(spq_alignment<Configuration::NumaFriendly>) buffered_spq {
                 deletion_buffer.pop_back();
             }
             deletion_buffer.insert(pos, value);
+            auto current_min = pos == 0 ? value.key : get_min_key();
+            min_key.store(current_min, std::memory_order_release);
         }
-        assert(!deletion_buffer.empty());
-        // TODO: Maybe only read deletion_buffer if pos == 0?
-        min_key.store(deletion_buffer.front().key, std::memory_order_release);
     }
 
     inline bool empty() const noexcept {
@@ -129,7 +131,7 @@ class alignas(spq_alignment<Configuration::NumaFriendly>) buffered_spq {
         return min_key.load(std::memory_order_relaxed) & (~lock_mask);
     }
 
-    inline bool try_lock() const noexcept {
+    inline bool try_lock() noexcept {
         Key current = min_key.load(std::memory_order_relaxed);
         if (current & lock_mask) {
             return false;
@@ -138,7 +140,7 @@ class alignas(spq_alignment<Configuration::NumaFriendly>) buffered_spq {
                                                std::memory_order_relaxed);
     }
 
-    inline bool try_lock(Key expected) const noexcept {
+    inline bool try_lock(Key expected) noexcept {
         if (expected & lock_mask) {
             return false;
         }
@@ -146,13 +148,16 @@ class alignas(spq_alignment<Configuration::NumaFriendly>) buffered_spq {
                                                std::memory_order_relaxed);
     }
 
-    // Use only if min_key was not changed
-    inline void unlock() const noexcept {
+    inline void unlock() noexcept {
         Key expected = min_key.load(std::memory_order_acquire);
         assert(expected & lock_mask);
         min_key.store(expected & (~lock_mask), std::memory_order_release);
     }
+
+    inline void heap_reserve(std::size_t cap) {
+        heap.reserve(cap);
+    }
 };
 
 }  // namespace multiqueue
-#endif  //! BUFFERED_SPQ_HPP_INCLUDED
+#endif  //! BUFFERED_PQ_HPP_INCLUDED

@@ -33,8 +33,9 @@ See <http://creativecommons.org/publicdomain/zero/1.0/>. */
 
 #include <cstdint>
 #include <limits>
+#include <random>
 
-static inline std::uint64_t rotl(std::uint64_t const x, int k) noexcept {
+static inline std::uint64_t rotl(std::uint64_t x, int k) noexcept {
     return (x << k) | (x >> (64 - k));
 }
 
@@ -46,25 +47,30 @@ class xoroshiro128plus {
     using result_type = std::uint64_t;
     static constexpr std::uint64_t default_seed = 1;
 
+    template <typename Sseq>
+    explicit xoroshiro128plus(Sseq& seq) {
+        seq.generate(s_, s_ + 2);
+    }
+
     explicit xoroshiro128plus(std::uint64_t value) {
-        s_[0] = value & ((UINT64_C(1) << 32) - 1);
-        s_[1] = value >> 32;
+        std::seed_seq seq{value};
+        seq.generate(s_, s_ + 2);
     }
 
     xoroshiro128plus() : xoroshiro128plus(default_seed) {
     }
 
-    template <typename Sseq>
-    explicit xoroshiro128plus(Sseq& s) {
-        s.generate(s_, s_ + 2);
-    }
-
     xoroshiro128plus(xoroshiro128plus const&) = default;
     xoroshiro128plus& operator=(xoroshiro128plus const&) = default;
 
+    void seed(std::uint64_t value) noexcept {
+        std::seed_seq seq{value};
+        seq.generate(s_, s_ + 2);
+    }
+
     template <typename Sseq>
-    void seed(Sseq& s) noexcept {
-      s.generate(s_, s_ + 2);
+    void seed(Sseq& seq) noexcept {
+        seq.generate(s_, s_ + 2);
     }
 
     std::uint64_t operator()() noexcept {

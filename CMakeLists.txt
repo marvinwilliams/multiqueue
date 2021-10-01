@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(multiqueue VERSION 1.0.0 LANGUAGES CXX C)
+# set(CMAKE_CXX_STANDARD 17)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
@@ -10,15 +11,12 @@ include(CMakePackageConfigHelpers)
 include(CTest)
 include(GNUInstallDirs)
 
-
-
 discourage_intree_builds()
 
 option(multiqueue_BUILD_TESTS "Build unit tests for multiqueue" OFF)
 option(multiqueue_BUILD_BENCHMARKS "Build micro benchmarks" OFF)
 option(multiqueue_BUILD_EXAMPLES "Build examples" OFF)
 cmake_dependent_option(multiqueue_INSTALL_DOCS "Add the generated documentation to the install list" ON, multiqueue_GENERATE_DOCS OFF)
-option(multiqueue_ABORT_MISALIGNED "Abort if assumptions about alignment are violated" ON)
 
 # Read the system's L1 cache-line size and page size
 execute_process(COMMAND getconf LEVEL1_DCACHE_LINESIZE OUTPUT_VARIABLE L1_CACHE_LINESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -66,18 +64,8 @@ target_compile_features(
     cxx_std_17
 )
 
-find_package(Numa)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads)
-
-if (Numa_FOUND)
-  target_compile_definitions(multiqueue INTERFACE MULTIQUEUE_HAVE_NUMA)
-  target_link_libraries(multiqueue INTERFACE Numa::Numa)
-endif()
-
-if (multiqueue_ABORT_MISALIGNED)
-  target_compile_definitions(multiqueue INTERFACE MULTIQUEUE_ABORT_MISALIGNED)
-endif()
 
 # The namespace alias can be used as link target if this project is a
 # subproject.

@@ -48,7 +48,7 @@ class ring_buffer_iterator {
     }
 
     constexpr pointer operator->() const noexcept {
-        return *(data_ + ((begin_ + pos_) & (N - 1u)));
+        return data_ + ((begin_ + pos_) & (N - 1u));
     }
 
     constexpr ring_buffer_iterator& operator++() noexcept {
@@ -59,7 +59,7 @@ class ring_buffer_iterator {
 
     constexpr ring_buffer_iterator operator++(int) noexcept {
         auto tmp = *this;
-        ++(*this);
+        operator++();
         return tmp;
     }
 
@@ -71,7 +71,7 @@ class ring_buffer_iterator {
 
     constexpr ring_buffer_iterator operator--(int) noexcept {
         auto tmp = *this;
-        --(*this);
+        operator--();
         return tmp;
     }
 
@@ -191,7 +191,7 @@ struct ring_buffer {
     }
 
     // `pos` is relative to begin_
-    void insert(std::uint64_t pos, T value) noexcept{
+    void insert(std::uint64_t pos, T value) noexcept {
         assert(!full());
         assert(pos <= size());
         if (pos <= size() / 2) {

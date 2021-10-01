@@ -11,7 +11,7 @@
 #ifndef HEAP_HPP_INCLUDED
 #define HEAP_HPP_INCLUDED
 
-#include "multiqueue/value"
+#include "multiqueue/value.hpp"
 
 #include <cassert>
 #include <cstddef>
@@ -23,22 +23,22 @@
 namespace multiqueue {
 
 template <typename Key, typename T, unsigned int Degree, typename Allocator>
-class heap {
+class Heap {
    public:
-    using value_type = Value<Key, T>;
+    using value_type = multiqueue::Value<Key, T>;
     using key_type = typename value_type::key_type;
     using mapped_type = typename value_type::mapped_type;
     using reference = value_type &;
     using const_reference = value_type const &;
 
     using allocator_type = Allocator;
-    using container_type = std::vector<typename heap::value_type, allocator_type>;
+    using container_type = std::vector<value_type, allocator_type>;
     using iterator = typename container_type::const_iterator;
     using const_iterator = typename container_type::const_iterator;
     using difference_type = typename container_type::difference_type;
     using size_type = std::size_t;
 
-    static_assert(Degree >= 1, "Degree must be at least one");
+    static_assert(Degree >= 2, "Degree must be at least two");
 
    private:
     container_type data_;
@@ -61,7 +61,7 @@ class heap {
         assert(last <= size());
         auto result = index++;
         for (; index < last; ++index) {
-            if (data_[index] < data_[result]) {
+            if (data_[index].key < data_[result].key) {
                 result = index;
             }
         }
@@ -124,9 +124,9 @@ class heap {
     }
 #endif
    public:
-    heap() = default;
+    Heap() = default;
 
-    explicit heap(allocator_type const &alloc = allocator_type()) noexcept : data_(alloc) {
+    explicit Heap(allocator_type const &alloc = allocator_type()) noexcept : data_(alloc) {
     }
 
     inline iterator begin() const noexcept {
@@ -191,15 +191,6 @@ class heap {
 
     inline void reserve(std::size_t cap) {
         data_.reserve(cap);
-    }
-
-    inline void reserve_and_touch(std::size_t cap) {
-        if (size() < cap) {
-            size_type const old_size = size();
-            data_.resize(cap);
-            // this does not free allocated memory
-            data_.resize(old_size);
-        }
     }
 
     inline void clear() noexcept {
