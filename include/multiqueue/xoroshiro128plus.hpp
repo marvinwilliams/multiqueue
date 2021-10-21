@@ -31,6 +31,10 @@ See <http://creativecommons.org/publicdomain/zero/1.0/>. */
    better results in our test than the 2016 version (a=55, b=14, c=36).
 */
 
+#pragma once
+#ifndef XOROSHIRO128PLUS_HPP_INCLUDED
+#define XOROSHIRO128PLUS_HPP_INCLUDED
+
 #include <cstdint>
 #include <limits>
 #include <random>
@@ -142,3 +146,5 @@ class xoroshiro128plus {
         s_[1] = s1;
     }
 };
+
+#endif  //! XOROSHIRO128PLUS_HPP_INCLUDED

@@ -14,23 +14,8 @@ include(GNUInstallDirs)
 discourage_intree_builds()
 
 option(multiqueue_BUILD_TESTS "Build unit tests for multiqueue" OFF)
-option(multiqueue_BUILD_BENCHMARKS "Build micro benchmarks" OFF)
 option(multiqueue_BUILD_EXAMPLES "Build examples" OFF)
 cmake_dependent_option(multiqueue_INSTALL_DOCS "Add the generated documentation to the install list" ON, multiqueue_GENERATE_DOCS OFF)
-
-# Read the system's L1 cache-line size and page size
-execute_process(COMMAND getconf LEVEL1_DCACHE_LINESIZE OUTPUT_VARIABLE L1_CACHE_LINESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
-execute_process(COMMAND getconf PAGESIZE OUTPUT_VARIABLE PAGESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
-
-if (NOT "${L1_CACHE_LINESIZE}" MATCHES "^[0-9]+")
-  message(WARNING "Could not read L1 cache-line size, using default: 64")
-  set (L1_CACHE_LINESIZE 64)
-endif()
-
-if (NOT "${PAGESIZE}" MATCHES "^[0-9]+")
-  message(WARNING "Could not read page size, using default: 4096")
-  set (PAGESIZE 4096)
-endif()
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
@@ -49,19 +34,19 @@ add_library(multiqueue INTERFACE)
 # all files will be copied to the same location such that no additional
 # directories have to be included.
 target_include_directories(
-    multiqueue
+  multiqueue
   INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/multiqueue>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/multiqueue>
 )
 
 # We require c++17 or above
 target_compile_features(
-    multiqueue
+  multiqueue
   INTERFACE
-    cxx_std_17
+  cxx_std_17
 )
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -73,18 +58,20 @@ add_library("multiqueue::multiqueue" ALIAS multiqueue)
 
 set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/external")
 
-if(IS_DIRECTORY "${EXTERNAL_DIR}/Catch2")
-  add_subdirectory("${EXTERNAL_DIR}/Catch2" EXCLUDE_FROM_ALL)
-  list(APPEND CMAKE_MODULE_PATH "${EXTERNAL_DIR}/Catch2/extras")
+if(multiqueue_BUILD_TESTS)
+  if(IS_DIRECTORY "${EXTERNAL_DIR}/Catch2")
+    add_subdirectory("${EXTERNAL_DIR}/Catch2" EXCLUDE_FROM_ALL)
+    list(APPEND CMAKE_MODULE_PATH "${EXTERNAL_DIR}/Catch2/extras")
+  endif()
 endif()
 
 find_package(Doxygen)
 if(Doxygen_FOUND)
   doxygen_add_docs(
-      doxygen
-      "${CMAKE_CURRENT_LIST_DIR}/include/multiqueue"
+    doxygen
+    "${CMAKE_CURRENT_LIST_DIR}/include/multiqueue"
     COMMENT
-      "Generate documentation"
+    "Generate documentation"
   )
 else()
   message(WARNING "Doxygen not found, documentation cannot be built")
@@ -114,20 +101,20 @@ set(INSTALL_MODULEDIR "${CMAKE_INSTALL_LIBDIR}/cmake")
 set(INSTALL_CMAKEDIR "${INSTALL_MODULEDIR}/multiqueue")
 
 configure_package_config_file(
-    "${CMAKE_CURRENT_LIST_DIR}/cmake/multiqueueConfig.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/multiqueueConfig.cmake"
+  "${CMAKE_CURRENT_LIST_DIR}/cmake/multiqueueConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/multiqueueConfig.cmake"
   INSTALL_DESTINATION
-    "${INSTALL_CMAKEDIR}"
+  "${INSTALL_CMAKEDIR}"
   PATH_VARS
-    INSTALL_MODULEDIR
+  INSTALL_MODULEDIR
 )
 
 write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/multiqueueConfigVersion.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/multiqueueConfigVersion.cmake"
   VERSION
-    ${PROJECT_VERSION}
+  ${PROJECT_VERSION}
   COMPATIBILITY
-    SameMajorVersion
+  SameMajorVersion
   ARCH_INDEPENDENT
 )
 
@@ -135,58 +122,58 @@ write_basic_package_version_file(
 # library, only the usage requirements are propagated
 install(
   TARGETS
-    multiqueue
+  multiqueue
   EXPORT
-    multiqueueExport
+  multiqueueExport
 )
 
 # On install, copy the header files to the appropriate location.
 install(
   DIRECTORY
-    "include/multiqueue/"
+  "include/multiqueue/"
   DESTINATION
-    "${CMAKE_INSTALL_INCLUDEDIR}/multiqueue"
+  "${CMAKE_INSTALL_INCLUDEDIR}/multiqueue"
   COMPONENT
-    Development
+  Development
   FILES_MATCHING PATTERN
-    "*.hpp"
+  "*.hpp"
 )
 
 # Also copy the artefacts generated at build time into the include directory.
 install(
   FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/system_config.hpp"
+  "${CMAKE_CURRENT_BINARY_DIR}/system_config.hpp"
   DESTINATION
-    "${CMAKE_INSTALL_INCLUDEDIR}/multiqueue"
+  "${CMAKE_INSTALL_INCLUDEDIR}/multiqueue"
 )
 
 # Copy the package config file to the appropriate directory so that it can be found by find_package()
 install(
   FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/multiqueueConfig.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/multiqueueConfigVersion.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/multiqueueConfig.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/multiqueueConfigVersion.cmake"
   DESTINATION
-    "${INSTALL_CMAKEDIR}"
+  "${INSTALL_CMAKEDIR}"
 )
 
 # Install the export set consisting of the multiqueue target
 install(
   EXPORT
-    multiqueueExport
+  multiqueueExport
   DESTINATION
-    "${INSTALL_CMAKEDIR}"
+  "${INSTALL_CMAKEDIR}"
   NAMESPACE
-    multiqueue::
+  multiqueue::
   FILE
-    multiqueueTargets.cmake
+  multiqueueTargets.cmake
 )
 
 if(multiqueue_INSTALL_DOCS)
   install(
     DIRECTORY
-      "${CMAKE_CURRENT_BINARY_DIR}/html"
+    "${CMAKE_CURRENT_BINARY_DIR}/html"
     DESTINATION
-      "${CMAKE_INSTALL_DOCDIR}"
+    "${CMAKE_INSTALL_DOCDIR}"
   )
 endif()
 
@@ -215,13 +202,13 @@ string(
 )
 
 target_compile_options(
-    multiqueue_internal
+  multiqueue_internal
   INTERFACE
-    ${WARNING_FLAGS}
+  ${WARNING_FLAGS}
 )
 
 target_link_libraries(
-    multiqueue_internal
+  multiqueue_internal
   INTERFACE
-    multiqueue
+  multiqueue
 )

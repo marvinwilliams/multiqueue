@@ -29,6 +29,10 @@
 #include <utility>
 #include <vector>
 
+#ifndef L1_CACHE_LINESIZE
+#error Need to define L1_CACHE_LINESIZE
+#endif
+
 namespace multiqueue {
 
 template <typename Key, typename T, typename Configuration = multiqueue::DefaultConfiguration,
@@ -184,7 +188,7 @@ class Multiqueue {
         ss << "Using deletion buffer with size: " << Configuration::DeletionBufferSize << "\n\t";
         ss << "Using insertion buffer with size: " << Configuration::InsertionBufferSize << "\n\t";
         ss << "Heap degree: " << Configuration::HeapDegree << "\n\t";
-        if (Configuration::NumaFriendly) {
+        if (Configuration::UseNuma) {
             ss << "Numa friendly\n\t";
         }
         ss << "Selection strategy: " << selection_strategy::description(selection_strategy_data_);

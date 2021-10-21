@@ -115,7 +115,7 @@ class Heap {
                 if (first_child + j >= size()) {
                     return true;
                 }
-                if (value_compare(data_[first_child + j], data_[i])) {
+                if (data_[first_child + j].key < data_[i].key) {
                     return false;
                 }
             }

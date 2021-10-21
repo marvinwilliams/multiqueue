@@ -24,8 +24,6 @@ struct DefaultConfiguration {
     // Buffer sizes (number of elements)
     static constexpr std::size_t DeletionBufferSize = 8;
     static constexpr std::size_t InsertionBufferSize = 8;
-    // Use stickiness
-    static constexpr bool UseStickiness = true;
     // Use numa friendly alignments (induces more overhead)
     static constexpr bool UseNuma = false;
     template <typename T>

@@ -60,7 +60,7 @@ struct random {
             first_key = first->get_min_key();
             second_key = second->get_min_key();
 
-            if (first_key != Multiqueue::empty_key || second != Multiqueue::empty_key) {
+            if (first_key != Multiqueue::empty_key || second_key != Multiqueue::empty_key) {
                 // empty_key is larger than all valid keys
                 if (second_key < first_key) {
                     first = second;

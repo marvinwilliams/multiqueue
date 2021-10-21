@@ -20,6 +20,13 @@
 #include <limits>
 #include <memory>
 
+#ifndef L1_CACHE_LINESIZE
+#error Need to define L1_CACHE_LINESIZE
+#endif
+
+#ifndef PAGESIZE
+#error Need to define PAGESIZE
+#endif
 namespace multiqueue {
 
 template <typename Key, typename T, typename Configuration>
