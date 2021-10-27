@@ -57,12 +57,10 @@ class Multiqueue {
        public:
         Handle(Handle const &) = delete;
         Handle &operator=(Handle const &) = delete;
+        alignas(2 * L1_CACHE_LINESIZE) typename selection_strategy::thread_data_t data;
 
        private:
-        alignas(2 * L1_CACHE_LINESIZE) typename selection_strategy::thread_data_t selection_strategy_data_;
-
-       private:
-        explicit Handle(this_t &mq) : selection_strategy_data_{mq} {
+        explicit Handle(this_t &mq) : data{mq} {
         }
     };
 
@@ -85,7 +83,7 @@ class Multiqueue {
 
    public:
     template <typename... Args>
-    explicit Multiqueue(unsigned int num_threads, unsigned int c, allocator_type const &alloc, Args &&...args)
+    explicit Multiqueue(unsigned int num_threads, std::size_t c, allocator_type const &alloc, Args &&...args)
         : num_spqs_{num_threads * c},
           num_threads_{num_threads},
           selection_strategy_data_{std::forward<Args>(args)...},
@@ -101,7 +99,7 @@ class Multiqueue {
     }
 
     template <typename... Args>
-    explicit Multiqueue(unsigned int num_threads, unsigned int c, Args &&...args)
+    explicit Multiqueue(unsigned int num_threads, std::size_t c, Args &&...args)
         : Multiqueue(num_threads, c, static_cast<allocator_type const &>(allocator_type()),
                      std::forward<Args>(args)...) {
     }
@@ -118,13 +116,13 @@ class Multiqueue {
     }
 
     void push(Handle &handle, value_type value) {
-        spq_t *s = selection_strategy::get_locked_insert_spq(*this, handle.selection_strategy_data_);
+        spq_t *s = selection_strategy::get_locked_insert_spq(*this, handle.data);
         assert(s);
         s->push_and_unlock(value);
     }
 
     bool try_delete_min(Handle &handle, value_type &retval) {
-        spq_t *s = selection_strategy::get_locked_delete_spq(*this, handle.selection_strategy_data_);
+        spq_t *s = selection_strategy::get_locked_delete_spq(*this, handle.data);
         if (s) {
             retval = s->extract_min_and_unlock();
             return true;
@@ -185,12 +183,9 @@ class Multiqueue {
         std::stringstream ss;
         ss << "multiqueue\n\t";
         ss << "C: " << num_spqs_ / num_threads_ << "\n\t";
-        ss << "Using deletion buffer with size: " << Configuration::DeletionBufferSize << "\n\t";
-        ss << "Using insertion buffer with size: " << Configuration::InsertionBufferSize << "\n\t";
+        ss << "Deletion buffer size: " << Configuration::DeletionBufferSize << "\n\t";
+        ss << "Insertion buffer size: " << Configuration::InsertionBufferSize << "\n\t";
         ss << "Heap degree: " << Configuration::HeapDegree << "\n\t";
-        if (Configuration::UseNuma) {
-            ss << "Numa friendly\n\t";
-        }
         ss << "Selection strategy: " << selection_strategy::description(selection_strategy_data_);
         return ss.str();
     }

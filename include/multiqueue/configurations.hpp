@@ -24,8 +24,6 @@ struct DefaultConfiguration {
     // Buffer sizes (number of elements)
     static constexpr std::size_t DeletionBufferSize = 8;
     static constexpr std::size_t InsertionBufferSize = 8;
-    // Use numa friendly alignments (induces more overhead)
-    static constexpr bool UseNuma = false;
     template <typename T>
     using selection_strategy = selection_strategy::sticky<T>;
     // Degree of the heap tree

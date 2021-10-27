@@ -110,7 +110,7 @@ class xoroshiro128plus {
 
         std::uint64_t s0 = 0;
         std::uint64_t s1 = 0;
-        for (int i = 0; i < sizeof(JUMP) / sizeof(*JUMP); ++i)
+        for (std::size_t i = 0; i < sizeof(JUMP) / sizeof(*JUMP); ++i)
             for (int b = 0; b < 64; ++b) {
                 if (JUMP[i] & UINT64_C(1) << b) {
                     s0 ^= s_[0];
@@ -133,7 +133,7 @@ class xoroshiro128plus {
 
         std::uint64_t s0 = 0;
         std::uint64_t s1 = 0;
-        for (int i = 0; i < sizeof(LONG_JUMP) / sizeof(*LONG_JUMP); ++i)
+        for (std::size_t i = 0; i < sizeof(LONG_JUMP) / sizeof(*LONG_JUMP); ++i)
             for (int b = 0; b < 64; ++b) {
                 if (LONG_JUMP[i] & UINT64_C(1) << b) {
                     s0 ^= s_[0];

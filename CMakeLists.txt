@@ -19,6 +19,20 @@ cmake_dependent_option(multiqueue_INSTALL_DOCS "Add the generated documentation 
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
+# Read the system's L1 cache-line size and page size
+execute_process(COMMAND getconf LEVEL1_DCACHE_LINESIZE OUTPUT_VARIABLE L1_CACHE_LINESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(COMMAND getconf PAGESIZE OUTPUT_VARIABLE PAGESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+if(NOT "${L1_CACHE_LINESIZE}" MATCHES "^[0-9]+")
+  message(WARNING "Could not read L1 cache-line size, using default: 64")
+  set(L1_CACHE_LINESIZE 64)
+endif()
+
+if(NOT "${PAGESIZE}" MATCHES "^[0-9]+")
+  message(WARNING "Could not read page size, using default: 4096")
+  set(PAGESIZE 4096)
+endif()
+
 # Generate header containing definitions for L1 cache-line size and page size
 configure_file(
   "system_config.hpp.in"
