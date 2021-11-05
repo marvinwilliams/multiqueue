@@ -17,6 +17,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <utility>
 
 namespace multiqueue {
 

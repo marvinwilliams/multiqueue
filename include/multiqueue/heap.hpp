@@ -22,96 +22,116 @@
 
 namespace multiqueue {
 
-template <typename Key, typename T, unsigned int Degree, typename Allocator>
+template <typename Key, typename T, unsigned int Degree, typename Compare, typename Allocator>
 class Heap {
    public:
-    using value_type = multiqueue::Value<Key, T>;
-    using key_type = typename value_type::key_type;
-    using mapped_type = typename value_type::mapped_type;
-    using reference = value_type &;
-    using const_reference = value_type const &;
-
+    using key_type = Key;
+    using value_type = detail::value_type<Key, T>;
+    using key_compare = Compare;
+    template <typename Key, typename T, typename Compare>
+    struct value_compare {
+        bool operator()(value_type<Key, T> const &lhs, value_type<Key, T> const &rhs) const {
+            return Compare{}(key_extractor<Key, T>{}(lhs), key_extractor<Key, T>{}(rhs));
+        }
+    };
     using allocator_type = Allocator;
     using container_type = std::vector<value_type, allocator_type>;
-    using iterator = typename container_type::const_iterator;
-    using const_iterator = typename container_type::const_iterator;
-    using difference_type = typename container_type::difference_type;
-    using size_type = std::size_t;
+    using reference = typename container_type::reference;
+    using const_reference = typename container_type::const_reference;
 
+    using size_type = typename container_type::size_type;
+
+   private:
     static_assert(Degree >= 2, "Degree must be at least two");
+    static constexpr size_type degree_ = Degree;
+    static constexpr size_type root = size_type{0};
+    using key_extractor = detail::key_extractor<Key, T>;
 
-   private:
     container_type data_;
+    key_compare comp_;
 
    private:
-    static constexpr std::size_t parent_index(std::size_t index) noexcept {
-        return (index - 1) / Degree;
+    static constexpr size_type parent(size_type index) noexcept {
+        assert(index != root);
+        return (index - size_type(1)) / degree_;
     }
 
-    static constexpr std::size_t first_child_index(std::size_t index) noexcept {
-        return index * Degree + 1;
+    static constexpr size_type first_child(size_type index) noexcept {
+        return index * degree_ + size_type(1);
     }
 
-    // Find the index of the smallest `num_children` children of the node at
-    // index `index`
-    constexpr size_type min_child_index(size_type index, size_type num_children = Degree) const noexcept {
-        assert(index < size());
-        index = first_child_index(index);
-        auto const last = index + num_children;
+    // returns the index of the first node without all children
+    constexpr size_type first_partial_parent() const noexcept {
+        assert(!empty());
+        return parent(size());
+    }
+
+    // Find the index of the smallest node
+    // If no index is smaller than key, return `last`
+    size_type min_node(size_type first, size_type last, key_type const &key) const {
+        assert(first <= last);
         assert(last <= size());
-        auto result = index++;
-        for (; index < last; ++index) {
-            if (data_[index].key < data_[result].key) {
-                result = index;
-            }
+        if (first == last) {
+            return last;
         }
-        return result;
-    }
-
-    size_type sift_up_hole(size_type index, key_type key) {
-        assert(index < size());
-        size_type parent;
-        while (index > 0) {
-            parent = parent_index(index);
-            if (key >= data_[parent].key) {
+        auto smallest = last;
+        for (; first != last; ++first) {
+            if (comp_(key_extractor{}(data_[first]), key)) {
+                smallest = first;
+                ++first;
                 break;
             }
-            data_[index] = data_[parent];
-            index = parent;
+        }
+        for (; first != last; ++first) {
+            if (comp_(key_extractor{}(data_[first]), key_extractor{}(data_[smallest]))) {
+                smallest = first;
+            }
+        }
+        return smallest;
+    }
+
+    size_type sift_up(size_type index, key_type key) {
+        assert(index < size());
+        for (size_type p; index != root && (p = parent(index), comp_(key_extractor{}(data_[p]), key)); index = p) {
+            data_[index] = std::move(data_[parent]);
         }
         return index;
     }
 
-    size_type remove_min() {
-        assert(size() > 0);
+    size_type delete_top(key_type key) {
+        assert(!empty());
         if (size() == 1) {
             return 0;
         }
-        size_type const last_parent = parent_index(size() - 1);
-        // This loop exits too early if we descent into the last parent node
         size_type index = 0;
-        while (index < last_parent) {
-            auto const child = min_child_index(index);
-            assert(child < size());
-            data_[index] = data_[child];
-            index = child;
+        size_type const last_full = first_partial_parent();
+        while (index < last_full) {
+            auto next = first_child(index);
+            auto const last = next + degree_;
+            next = min_node(next, last, key);
+            if (next == last) {
+                return index;
+            }
+            data_[index] = std::move(data_[next]);
+            index = next;
         }
-        if (index == last_parent) {
-            // Loop has exited too early and we need to sift the hole down
-            // once more
-            auto const child = min_child_index(index, size() - first_child_index(last_parent));
-            assert(child < size());
-            data_[index] = data_[child];
-            return child;
+        if (index == last_full) {
+            auto next = first_child(index);
+            next = min_node(next, size(), key);
+            if (next == size()) {
+                return index;
+            }
+            data_[index] = std::move(data_[next]);
+            index = next;
         }
-        return sift_up_hole(index, data_.back().key);
+        return index;
     }
 
 #ifndef NDEBUG
     bool is_heap() const {
         for (size_type i = 0; i < size(); i++) {
             auto const first_child = first_child_index(i);
-            for (std::size_t j = 0; j < Degree; ++j) {
+            for (size_type j = 0; j < Degree; ++j) {
                 if (first_child + j >= size()) {
                     return true;
                 }
@@ -123,77 +143,69 @@ class Heap {
         return true;
     }
 #endif
+
    public:
     Heap() = default;
 
     explicit Heap(allocator_type const &alloc = allocator_type()) noexcept : data_(alloc) {
     }
 
-    inline iterator begin() const noexcept {
-        return data_.cbegin();
-    }
-
-    inline const_iterator cbegin() const noexcept {
-        return data_.cbegin();
-    }
-
-    inline iterator end() const noexcept {
-        return data_.cend();
-    }
-
-    inline const_iterator cend() const noexcept {
-        return data_.cend();
-    }
-
-    [[nodiscard]] inline bool empty() const noexcept {
+    [[nodiscard]] bool empty() const noexcept {
         return data_.empty();
     }
 
-    inline size_type size() const noexcept {
+    size_type size() const noexcept {
         return data_.size();
     }
 
-    inline value_type min() const {
+    const_reference top() const {
         return data_.front();
     }
 
     void pop() {
-        assert(!data_.empty());
-        auto const index = remove_min();
-        if (index + 1 < size()) {
-            data_[index] = data_.back();
+        assert(!empty());
+        auto const index = delete_top(key_extractor{}(data_.back()));
+        if (index + size_type(1) < size()) {
+            data_[index] = std::move(data_.back());
         }
         data_.pop_back();
         assert(is_heap());
     }
 
-    void extract_min(value_type &retval) {
+    void extract_top(reference retval) {
         assert(!data_.empty());
-        retval = data_.front();
+        retval = std::move(data_.front());
         pop();
+        assert(is_heap());
     }
 
-    void insert(value_type value) {
-        size_type parent;
-        if (empty()) {
+    void push(const_reference value) {
+        if (size_t p; empty() || (p = parent(size()), !comp_(key_extractor{}(value)), key_extractor{}(data_[p]))) {
             data_.push_back(value);
-        }
-        parent = parent_index(size());
-        if (value.key < data_[parent].key) {
-            data_.push_back(data_[parent]);
-            auto const index = sift_up_hole(parent, value.key);
-            data_[index] = value;
         } else {
-            data_.push_back(value);
+            data_.push_back(std::move(data_[p]));
+            auto const index = sift_up(p, key_extractor{}(value));
+            data_[index] = value;
         }
         assert(is_heap());
     }
 
-    inline void reserve(std::size_t cap) {
+    void push(value_type &&value) {
+        if (size_t p; empty() || (p = parent(size()), !comp_(key_extractor{}(value)), key_extractor{}(data_[p]))) {
+            data_.push_back(std::move(value));
+        } else {
+            data_.push_back(std::move(data_[p]));
+            auto const index = sift_up(p, key_extractor{}(value));
+            data_[index] = std::move(value);
+        }
+        assert(is_heap());
+    }
+
+    void reserve(size_type cap) {
         data_.reserve(cap);
     }
 
-    inline void clear() noexcept {
+    void clear() noexcept {
         data_.clear();
     }
 };

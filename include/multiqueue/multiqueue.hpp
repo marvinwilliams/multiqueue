@@ -14,14 +14,15 @@
 #include "multiqueue/buffered_pq.hpp"
 #include "multiqueue/configurations.hpp"
 #include "multiqueue/heap.hpp"
+#include "multiqueue/key_extractor.hpp"
 #include "multiqueue/ring_buffer.hpp"
-#include "multiqueue/value.hpp"
 #include "system_config.hpp"
 
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
+#include <functional>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -35,35 +36,47 @@
 
 namespace multiqueue {
 
-template <typename Key, typename T, typename Configuration = multiqueue::DefaultConfiguration,
-          typename Allocator = std::allocator<Key>>
+template <typename Key, typename T = void, typename Compare = std::less<Key>, typename Allocator = std::allocator<Key>,
+          typename Configuration = multiqueue::DefaultConfiguration>
 class Multiqueue {
+   public:
+    using key_type = Key;
+    using value_type = std::conditional_t<std::is_same_v<T, void>, Key, std::pair<Key, T>>;
+    using key_compare = Compare;
+
+    struct value_compare {
+        bool operator()(value_type const &lhs, value_type const &rhs) const {
+            return key_compare()(KeyExtractor<Key, T>{}(lhs), KeyExtractor<Key, T>{}(rhs));
+        }
+    };
+
+    using allocator_type = Allocator;
+    using size_type = std::size_t;
+
    private:
-    using this_t = Multiqueue<Key, T, Configuration, Allocator>;
+    using this_t = Multiqueue<Key, T, Compare, Allocator, Configuration>;
     using spq_t = BufferedPQ<Key, T, Configuration>;
     using selection_strategy = typename Configuration::template selection_strategy<this_t>;
     friend selection_strategy;
 
-   public:
-    using allocator_type = Allocator;
-    using key_type = Key;
-    using mapped_type = T;
-    using value_type = typename spq_t::value_type;
-    using size_type = std::size_t;
-
-    class Handle {
+    template <typename class alignas(2 * L1_CACHE_LINESIZE) Handle {
         friend this_t;
+        using data_t = typename selection_strategy::thread_data_t;
+
+        Multiqueue &mq;
+        data_t data_;
 
        public:
         Handle(Handle const &) = delete;
         Handle &operator=(Handle const &) = delete;
-        alignas(2 * L1_CACHE_LINESIZE) typename selection_strategy::thread_data_t data;
+        Handle(Handle &&) = default;
 
        private:
-        explicit Handle(this_t &mq) : data{mq} {
+        explicit Handle(unsigned int id, this_t &mq) : data{mq} {
         }
     };
 
+   public:
     static constexpr key_type min_valid_key = spq_t::min_valid_key;
     static constexpr key_type max_valid_key = spq_t::max_valid_key;
 
