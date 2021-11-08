@@ -16,24 +16,25 @@
 #include <cstdint>
 #include <iterator>
 #include <limits>
+#include <new>
 #include <type_traits>
 
 namespace multiqueue {
 
-template <typename T, std::uint64_t N>
-struct ring_buffer;
+template <typename T, std::size_t N>
+struct RingBuffer;
 
-template <typename T, std::uint64_t N>
-class ring_buffer_iterator {
-    friend ring_buffer<std::decay_t<T>, N>;
+template <typename T, std::size_t N>
+class RingBufferIterator {
+    friend RingBuffer<std::decay_t<T>, N>;
+
+    static constexpr std::size_t mask = N - 1;
 
    protected:
-    std::uint64_t pos_;
-    std::uint64_t begin_;
     T* data_;
+    std::size_t pos_;
 
-    explicit constexpr ring_buffer_iterator(T* data, std::uint64_t begin, std::uint64_t pos = 0) noexcept
-        : data_{data}, begin_{begin}, pos_{pos} {
+    explicit constexpr RingBufferIterator(T* data, std::size_t pos) noexcept : data_{data}, pos_{pos} {
     }
 
    public:
@@ -42,58 +43,59 @@ class ring_buffer_iterator {
     using difference_type = std::ptrdiff_t;
     using reference = T&;
     using pointer = T*;
+    using size_type = std::size_t;
 
     constexpr reference operator*() const noexcept {
-        return *(data_ + ((begin_ + pos_) & (N - 1u)));
+        assert(pos_ < N);
+        return *(data_ + pos_);
     }
 
     constexpr pointer operator->() const noexcept {
-        return data_ + ((begin_ + pos_) & (N - 1u));
+        assert(pos_ < N);
+        return data_ + pos_;
     }
 
-    constexpr ring_buffer_iterator& operator++() noexcept {
+    constexpr RingBufferIterator& operator++() noexcept {
         assert(pos_ < N);
-        ++pos_;
+        ++pos_ &= mask;
         return *this;
     }
 
-    constexpr ring_buffer_iterator operator++(int) noexcept {
+    constexpr RingBufferIterator operator++(int) noexcept {
         auto tmp = *this;
         operator++();
         return tmp;
     }
 
-    constexpr ring_buffer_iterator& operator--() noexcept {
+    constexpr RingBufferIterator& operator--() noexcept {
         assert(pos_ > 0);
         --pos_;
         return *this;
     }
 
-    constexpr ring_buffer_iterator operator--(int) noexcept {
+    constexpr RingBufferIterator operator--(int) noexcept {
         auto tmp = *this;
         operator--();
         return tmp;
     }
 
-    constexpr ring_buffer_iterator& operator+=(difference_type n) noexcept {
-        assert(pos_ + n <= N);
-        pos_ += n;
+    constexpr RingBufferIterator& operator+=(difference_type n) noexcept {
+        pos_ = (pos_ + n) & mask;
         return *this;
     }
 
-    constexpr ring_buffer_iterator operator+(difference_type n) noexcept {
+    constexpr RingBufferIterator operator+(difference_type n) noexcept {
         auto tmp = *this;
         tmp += n;
         return tmp;
     }
 
-    constexpr ring_buffer_iterator& operator-=(difference_type n) noexcept {
-        assert(pos_ >= n);
-        pos_ -= n;
+    constexpr RingBufferIterator& operator-=(difference_type n) noexcept {
+        pos_ = (pos_ - n) & mask;
         return *this;
     }
 
-    constexpr ring_buffer_iterator operator-(difference_type n) noexcept {
+    constexpr RingBufferIterator operator-(difference_type n) noexcept {
         auto tmp = *this;
         tmp -= n;
         return tmp;
@@ -103,39 +105,23 @@ class ring_buffer_iterator {
         return *(*this + n);
     }
 
-    constexpr difference_type operator-(ring_buffer_iterator const& other) noexcept {
-        return pos_ - other.pos_;
+    constexpr difference_type operator-(RingBufferIterator const& other) noexcept {
+        return (pos_ - other.pos_) & mask;
     }
 
-    constexpr difference_type operator<(ring_buffer_iterator const& other) noexcept {
-        return pos_ < other.pos_;
+    friend bool operator==(RingBufferIterator const& lhs, RingBufferIterator const& rhs) noexcept {
+        return lhs.data_ == rhs.data_ && lhs.pos_ == rhs.pos_;
     }
 
-    constexpr difference_type operator>(ring_buffer_iterator const& other) noexcept {
-        return pos_ > other.pos_;
-    }
-
-    constexpr difference_type operator<=(ring_buffer_iterator const& other) noexcept {
-        return pos_ <= other.pos_;
-    }
-
-    constexpr difference_type operator>=(ring_buffer_iterator const& other) noexcept {
-        return pos_ >= other.pos_;
-    }
-
-    friend bool operator==(ring_buffer_iterator const& lhs, ring_buffer_iterator const& rhs) noexcept {
-        return lhs.data_ == rhs.data_ && lhs.begin_ == rhs.begin_ && lhs.pos_ == rhs.pos_;
-    }
-
-    friend bool operator!=(ring_buffer_iterator const& lhs, ring_buffer_iterator const& rhs) noexcept {
+    friend bool operator!=(RingBufferIterator const& lhs, RingBufferIterator const& rhs) noexcept {
         return !(lhs == rhs);
     }
 };
 
-template <typename T, std::uint64_t N>
-struct ring_buffer {
+template <typename T, std::size_t N>
+struct RingBuffer {
     static_assert(N > 0 && (N & (N - 1)) == 0, "N must be a power of two");
-    static constexpr std::uint64_t Capacity = N;
+    static constexpr std::size_t Capacity = N;
 
     using value_type = T;
     using size_type = std::size_t;
@@ -144,64 +130,41 @@ struct ring_buffer {
     using const_reference = value_type const&;
     using pointer = value_type*;
     using const_pointer = value_type const*;
-    using iterator = ring_buffer_iterator<T, N>;
-    using const_iterator = ring_buffer_iterator<T const, N>;
+    using iterator = RingBufferIterator<T, N>;
+    using const_iterator = RingBufferIterator<T const, N>;
     using reverse_iterator = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
    private:
-    static constexpr std::uint64_t mask = N - 1;
+    static constexpr std::size_t mask = N - 1;
 
-    std::array<T, N> data_;
-    std::uint64_t begin_ = 0;
+    std::aligned_storage<sizeof(T), alignof(T)> data_[N];
+    size_type begin_ = 0;
     // The bit representing N signifies if the ring buffer is full
-    std::uint64_t end_ = 0;
+    size_type end_ = 0;
 
-   public:
-    inline bool empty() const noexcept {
-        return begin_ == end_;
+    size_type get_index(difference_type pos) const noexcept {
+        return ((begin_ + pos) & mask);
     }
 
-    inline bool full() const noexcept {
-        return end_ & N;
-    }
-
-    inline std::size_t size() const noexcept {
-        // If full, (end_ - begin_) & mask is zero
-        // Otherwise, full() is false
-        return !full() ? (end_ - begin_) & mask : N;
-    }
-
-    inline void push_front(T value) noexcept {
+    void make_hole(size_type pos) {
         assert(!full());
-        --begin_ &= mask;
-        data_[begin_] = value;
-        if (begin_ == end_) {
-            end_ |= N;
-        }
-    }
-
-    inline void push_back(T value) noexcept {
-        assert(!full());
-        data_[end_] = value;
-        ++end_ &= mask;
-        if (begin_ == end_) {
-            end_ |= N;
-        }
-    }
-
-    // `pos` is relative to begin_
-    void insert(std::uint64_t pos, T value) noexcept {
-        assert(!full());
-        assert(pos <= size());
+        assert(pos > 0 && pos < size());
         if (pos <= size() / 2) {
-            --begin_ &= mask;
-            for (std::uint64_t i = 0; i < pos; ++i) {
-                data_[(begin_ + i) & mask] = std::move(data_[(begin_ + i + 1) & mask]);
+            new (&data_[get_index(-1)]) value_type(std::move(data_[start]));
+            size_type start = begin_;
+            size_type prev = (start - 1) & mask;
+            while (start != ((begin_ + pos) & mask)) {
+                *std::launder(reinterpret_cast<T*>(&data_[start])) =
+                    std::move(*std::launder(reinterpret_cast<T*>(&data_[prev])));
+                start = (start + 1) & mask;
             }
-            data_[(begin_ + pos) & mask] = value;
+            for (size_type i = 0; i < pos; ++i) {
+                data_[(begin_ + i - 1) & mask] = std::move(data_[(begin_ + i) & mask]);
+            }
+            --begin_ &= mask;
         } else {
-            for (std::uint64_t i = 0; i < size() - pos; ++i) {
+            for (std::size_t i = 0; i < size() - pos; ++i) {
                 data_[(end_ - i) & mask] = std::move(data_[(end_ - (i + 1)) & mask]);
             }
             data_[(end_ - (size() - pos)) & mask] = value;
@@ -212,28 +175,90 @@ struct ring_buffer {
         }
     }
 
-    inline void pop_front() noexcept {
+   public:
+    bool empty() const noexcept {
+        return begin_ == end_;
+    }
+
+    bool full() const noexcept {
+        return end_ & (~mask);
+    }
+
+    std::size_t size() const noexcept {
+        return full() ? N : (end_ - begin_) & mask;
+    }
+
+    void push_front(const_reference value) {
+        assert(!full());
+        --begin_ &= mask;
+        new (&data_[begin_]) T(value);
+        if (begin_ == end_) {
+            end_ |= N;
+        }
+    }
+
+    void push_front(value_type&& value) {
+        assert(!full());
+        --begin_ &= mask;
+        new (&data_[begin_]) T(std::move(value));
+        if (begin_ == end_) {
+            end_ |= N;
+        }
+    }
+
+    void push_back(T value) {
+        assert(!full());
+        data_[end_] = value;
+        ++end_ &= mask;
+        if (begin_ == end_) {
+            end_ |= N;
+        }
+    }
+
+    // `pos` is relative to begin_
+    void insert(std::size_t pos, const_reference value) {
+        assert(!full());
+        assert(pos <= size());
+        if (pos <= size() / 2) {
+            for (std::size_t i = 0; i < pos; ++i) {
+                data_[(begin_ + i - 1) & mask] = std::move(data_[(begin_ + i) & mask]);
+            }
+            new (data_[(begin_ + pos) & mask]) value_type(value);
+            --begin_ &= mask;
+        } else {
+            for (std::size_t i = 0; i < size() - pos; ++i) {
+                data_[(end_ - i) & mask] = std::move(data_[(end_ - (i + 1)) & mask]);
+            }
+            data_[(end_ - (size() - pos)) & mask] = value;
+            ++end_ &= mask;
+        }
+        if (begin_ == end_) {
+            end_ |= N;
+        }
+    }
+
+    void pop_front() noexcept {
         assert(!empty());
         ++begin_ &= mask;
         end_ &= mask;
     }
 
-    inline void pop_back() noexcept {
+    void pop_back() noexcept {
         assert(!empty());
         --end_ &= mask;
     }
 
-    inline void clear() noexcept {
+    void clear() noexcept {
         begin_ = end_ = 0;
     }
 
     // Relative to `begin_`
-    T operator[](std::uint64_t pos) const noexcept {
+    T operator[](std::size_t pos) const noexcept {
         assert(pos < size());
         return data_[(begin_ + pos) & mask];
     }
 
-    T& operator[](std::uint64_t pos) noexcept {
+    T& operator[](std::size_t pos) noexcept {
         return data_[(begin_ + pos) & mask];
     }
 
