@@ -11,53 +11,67 @@
 #ifndef RING_BUFFER_HPP_INCLUDED
 #define RING_BUFFER_HPP_INCLUDED
 
-#include <array>
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <iterator>
-#include <limits>
 #include <new>
 #include <type_traits>
 
 namespace multiqueue {
 
-template <typename T, std::size_t N>
+template <typename T, std::size_t LogSize>
 struct RingBuffer;
 
-template <typename T, std::size_t N>
+template <typename T, std::size_t LogSize>
 class RingBufferIterator {
-    friend RingBuffer<std::decay_t<T>, N>;
-
-    static constexpr std::size_t mask = N - 1;
-
-   protected:
-    T* data_;
-    std::size_t pos_;
-
-    explicit constexpr RingBufferIterator(T* data, std::size_t pos) noexcept : data_{data}, pos_{pos} {
-    }
+    using ring_buffer_type = RingBuffer<std::decay_t<T>, LogSize>;
+    friend ring_buffer_type;
 
    public:
     using iterator_category = std::random_access_iterator_tag;
     using value_type = T;
-    using difference_type = std::ptrdiff_t;
-    using reference = T&;
-    using pointer = T*;
     using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+    using reference = value_type&;
+    using const_reference = value_type const&;
+    using pointer = value_type*;
+    using const_pointer = value_type const*;
 
-    constexpr reference operator*() const noexcept {
-        assert(pos_ < N);
-        return *(data_ + pos_);
+   protected:
+    ring_buffer_type* ring_buffer_;
+    size_type pos_;
+
+    explicit constexpr RingBufferIterator(ring_buffer_type* ring_buffer, size_type pos) noexcept
+        : ring_buffer_{ring_buffer}, pos_{pos} {
     }
 
-    constexpr pointer operator->() const noexcept {
-        assert(pos_ < N);
-        return data_ + pos_;
+   public:
+    constexpr RingBufferIterator() noexcept : ring_buffer_{nullptr}, pos_{0} {
+    }
+
+    explicit constexpr RingBufferIterator(RingBufferIterator const& other) noexcept
+        : ring_buffer_{other.ring_buffer_}, pos_{other.pos_} {
+    }
+
+    RingBufferIterator& operator=(RingBufferIterator const& other) noexcept {
+        ring_buffer_ = other.ring_buffer_;
+        pos_ = other.pos_;
+    }
+
+    reference operator*() const {
+        assert(ring_buffer_);
+        return (*ring_buffer_)[pos_];
+    }
+
+    pointer operator->() const {
+        assert(ring_buffer_);
+        return &((*ring_buffer_)[pos_]);
     }
 
     constexpr RingBufferIterator& operator++() noexcept {
-        assert(pos_ < N);
-        ++pos_ &= mask;
+        assert(pos_ < Capacity);
+        ++pos_;
         return *this;
     }
 
@@ -68,7 +82,7 @@ class RingBufferIterator {
     }
 
     constexpr RingBufferIterator& operator--() noexcept {
-        assert(pos_ > 0);
+        assert(pos > 0);
         --pos_;
         return *this;
     }
@@ -80,7 +94,8 @@ class RingBufferIterator {
     }
 
     constexpr RingBufferIterator& operator+=(difference_type n) noexcept {
-        pos_ = (pos_ + n) & mask;
+        assert(pos_ + n <= Capacity);
+        pos_ += n;
         return *this;
     }
 
@@ -91,7 +106,8 @@ class RingBufferIterator {
     }
 
     constexpr RingBufferIterator& operator-=(difference_type n) noexcept {
-        pos_ = (pos_ - n) & mask;
+        assert(pos_ >= n);
+        pos_ -= n;
         return *this;
     }
 
@@ -101,28 +117,34 @@ class RingBufferIterator {
         return tmp;
     }
 
-    constexpr reference operator[](difference_type n) noexcept {
-        return *(*this + n);
+    reference operator[](size_type n) {
+        assert(ring_buffer_);
+        assert(pos_ + n <= Capacity);
+        return (*ring_buffer_)[pos_ + n];
+    }
+
+    const_reference operator[](size_type n) const {
+        assert(ring_buffer_);
+        assert(pos_ + n <= Capacity);
+        return (*ring_buffer_)[pos_ + n];
     }
 
     constexpr difference_type operator-(RingBufferIterator const& other) noexcept {
-        return (pos_ - other.pos_) & mask;
+        assert(pos_ >= other.pos_);
+        return pos_ - other.pos_;
     }
 
-    friend bool operator==(RingBufferIterator const& lhs, RingBufferIterator const& rhs) noexcept {
-        return lhs.data_ == rhs.data_ && lhs.pos_ == rhs.pos_;
+    friend constexpr bool operator==(RingBufferIterator const& lhs, RingBufferIterator const& rhs) noexcept {
+        return lhs.pos_ == rhs.pos_;
     }
 
-    friend bool operator!=(RingBufferIterator const& lhs, RingBufferIterator const& rhs) noexcept {
+    friend constexpr bool operator!=(RingBufferIterator const& lhs, RingBufferIterator const& rhs) noexcept {
         return !(lhs == rhs);
     }
 };
 
-template <typename T, std::size_t N>
+template <typename T, std::size_t LogSize>
 struct RingBuffer {
-    static_assert(N > 0 && (N & (N - 1)) == 0, "N must be a power of two");
-    static constexpr std::size_t Capacity = N;
-
     using value_type = T;
     using size_type = std::size_t;
     using difference_type = std::ptrdiff_t;
@@ -130,186 +152,203 @@ struct RingBuffer {
     using const_reference = value_type const&;
     using pointer = value_type*;
     using const_pointer = value_type const*;
-    using iterator = RingBufferIterator<T, N>;
-    using const_iterator = RingBufferIterator<T const, N>;
+    using iterator = RingBufferIterator<T, LogSize>;
+    using const_iterator = RingBufferIterator<T const, LogSize>;
     using reverse_iterator = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
+    static constexpr size_type Capacity = size_type(1) << LogSize;
+
    private:
-    static constexpr std::size_t mask = N - 1;
+    static constexpr size_type capacity_mask = Capacity - 1;
 
-    std::aligned_storage<sizeof(T), alignof(T)> data_[N];
-    size_type begin_ = 0;
-    // The bit representing N signifies if the ring buffer is full
-    size_type end_ = 0;
+    std::aligned_storage_t<sizeof(T), alignof(T)> data_[Capacity];
+    size_type begin_;
+    size_type size_;
 
-    size_type get_index(difference_type pos) const noexcept {
-        return ((begin_ + pos) & mask);
+    static constexpr size_type into_range(size_type pos) noexcept {
+        return pos & capacity_mask;
     }
 
-    void make_hole(size_type pos) {
-        assert(!full());
-        assert(pos > 0 && pos < size());
-        if (pos <= size() / 2) {
-            new (&data_[get_index(-1)]) value_type(std::move(data_[start]));
-            size_type start = begin_;
-            size_type prev = (start - 1) & mask;
-            while (start != ((begin_ + pos) & mask)) {
-                *std::launder(reinterpret_cast<T*>(&data_[start])) =
-                    std::move(*std::launder(reinterpret_cast<T*>(&data_[prev])));
-                start = (start + 1) & mask;
-            }
-            for (size_type i = 0; i < pos; ++i) {
-                data_[(begin_ + i - 1) & mask] = std::move(data_[(begin_ + i) & mask]);
-            }
-            --begin_ &= mask;
-        } else {
-            for (std::size_t i = 0; i < size() - pos; ++i) {
-                data_[(end_ - i) & mask] = std::move(data_[(end_ - (i + 1)) & mask]);
-            }
-            data_[(end_ - (size() - pos)) & mask] = value;
-            ++end_ &= mask;
-        }
-        if (begin_ == end_) {
-            end_ |= N;
-        }
+    // Pos is absolute
+    pointer as_value_pointer(size_type pos) noexcept {
+        return std::launder(reinterpret_cast<pointer>(&data_[pos]));
+    }
+
+    const_pointer as_value_pointer(size_type pos) const noexcept {
+        return std::launder(reinterpret_cast<pointer>(&data_[pos]));
     }
 
    public:
-    bool empty() const noexcept {
-        return begin_ == end_;
+    RingBuffer() noexcept : begin_{0}, size_{0} {
     }
 
-    bool full() const noexcept {
-        return end_ & (~mask);
+    ~RingBuffer() noexcept {
+        clear();
     }
 
-    std::size_t size() const noexcept {
-        return full() ? N : (end_ - begin_) & mask;
+    [[nodiscard]] constexpr bool empty() const noexcept {
+        return size_ == 0;
+    }
+
+    constexpr bool full() const noexcept {
+        return size_ == Capacity;
+    }
+
+    constexpr std::size_t size() const noexcept {
+        return size_;
     }
 
     void push_front(const_reference value) {
         assert(!full());
-        --begin_ &= mask;
-        new (&data_[begin_]) T(value);
-        if (begin_ == end_) {
-            end_ |= N;
-        }
+        begin_ = into_range(begin_ - 1);
+        new (&data_[begin_]) value_type(value);
+        ++size_;
     }
 
     void push_front(value_type&& value) {
         assert(!full());
-        --begin_ &= mask;
-        new (&data_[begin_]) T(std::move(value));
-        if (begin_ == end_) {
-            end_ |= N;
-        }
+        begin_ = into_range(begin_ - 1);
+        new (&data_[begin_]) value_type(std::move(value));
+        ++size_;
     }
 
-    void push_back(T value) {
+    void push_back(const_reference value) {
         assert(!full());
-        data_[end_] = value;
-        ++end_ &= mask;
-        if (begin_ == end_) {
-            end_ |= N;
-        }
+        new (&data_[into_range(begin_ + size_)]) value_type(value);
+        ++size_;
     }
 
-    // `pos` is relative to begin_
-    void insert(std::size_t pos, const_reference value) {
+    void push_back(value_type&& value) {
         assert(!full());
-        assert(pos <= size());
-        if (pos <= size() / 2) {
-            for (std::size_t i = 0; i < pos; ++i) {
-                data_[(begin_ + i - 1) & mask] = std::move(data_[(begin_ + i) & mask]);
-            }
-            new (data_[(begin_ + pos) & mask]) value_type(value);
-            --begin_ &= mask;
+        new (&data_[into_range(begin_ + size_)]) value_type(std::move(value));
+        ++size_;
+    }
+
+    void insert(iterator pos, const_reference value) {
+        assert(!full());
+        if (pos == begin()) {
+            begin_ = into_range(begin_ - 1);
+            new (&data_[begin_]) value_type(value);
+        } else if (pos == end()) {
+            new (&data_[into_range(begin_ + size_)]) value_type(value);
         } else {
-            for (std::size_t i = 0; i < size() - pos; ++i) {
-                data_[(end_ - i) & mask] = std::move(data_[(end_ - (i + 1)) & mask]);
+            // Copy value, as it could exist in the buffer
+            auto value_cpy = value;
+            // Determine which side of the ring buffer has fewer elements
+            if (end() - pos <= pos - begin()) {
+                new (&data_[into_range(begin_ + size_)]) value_type(std::move(back()));
+                std::move_backward(pos, end() - 1, end());
+            } else {
+                new (&data_[into_range(begin_ - 1)]) value_type(std::move(front()));
+                std::move(begin() + 1, pos, begin());
             }
-            data_[(end_ - (size() - pos)) & mask] = value;
-            ++end_ &= mask;
+            *pos = std::move(value_cpy);
         }
-        if (begin_ == end_) {
-            end_ |= N;
-        }
+        ++size_;
     }
 
-    void pop_front() noexcept {
-        assert(!empty());
-        ++begin_ &= mask;
-        end_ &= mask;
+    void insert(iterator pos, value_type&& value) {
+        assert(!full());
+        if (pos == begin()) {
+            begin_ = into_range(begin_ - 1);
+            new (&data_[begin_]) value_type(value);
+        } else if (pos == end()) {
+            new (&data_[into_range(begin_ + size_)]) value_type(value);
+        } else {
+            // Move value, as it could exist in the buffer
+            auto value_cpy = std::move(value);
+            // Determine which side of the ring buffer has fewer elements
+            if (end() - pos <= pos - begin()) {
+                new (&data_[into_range(begin_ + size_)]) value_type(std::move(back()));
+                std::move_backward(pos, end() - 1, end());
+            } else {
+                new (&data_[into_range(begin_ - 1)]) value_type(std::move(front()));
+                std::move(begin() + 1, pos, begin());
+            }
+            *pos = std::move(value_cpy);
+        }
+        ++size_;
     }
 
-    void pop_back() noexcept {
+    void pop_front() {
         assert(!empty());
-        --end_ &= mask;
+        as_value_pointer(begin_)->~value_type();
+        begin_ = into_range(begin_ + 1);
+        --size_;
+    }
+
+    void pop_back() {
+        assert(!empty());
+        as_value_pointer(into_range(begin_ + size_ - 1))->~value_type();
+        --size_;
     }
 
     void clear() noexcept {
-        begin_ = end_ = 0;
+        std::for_each(begin(), end(), [](value_type& v) { v.~value_type(); });
+        begin_ = size_ = 0;
     }
 
-    // Relative to `begin_`
-    T operator[](std::size_t pos) const noexcept {
-        assert(pos < size());
-        return data_[(begin_ + pos) & mask];
+    const_reference operator[](size_type pos) const {
+        assert(pos < size_);
+        return *as_value_pointer(into_range(begin_ + pos));
     }
 
-    T& operator[](std::size_t pos) noexcept {
-        return data_[(begin_ + pos) & mask];
+    reference operator[](size_type pos) {
+        assert(pos < size_);
+        return *as_value_pointer(into_range(begin_ + pos));
     }
 
-    T front() const noexcept {
+    const_reference front() const {
         assert(!empty());
-        return data_[begin_];
+        return *as_value_pointer(begin_);
     }
 
-    T& front() noexcept {
-        return data_[begin_];
-    }
-
-    T back() const noexcept {
+    reference front() {
         assert(!empty());
-        return data_[(end_ - 1) & mask];
+        return *as_value_pointer(begin_);
     }
 
-    T& back() noexcept {
-        return data_[(end_ - 1) & mask];
+    const_reference back() const {
+        assert(!empty());
+        return *as_value_pointer(into_range(begin_ + size_ - 1));
+    }
+
+    reference back() {
+        assert(!empty());
+        return *as_value_pointer(into_range(begin_ + size_ - 1));
     }
 
     constexpr iterator begin() noexcept {
-        return iterator{data_.data(), begin_};
+        return iterator{this, 0};
     }
 
-    constexpr const const_iterator begin() const noexcept {
-        return const_iterator{data_.data(), begin_};
+    constexpr const_iterator begin() const noexcept {
+        return const_iterator{this, 0};
     }
 
-    constexpr const const_iterator cbegin() const noexcept {
-        return const_iterator{data_.data(), begin_};
+    constexpr const_iterator cbegin() const noexcept {
+        return const_iterator{this, 0};
     }
 
     constexpr iterator end() noexcept {
-        return iterator{data_.data(), begin_, size()};
+        return iterator{this, size_};
     }
 
-    constexpr const const_iterator end() const noexcept {
-        return const_iterator{data_.data(), begin_, size()};
+    constexpr const_iterator end() const noexcept {
+        return const_iterator{this, size_};
     }
 
     constexpr const const_iterator cend() const noexcept {
-        return const_iterator{data_.data(), begin_, size()};
+        return const_iterator{this, size_};
     }
 
     constexpr reverse_iterator rbegin() noexcept {
         return reverse_iterator{end()};
     }
 
-    constexpr const const_reverse_iterator rbegin() const noexcept {
-        return const_reverse_iterator{end()};
+    constexpr const_reverse_iterator rbegin() const noexcept {
+        return const_reverse_iterator{cend()};
     }
 
     constexpr const const_reverse_iterator crbegin() const noexcept {
@@ -320,11 +359,11 @@ struct RingBuffer {
         return reverse_iterator{begin()};
     }
 
-    constexpr const const_reverse_iterator rend() const noexcept {
-        return const_reverse_iterator{begin()};
+    constexpr const_reverse_iterator rend() const noexcept {
+        return const_reverse_iterator{cbegin()};
     }
 
-    constexpr const const_reverse_iterator crend() const noexcept {
+    constexpr const_reverse_iterator crend() const noexcept {
         return const_reverse_iterator{cbegin()};
     }
 };

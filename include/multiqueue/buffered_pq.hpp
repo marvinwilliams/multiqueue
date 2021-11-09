@@ -12,157 +12,151 @@
 #ifndef BUFFERED_PQ_HPP_INCLUDED
 #define BUFFERED_PQ_HPP_INCLUDED
 
+#include "multiqueue/buffer.hpp"
 #include "multiqueue/heap.hpp"
 #include "multiqueue/ring_buffer.hpp"
 #include "multiqueue/value.hpp"
 #include "system_config.hpp"
 
-#include <limits>
+#include <cstddef>
 #include <memory>
+#include <utility>
 
-#ifndef L1_CACHE_LINESIZE
-#error Need to define L1_CACHE_LINESIZE
-#endif
-
-#ifndef PAGESIZE
-#error Need to define PAGESIZE
-#endif
 namespace multiqueue {
 
-template <typename Key, typename T, typename Configuration>
-class alignas(PAGESIZE) BufferedPQ {
-   public:
-    using value_type = multiqueue::Value<Key, T>;
-    using allocator_type = typename Configuration::HeapAllocator;
-
+template <typename Key, typename T, typename Compare, typename Allocator, typename Configuration>
+class BufferedPQ {
    private:
-    using heap_type = Heap<Key, T, Configuration::HeapDegree, allocator_type>;
+    using heap_type = Heap<Key, T, Compare, Configuration::HeapDegree, Allocator>;
+    using key_of = detail::key_extractor<Key, T>;
 
    public:
-    static constexpr Key min_valid_key = 0;
-    static constexpr Key max_valid_key = (std::numeric_limits<Key>::max() >> 1) - 1;
-    static constexpr Key empty_key = max_valid_key + 1;
+    using key_type = typename heap_type::key_type;
+    using value_type = typename heap_type::value_type;
+    using key_compare = Compare;
+    using allocator_type = Allocator;
+    using reference = typename heap_type::reference;
+    using const_reference = typename heap_type::const_reference;
+    using size_type = std::size_t;
 
    private:
-    static constexpr Key lock_mask = ~empty_key;
+    Buffer<value_type, Configuration::InsertionBuffersize> insertion_buffer_;
+    RingBuffer<value_type, Configuration::DeletionBufferSize> deletion_buffer_;
 
-    // The highest bit of min_key also functions as lock
-    std::atomic<Key> min_key;
-    alignas(L1_CACHE_LINESIZE) std::array<value_type, Configuration::InsertionBufferSize> insertion_buffer;
-    typename decltype(insertion_buffer)::iterator insertion_buffer_end;
-    ring_buffer<value_type, Configuration::DeletionBufferSize> deletion_buffer;
+    heap_type heap_;
+    key_compare comp_;
 
-    heap_type heap;
-
-    inline void flush_insertion_buffer() {
-        assert(min_key & lock_mask);
-        auto it = insertion_buffer.begin();
-        while (it != insertion_buffer_end) {
-            heap.insert(*it);
-            ++it;
+   private:
+    void flush_insertion_buffer() {
+        for (auto it = insertion_buffer_.begin(); it != insertion_buffer_.end(); ++it) {
+            heap_.insert(std::move(*it));
         }
-        insertion_buffer_end = insertion_buffer.begin();
+        insertion_buffer_.clear();
     }
 
-    void refresh_min() {
-        assert(min_key & lock_mask);
-        assert(deletion_buffer.empty());
+    void refill_deletion_buffer() {
+        assert(deletion_buffer_.empty());
         flush_insertion_buffer();
-        while (!deletion_buffer.full() && !heap.empty()) {
-            deletion_buffer.push_back(heap.min());
-            heap.pop();
+        while (!deletion_buffer_.full() && !heap_.empty()) {
+            deletion_buffer_.push_back(heap_.top());
+            heap_.pop();
         }
     }
 
    public:
-    explicit BufferedPQ(allocator_type const &alloc = allocator_type())
-        : min_key(empty_key), insertion_buffer_end(insertion_buffer.begin()), heap(alloc) {
+    explicit BufferedPQ(allocator_type const& alloc = allocator_type()) : heap_(alloc) {
     }
 
-    // Lock must be held
-    // Deletion buffer must not be empty
-    value_type extract_min_and_unlock() {
-        assert(min_key & lock_mask);
-        assert(!deletion_buffer.empty());
-        auto retval = deletion_buffer.front();
-        deletion_buffer.pop_front();
-        if (deletion_buffer.empty()) {
-            refresh_min();
+    [[nodiscard]] constexpr bool empty() const noexcept {
+        return deletion_buffer_.empty();
+    }
+
+    constexpr size_type size() const noexcept {
+        return insertion_buffer_.size() + deletion_buffer_.size() + heap_.size();
+    }
+
+    constexpr const_reference top() const {
+        return deletion_buffer_.front();
+    }
+
+    void pop() {
+        assert(!empty());
+        deletion_buffer_.pop_front();
+        if (deletion_buffer_.empty()) {
+            refill_deletion_buffer();
         }
-        min_key.store(deletion_buffer.empty() ? empty_key : deletion_buffer.front().key, std::memory_order_release);
-        return retval;
+    }
+
+    void extract_top(reference retval) {
+        assert(!empty());
+        retval = std::move(deletion_buffer_.front());
+        pop();
     };
 
-    void push_and_unlock(value_type value) {
-        assert(min_key & lock_mask);
-        auto pos = deletion_buffer.size();
-        while (pos > 0 && value.key < deletion_buffer[pos - 1].key) {
-            --pos;
+    void push(const_reference value) {
+        auto it = deletion_buffer_.end();
+        while (it != deletion_buffer_.begin() && comp_(key_of{}(value), key_of{}(*(it - 1)))) {
+            --it;
         }
-        if (!deletion_buffer.empty() && pos == deletion_buffer.size()) {
+        if (!deletion_buffer_.empty() && it == deletion_buffer_.end()) {
             // Insert into insertion buffer
-            if (insertion_buffer_end != insertion_buffer.end()) {
-                *insertion_buffer_end++ = value;
-            } else {
+            if (insertion_buffer_.full()) {
                 flush_insertion_buffer();
-                heap.insert(value);
+                heap_.insert(value);
+            } else {
+                insertion_buffer_.push_back(value);
             }
-            auto current_min = get_min_key();
-            min_key.store(current_min, std::memory_order_release);
         } else {
             // Insert into deletion buffer
-            if (deletion_buffer.full()) {
-                if (insertion_buffer_end != insertion_buffer.end()) {
-                    *insertion_buffer_end++ = deletion_buffer.back();
-                } else {
+            if (deletion_buffer_.full()) {
+                if (insertion_buffer_.full()) {
                     flush_insertion_buffer();
-                    heap.insert(deletion_buffer.back());
+                    heap_.insert(std::move(deletion_buffer_.back()));
+                } else {
+                    insertion_buffer_.push_back(std::move(deletion_buffer_.back()));
                 }
-                deletion_buffer.pop_back();
+                deletion_buffer_.pop_back();
             }
-            deletion_buffer.insert(pos, value);
-            auto current_min = pos == 0 ? value.key : get_min_key();
-            min_key.store(current_min, std::memory_order_release);
+            deletion_buffer_.insert(it, value);
         }
     }
 
-    inline bool empty() const noexcept {
-        return deletion_buffer.empty();
-    }
-
-    inline std::size_t size() const noexcept {
-        return (insertion_buffer_end - insertion_buffer.begin()) + deletion_buffer.size() + heap.size();
-    }
-
-    inline Key get_min_key() const noexcept {
-        return min_key.load(std::memory_order_relaxed) & (~lock_mask);
-    }
-
-    inline bool try_lock() noexcept {
-        Key current = min_key.load(std::memory_order_relaxed);
-        if (current & lock_mask) {
-            return false;
+    void push(value_type&& value) {
+        auto it = deletion_buffer_.end();
+        while (it != deletion_buffer_.begin() && comp_(key_of{}(value), key_of{}(*(it - 1)))) {
+            --it;
         }
-        return min_key.compare_exchange_strong(current, current | lock_mask, std::memory_order_acquire,
-                                               std::memory_order_relaxed);
-    }
-
-    inline bool try_lock(Key expected) noexcept {
-        if (expected & lock_mask) {
-            return false;
+        if (!deletion_buffer_.empty() && it == deletion_buffer_.end()) {
+            // Insert into insertion buffer
+            if (insertion_buffer_.full()) {
+                flush_insertion_buffer();
+                heap_.insert(std::move(value));
+            } else {
+                insertion_buffer_.push_back(std::move(value));
+            }
+        } else {
+            // Insert into deletion buffer
+            if (deletion_buffer_.full()) {
+                if (insertion_buffer_.full()) {
+                    flush_insertion_buffer();
+                    heap_.insert(std::move(deletion_buffer_.back()));
+                } else {
+                    insertion_buffer_.push_back(std::move(deletion_buffer_.back()));
+                }
+                deletion_buffer_.pop_back();
+            }
+            deletion_buffer_.insert(it, std::move(value));
         }
-        return min_key.compare_exchange_strong(expected, expected | lock_mask, std::memory_order_acquire,
-                                               std::memory_order_relaxed);
     }
 
-    inline void unlock() noexcept {
-        Key expected = min_key.load(std::memory_order_acquire);
-        assert(expected & lock_mask);
-        min_key.store(expected & (~lock_mask), std::memory_order_release);
+    void heap_reserve(size_type cap) {
+        heap_.reserve(cap);
     }
 
-    inline void heap_reserve(std::size_t cap) {
-        heap.reserve(cap);
+    constexpr void clear() noexcept {
+        insertion_buffer_.clear();
+        deletion_buffer_.clear();
+        heap_.clear();
     }
 };
 

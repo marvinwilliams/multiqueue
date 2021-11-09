@@ -37,7 +37,7 @@ namespace multiqueue {
 
 #endif
 
-template <typename Key, typename T, unsigned int Degree, typename Compare, typename Allocator>
+template <typename Key, typename T, typename Compare, unsigned int Degree, typename Allocator>
 class Heap {
    public:
     using key_type = Key;
@@ -147,15 +147,15 @@ class Heap {
     explicit Heap(allocator_type const &alloc = allocator_type()) noexcept : data_(alloc) {
     }
 
-    [[nodiscard]] bool empty() const noexcept {
+    [[nodiscard]] constexpr bool empty() const noexcept {
         return data_.empty();
     }
 
-    size_type size() const noexcept {
+    constexpr size_type size() const noexcept {
         return data_.size();
     }
 
-    const_reference top() const {
+    constexpr const_reference top() const {
         return data_.front();
     }
 
@@ -214,11 +214,11 @@ class Heap {
         data_.reserve(cap);
     }
 
-    void clear() noexcept {
+    constexpr void clear() noexcept {
         data_.clear();
     }
 
-    bool verify() const {
+    bool verify() const noexcept{
         for (size_type i = 0; i < size(); i++) {
             auto const first_child = first_child_index(i);
             for (size_type j = 0; j < Degree; ++j) {
