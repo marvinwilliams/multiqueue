@@ -40,10 +40,13 @@ class BufferedPQ {
     using size_type = std::size_t;
 
    private:
-    Buffer<value_type, Configuration::InsertionBuffersize> insertion_buffer_;
-    RingBuffer<value_type, Configuration::DeletionBufferSize> deletion_buffer_;
+    using insertion_buffer_type = Buffer<value_type, Configuration::InsertionBufferSize>;
+    using deletion_buffer_type = RingBuffer<value_type, Configuration::DeletionBufferSize>;
 
+    insertion_buffer_type insertion_buffer_;
+    deletion_buffer_type deletion_buffer_;
     heap_type heap_;
+
     key_compare comp_;
 
    private:
@@ -57,7 +60,8 @@ class BufferedPQ {
     void refill_deletion_buffer() {
         assert(deletion_buffer_.empty());
         flush_insertion_buffer();
-        while (!deletion_buffer_.full() && !heap_.empty()) {
+        size_type num_refill = std::min(deletion_buffer_type::Capacity, heap_.size());
+        for (size_type i = 0; i < num_refill; ++i) {
             deletion_buffer_.push_back(heap_.top());
             heap_.pop();
         }
