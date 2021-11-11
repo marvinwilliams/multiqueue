@@ -33,7 +33,8 @@ class BufferedPQ {
    public:
     using key_type = typename heap_type::key_type;
     using value_type = typename heap_type::value_type;
-    using key_compare = Compare;
+    using key_compare = typename heap_type::key_compare;
+    using value_compare = typename heap_type::value_compare;
     using allocator_type = Allocator;
     using reference = typename heap_type::reference;
     using const_reference = typename heap_type::const_reference;
@@ -47,7 +48,7 @@ class BufferedPQ {
     deletion_buffer_type deletion_buffer_;
     heap_type heap_;
 
-    key_compare comp_;
+    [[no_unique_address]] key_compare comp_;
 
    private:
     void flush_insertion_buffer() {
@@ -68,7 +69,8 @@ class BufferedPQ {
     }
 
    public:
-    explicit BufferedPQ(allocator_type const& alloc = allocator_type()) : heap_(alloc) {
+    explicit BufferedPQ(key_compare const& comp, allocator_type const& alloc = allocator_type())
+        : comp_{comp}, heap_(comp, alloc) {
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept {
@@ -80,6 +82,7 @@ class BufferedPQ {
     }
 
     constexpr const_reference top() const {
+        assert(!empty());
         return deletion_buffer_.front();
     }
 
@@ -153,7 +156,7 @@ class BufferedPQ {
         }
     }
 
-    void heap_reserve(size_type cap) {
+    void reserve(size_type cap) {
         heap_.reserve(cap);
     }
 

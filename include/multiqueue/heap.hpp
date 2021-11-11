@@ -66,7 +66,7 @@ class Heap {
     static constexpr size_type root = size_type{0};
 
     container_type data_;
-    key_compare comp_;
+    [[no_unique_address]] key_compare comp_;
 
    private:
     static constexpr size_type parent(size_type index) noexcept {
@@ -142,9 +142,8 @@ class Heap {
     }
 
    public:
-    Heap() = default;
-
-    explicit Heap(allocator_type const &alloc = allocator_type()) noexcept : data_(alloc) {
+    explicit Heap(key_comparator const &comp, allocator_type const &alloc = allocator_type()) noexcept
+        : comp_{comp}, data_(alloc) {
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept {
@@ -218,7 +217,7 @@ class Heap {
         data_.clear();
     }
 
-    bool verify() const noexcept{
+    bool verify() const noexcept {
         for (size_type i = 0; i < size(); i++) {
             auto const first_child = first_child_index(i);
             for (size_type j = 0; j < Degree; ++j) {

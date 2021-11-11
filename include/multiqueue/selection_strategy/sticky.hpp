@@ -12,8 +12,8 @@
 #ifndef SELECTION_STRATEGY_STICKY_HPP_INCLUDED
 #define SELECTION_STRATEGY_STICKY_HPP_INCLUDED
 
-#include "multiqueue/fastrange.h"
-#include "multiqueue/xoroshiro128plus.hpp"
+#include "multiqueue/external/fastrange.h"
+#include "multiqueue/external/xoroshiro128plus.hpp"
 
 #include <cstdint>
 #include <sstream>
@@ -23,98 +23,98 @@
 namespace multiqueue {
 namespace selection_strategy {
 
-template <typename Multiqueue>
 struct sticky {
-    using key_type = typename Multiqueue::key_type;
-    using size_type = typename Multiqueue::size_type;
-    using spq_t = typename Multiqueue::spq_t;
-
     struct shared_data_t {
         unsigned int stickiness;
+        template <typename Configuration>
+        shared_data_t(Configuration const &config) : stickiness{config.stickiness} {
+        }
+
+        std::string description() const {
+            std::stringstream ss;
+            ss << "sticky\n";
+            ss << "\tStickiness: " << stickiness << '\n';
+            return ss.str();
+        }
     };
 
     struct thread_data_t {
         xoroshiro128plus gen;
-        unsigned int insert_count = 0;
-        unsigned int delete_count = 0;
-        spq_t *insert_spq;
-        spq_t *delete_spq[2];
+        unsigned int push_count = 0;
+        unsigned int delete_count[2] = {0, 0};
+        void *push_pq;
+        void *delete_pq[2];
 
-        explicit thread_data_t(Multiqueue&) {}
-
-        void seed(std::uint64_t seed) noexcept {
-            gen.seed(seed);
+        explicit thread_data_t(std::uint64_t seed) noexcept : gen(seed) {
         }
     };
 
-    inline static spq_t *get_locked_insert_spq(Multiqueue &mq, thread_data_t &thread_data) {
-        if (thread_data.insert_count > 0 && thread_data.insert_spq->try_lock()) {
-            --thread_data.insert_count;
-            return thread_data.insert_spq;
+    template <typename Multiqueue>
+    static inline auto lock_push_pq(Multiqueue &mq, thread_data_t &thread_data) {
+        if (thread_data.push_count == 0) {
+            thread_data.push_pq = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_spqs_);
+            thread_data.push_count = mq.shared_data_.stickiness;
         }
-        do {
-            thread_data.insert_spq = mq.spqs_ + fastrange64(thread_data.gen(), mq.num_spqs_);
-        } while (!thread_data.insert_spq->try_lock());
-        thread_data.insert_count = mq.selection_strategy_data_.stickiness - 1;
 
-        return thread_data.insert_spq;
+        if (static_cast<typename Multiqueue::pq_type *>(thread_data.push_pq)->try_lock()) {
+            --thread_data.push_count;
+            return static_cast<typename Multiqueue::pq_type *>(thread_data.push_pq);
+        }
+
+        do {
+            thread_data.push_pq = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_spqs_);
+        } while (!static_cast<typename Multiqueue::pq_type *>(thread_data.push_pq)->try_lock());
+        thread_data.push_count = mq.shared_data_.stickiness - 1;
+        return static_cast<typename Multiqueue::pq_type *>(thread_data.push_pq);
     }
 
-    inline static spq_t *get_locked_delete_spq(Multiqueue &mq, thread_data_t &thread_data) {
-        key_type first_key;
-        key_type second_key;
-        if (thread_data.delete_count > 0) {
-            first_key = thread_data.delete_spq[0]->get_min_key();
-            second_key = thread_data.delete_spq[1]->get_min_key();
-            if (first_key != Multiqueue::empty_key || second_key != Multiqueue::empty_key) {
-                if (second_key < first_key) {
-                    std::swap(first_key, second_key);
-                    std::swap(thread_data.delete_spq[0], thread_data.delete_spq[1]);
-                }
-                // Now the min element are in first position and can't be empty
-                if (thread_data.delete_spq[0]->try_lock(first_key)) {
-                    --thread_data.delete_count;
-                    if (second_key == Multiqueue::empty_key && thread_data.delete_count > 0) {
-                        thread_data.delete_spq[1] = mq.spqs_ + fastrange64(thread_data.gen(), mq.num_spqs_);
-                    }
-                    return thread_data.delete_spq[0];
-                }
-            } else {
-                thread_data.delete_count = 0;
-                return nullptr;
-            }
+    template <typename Multiqueue>
+    inline static auto lock_delete_pq(Multiqueue &mq, thread_data_t &thread_data) {
+        if (thread_data.delete_count[0] == 0) {
+            thread_data.delete_pq[0] = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_spqs_);
+            thread_data.delete_count[0] = mq.shared_data_.stickiness;
         }
-        // If we get here, either the count is 0 or locking failed, so choose new SPQs randomly
+        if (thread_data.delete_count[1] == 0) {
+            thread_data.delete_pq[1] = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_spqs_);
+            thread_data.delete_count[1] = mq.shared_data_.stickiness;
+        }
+        auto first_key = static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[0])->concurrent_top_key();
+        auto second_key = static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[1])->concurrent_top_key();
+
         do {
-            thread_data.delete_spq[0] = mq.spqs_ + fastrange64(thread_data.gen(), mq.num_spqs_);
-            thread_data.delete_spq[1] = mq.spqs_ + fastrange64(thread_data.gen(), mq.num_spqs_);
-            first_key = thread_data.delete_spq[0]->get_min_key();
-            second_key = thread_data.delete_spq[1]->get_min_key();
-            if (first_key != Multiqueue::empty_key || second_key != Multiqueue::empty_key) {
-                if (second_key < first_key) {
-                    std::swap(first_key, second_key);
-                    std::swap(thread_data.delete_spq[0], thread_data.delete_spq[1]);
+            if (first_key != Multiqueue::sentinel &&
+                (second_key == Multiqueue::sentinel || mq.comp_(first_key, second_key))) {
+                if (static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[0])->try_lock_if_key(first_key)) {
+                    --thread_data.delete_count[0];
+                    --thread_data.delete_count[1];
+                    return static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[0]);
+                } else {
+                    thread_data.delete_pq[0] = mq.spqs_ + fastrange64(thread_data.gen(), mq.num_spqs_);
+                    first_key =
+                        static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[0])->concurrent_top_key();
+                    thread_data.delete_count[0] = mq.shared_data_.stickiness;
                 }
-                if (thread_data.delete_spq[0]->try_lock(first_key)) {
-                    thread_data.delete_count = mq.selection_strategy_data_.stickiness - 1;
-                    if (second_key == Multiqueue::empty_key) {
-                        thread_data.delete_spq[1] = mq.spqs_ + fastrange64(thread_data.gen(), mq.num_spqs_);
-                    }
-                    return thread_data.delete_spq[0];
+            } else if (second_key != Multiqueue::sentinel) {
+                if (static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[1])
+                        ->try_lock_if_key(second_key)) {
+                    --thread_data.delete_count[0];
+                    --thread_data.delete_count[1];
+                    return static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[1]);
+                } else {
+                    thread_data.delete_pq[1] = mq.spqs_ + fastrange64(thread_data.gen(), mq.num_spqs_);
+                    second_key =
+                        static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[1])->concurrent_top_key();
+                    thread_data.delete_count[1] = mq.shared_data_.stickiness;
                 }
             } else {
+                // Both keys are sentinels
+                thread_data.delete_count[0] = 0;
+                thread_data.delete_count[1] = 0;
                 break;
             }
-        } while (true);
-        thread_data.delete_count = 0;
-        return nullptr;
-    }
 
-    static std::string description(shared_data_t const &data) {
-        std::stringstream ss;
-        ss << "sticky\n";
-        ss << "\tStickiness: " << data.stickiness << '\n';
-        return ss.str();
+        } while (true);
+        return nullptr;
     }
 };
 

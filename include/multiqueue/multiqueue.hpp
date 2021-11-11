@@ -11,24 +11,26 @@
 #ifndef MULTIQUEUE_HPP_INCLUDED
 #define MULTIQUEUE_HPP_INCLUDED
 
-#include "multiqueue/buffered_pq.hpp"
-#include "multiqueue/configurations.hpp"
+#include "multiqueue/default_configuration.hpp"
+#include "multiqueue/guarded_pq.hpp"
 #include "multiqueue/heap.hpp"
-#include "multiqueue/key_extractor.hpp"
-#include "multiqueue/ring_buffer.hpp"
 #include "system_config.hpp"
 
-#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
 #include <functional>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
+
+#ifdef MQ_ELEMENT_DISTRIBUTION
+#include <algorithm>
 #include <utility>
 #include <vector>
+#endif
 
 #ifndef L1_CACHE_LINESIZE
 #error Need to define L1_CACHE_LINESIZE
@@ -37,34 +39,33 @@
 namespace multiqueue {
 
 template <typename Key, typename T = void, typename Compare = std::less<Key>, typename Allocator = std::allocator<Key>,
-          typename Configuration = multiqueue::DefaultConfiguration>
+          typename Configuration = multiqueue::StickySelectionConfiguration>
 class Multiqueue {
-   public:
-    using key_type = Key;
-    using value_type = std::conditional_t<std::is_same_v<T, void>, Key, std::pair<Key, T>>;
-    using key_compare = Compare;
-
-    struct value_compare {
-        bool operator()(value_type const &lhs, value_type const &rhs) const {
-            return key_compare()(KeyExtractor<Key, T>{}(lhs), KeyExtractor<Key, T>{}(rhs));
-        }
-    };
-
-    using allocator_type = Allocator;
-    using size_type = std::size_t;
-
    private:
     using this_t = Multiqueue<Key, T, Compare, Allocator, Configuration>;
-    using spq_t = BufferedPQ<Key, T, Configuration>;
+    using pq_type = GuardedPQ<Key, T, Compare, Allocator, Configuration>;
+
+   public:
+    using key_type = typename pq_type::key_type;
+    using value_type = typename pq_type::value_type;
+    using key_compare = typename pq_type::key_compare;
+    using value_compare = typename pq_type::value_compare;
+    using allocator_type = Allocator;
+    using reference = typename pq_type::reference;
+    using const_reference = typename pq_type::const_reference;
+    using size_type = typename pq_type::size_type;
+
+   private:
     using selection_strategy = typename Configuration::template selection_strategy<this_t>;
     friend selection_strategy;
+    using shared_data_type = typename selection_strategy::shared_data_t;
 
-    template <typename class alignas(2 * L1_CACHE_LINESIZE) Handle {
+    class alignas(2 * L1_CACHE_LINESIZE) Handle {
         friend this_t;
         using data_t = typename selection_strategy::thread_data_t;
 
-        Multiqueue &mq;
-        data_t data_;
+        alignas(2 * L1_CACHE_LINESIZE) data_t data_;
+        Multiqueue &mq_;
 
        public:
         Handle(Handle const &) = delete;
@@ -72,100 +73,128 @@ class Multiqueue {
         Handle(Handle &&) = default;
 
        private:
-        explicit Handle(unsigned int id, this_t &mq) : data{mq} {
+        explicit constexpr Handle(this_t &mq) noexcept : data_{mq.rng_()}, mq_{mq} {
+        }
+
+       public:
+        bool try_extract_top(reference retval) {
+            pq_type *pq = selection_strategy::lock_delete_pq(mq_, data_);
+            if (!pq) {
+                return false;
+            }
+            pq->extract_top(retval);
+            pq->unlock();
+        }
+
+        void push(const_reference value) {
+            pq_type *pq = selection_strategy::lock_push_pq(mq_, data_);
+            assert(pq);
+            pq->push(value);
+            pq->unlock();
+        }
+
+        void push(value_type &&value) {
+            pq_type *pq = selection_strategy::lock_push_pq(mq_, data_);
+            assert(pq);
+            pq->push(std::move(value));
+            pq->unlock();
+        }
+
+        bool try_extract_from(size_type pos, value_type &retval) {
+            assert(pos < mq_.num_pqs_);
+            key_type key = mq_.pq_list_[pos].concurrent_top_key();
+            if (key != Multiqueue::sentinel && mq_.pq_list_[pos].try_lock_if_key(key)) {
+                mq_.pq_list_[pos].extract_top(retval);
+                return true;
+            }
+            return false;
         }
     };
 
-   public:
-    static constexpr key_type min_valid_key = spq_t::min_valid_key;
-    static constexpr key_type max_valid_key = spq_t::max_valid_key;
+    using pq_alloc_type = typename std::allocator_traits<allocator_type>::template rebind_alloc<pq_type>;
+    using pq_alloc_traits = std::allocator_traits<pq_alloc_type>;
+
+    static inline key_type sentinel = Configuration::template sentinel<key_type>::value;
 
    private:
-    using alloc_type = typename allocator_type::template rebind<spq_t>::other;
-    using alloc_traits = std::allocator_traits<alloc_type>;
+    // No padding needed, as these members are not written to concurrently?
+    pq_type *pq_list_;
+    size_type num_pqs_;
+    xoroshiro128plus rng_;
+    [[no_unique_address]] key_compare comp_;
+    [[no_unique_address]] shared_data_type shared_data_;
+    [[no_unique_address]] pq_alloc_type alloc_;
 
-    static constexpr key_type empty_key = spq_t::empty_key;
-
-   private:
-    // TODO: No padding needed, as these members are not written to concurrently?
-    spq_t *spqs_;
-    size_type num_spqs_;
-    size_type num_threads_;
-    [[no_unique_address]] typename selection_strategy::shared_data_t selection_strategy_data_;
-    [[no_unique_address]] alloc_type alloc_;
-
-   public:
-    template <typename... Args>
-    explicit Multiqueue(unsigned int num_threads, std::size_t c, allocator_type const &alloc, Args &&...args)
-        : num_spqs_{num_threads * c},
-          num_threads_{num_threads},
-          selection_strategy_data_{std::forward<Args>(args)...},
-          alloc_(alloc) {
-        assert(num_threads >= 1);
-        spqs_ = alloc_traits::allocate(alloc_, num_spqs_);
-        for (spq_t *s = spqs_; s != spqs_ + num_spqs_; ++s) {
+    void abort_on_data_misalignment() {
+        for (pq_type *s = pq_list_; s != pq_list_ + num_pqs_; ++s) {
             if (reinterpret_cast<std::uintptr_t>(s) % (2 * L1_CACHE_LINESIZE) != 0) {
                 std::abort();
             }
-            alloc_traits::construct(alloc_, s);
         }
     }
 
-    template <typename... Args>
-    explicit Multiqueue(unsigned int num_threads, std::size_t c, Args &&...args)
-        : Multiqueue(num_threads, c, static_cast<allocator_type const &>(allocator_type()),
-                     std::forward<Args>(args)...) {
+   public:
+    explicit Multiqueue(unsigned int num_threads, Configuration const &config = Configuration(),
+                        key_compare const &comp = key_compare(), allocator_type const &alloc = allocator_type())
+        : num_pqs_{num_threads * config.c}, rng_(config.seed), comp_(comp), shared_data_{config}, alloc_(alloc) {
+        if (num_threads == 0) {
+            throw std::invalid_argument("num_threads cannot be 0");
+        }
+        if (config.c == 0) {
+            throw std::invalid_argument("c cannot be 0");
+        }
+        pq_list_ = pq_alloc_traits::allocate(alloc_, num_pqs_);
+        for (pq_type *pq = pq_list_; pq != pq_list_ + num_pqs_; ++pq) {
+            pq_alloc_traits::construct(alloc_, pq, comp);
+        }
+#ifdef MQ_ABORT_ON_MISALIGNMENT
+        abort_on_data_misalignment();
+#endif
+    }
+
+    explicit Multiqueue(unsigned int num_threads, Configuration const &config, allocator_type const &alloc)
+        : Multiqueue(num_threads, config, key_compare(), alloc) {
+    }
+
+    explicit Multiqueue(unsigned int num_threads, key_compare const &comp,
+                        allocator_type const &alloc = allocator_type())
+        : Multiqueue(num_threads, Configuration(), comp, alloc) {
+    }
+
+    explicit Multiqueue(unsigned int num_threads, allocator_type const &alloc)
+        : Multiqueue(num_threads, Configuration(), key_compare(), alloc) {
     }
 
     ~Multiqueue() noexcept {
-        for (spq_t *s = spqs_; s != spqs_ + num_spqs_; ++s) {
-            alloc_traits::destroy(alloc_, s);
+        for (pq_type *pq = pq_list_; pq != pq_list_ + num_pqs_; ++pq) {
+            pq_alloc_traits::destroy(alloc_, pq);
         }
-        alloc_traits::deallocate(alloc_, spqs_, num_spqs_);
+        pq_alloc_traits::deallocate(alloc_, pq_list_, num_pqs_);
     }
 
-    inline Handle get_handle() {
+    constexpr Handle get_handle() noexcept {
         return Handle(*this);
     }
 
-    void push(Handle &handle, value_type value) {
-        spq_t *s = selection_strategy::get_locked_insert_spq(*this, handle.data);
-        assert(s);
-        s->push_and_unlock(value);
+    void reserve_per_spq(size_type cap) {
+        for (pq_type *pq = pq_list_; pq != pq_list_ + num_pqs_; ++pq) {
+            pq->reserve(cap);
+        };
     }
 
-    bool try_delete_min(Handle &handle, value_type &retval) {
-        spq_t *s = selection_strategy::get_locked_delete_spq(*this, handle.data);
-        if (s) {
-            retval = s->extract_min_and_unlock();
-            return true;
-        }
-        return false;
-    }
-
-    bool try_delete_first_from(size_type begin, size_type end, value_type &retval) {
-        for (spq_t *s = spqs_ + begin; s != spqs_ + end; ++s) {
-            key_type key = s->get_min_key();
-            if (key != empty_key && s->try_lock(key)) {
-                retval = s->extract_top_and_unlock();
-                return true;
-            }
-        }
-        return false;
-    }
-
+#ifdef MQ_ELEMENT_DISTRIBUTION
     std::vector<std::size_t> get_distribution() const {
-        std::vector<std::size_t> distribution(num_spqs_);
-        std::transform(spqs_, spqs_ + num_spqs_, distribution.begin(), [](auto const &spq) { return spq.size(); });
+        std::vector<std::size_t> distribution(num_pqs_);
+        std::transform(pq_list_, pq_list_ + num_pqs_, distribution.begin(), [](auto const &spq) { return spq.size(); });
         return distribution;
     }
 
     std::vector<std::size_t> get_top_distribution(std::size_t k) {
         std::vector<std::pair<value_type, std::size_t>> removed_elements;
         removed_elements.reserve(k);
-        std::vector<std::size_t> distribution(num_spqs_, 0);
+        std::vector<std::size_t> distribution(num_pqs_, 0);
         for (std::size_t i = 0; i < k; ++i) {
-            auto min = std::min_element(spqs_, spqs_ + num_spqs_, [](auto const &lhs, auto const &rhs) {
+            auto min = std::min_element(pq_list_, pq_list_ + num_pqs_, [](auto const &lhs, auto const &rhs) {
                 return lhs.get_min_key() < rhs.get_min_key();
             });
             if (min->get_min_key() == empty_key) {
@@ -176,30 +205,31 @@ class Multiqueue {
             [[maybe_unused]] bool success = min->try_lock();
             assert(success);
             result.first = min->extract_top_and_unlock();
-            result.second = static_cast<std::size_t>(min - spqs_);
+            result.second = static_cast<std::size_t>(min - pq_list_);
             removed_elements.push_back(result);
             ++distribution[result.second];
         }
         for (auto [val, index] : removed_elements) {
-            [[maybe_unused]] bool success = spqs_[index].try_lock();
+            [[maybe_unused]] bool success = pq_list_[index].try_lock();
             assert(success);
-            spqs_[index].push_and_unlock(val);
+            pq_list_[index].push_and_unlock(val);
         }
         return distribution;
     }
+#endif
 
-    inline void reserve_per_spq(std::size_t cap) {
-        std::for_each(spqs_, spqs_ + num_spqs_, [cap](auto &spq) { spq.heap_reserve(cap); });
+    constexpr size_type num_pqs() const noexcept {
+        return num_pqs_;
     }
 
     std::string description() const {
         std::stringstream ss;
         ss << "multiqueue\n\t";
-        ss << "C: " << num_spqs_ / num_threads_ << "\n\t";
+        ss << "# PQs: " << num_pqs_ << "\n\t";
         ss << "Deletion buffer size: " << Configuration::DeletionBufferSize << "\n\t";
         ss << "Insertion buffer size: " << Configuration::InsertionBufferSize << "\n\t";
         ss << "Heap degree: " << Configuration::HeapDegree << "\n\t";
-        ss << "Selection strategy: " << selection_strategy::description(selection_strategy_data_);
+        ss << "Selection strategy: " << shared_data_.description();
         return ss.str();
     }
 };
