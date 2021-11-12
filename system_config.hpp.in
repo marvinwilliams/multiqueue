@@ -1,9 +1,0 @@
-#cmakedefine L1_CACHE_LINESIZE @L1_CACHE_LINESIZE@
-#ifndef L1_CACHE_LINESIZE
-#define L1_CACHE_LINESIZE 64
-#endif
-
-#cmakedefine PAGESIZE @PAGESIZE@
-#ifndef PAGESIZE
-#define PAGESIZE 4096
-#endif

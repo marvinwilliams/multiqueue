@@ -14,7 +14,6 @@
 #include "multiqueue/default_configuration.hpp"
 #include "multiqueue/guarded_pq.hpp"
 #include "multiqueue/heap.hpp"
-#include "system_config.hpp"
 
 #include <cassert>
 #include <cstddef>
@@ -33,7 +32,11 @@
 #endif
 
 #ifndef L1_CACHE_LINESIZE
-#error Need to define L1_CACHE_LINESIZE
+#define L1_CACHE_LINESIZE 64
+#endif
+
+#ifndef PAGESIZE
+#define PAGESIZE 4096
 #endif
 
 namespace multiqueue {
@@ -56,7 +59,7 @@ class Multiqueue {
     using size_type = typename pq_type::size_type;
 
    private:
-    using selection_strategy = typename Configuration::template selection_strategy<this_t>;
+    using selection_strategy = typename Configuration::selection_strategy;
     friend selection_strategy;
     using shared_data_type = typename selection_strategy::shared_data_t;
 
@@ -147,7 +150,7 @@ class Multiqueue {
         for (pq_type *pq = pq_list_; pq != pq_list_ + num_pqs_; ++pq) {
             pq_alloc_traits::construct(alloc_, pq, comp);
         }
-#ifdef MQ_ABORT_ON_MISALIGNMENT
+#ifdef MQ_ABORT_MISALIGNMENT
         abort_on_data_misalignment();
 #endif
     }

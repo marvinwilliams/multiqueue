@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(multiqueue VERSION 1.0.0 LANGUAGES CXX C)
-# set(CMAKE_CXX_STANDARD 17)
+project(multiqueue VERSION 2.0.0 LANGUAGES CXX C)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
@@ -12,32 +11,27 @@ include(CTest)
 include(GNUInstallDirs)
 
 discourage_intree_builds()
-
-option(multiqueue_BUILD_TESTS "Build unit tests for multiqueue" OFF)
-option(multiqueue_BUILD_EXAMPLES "Build examples" OFF)
-cmake_dependent_option(multiqueue_INSTALL_DOCS "Add the generated documentation to the install list" ON, multiqueue_GENERATE_DOCS OFF)
-
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 # Read the system's L1 cache-line size and page size
-execute_process(COMMAND getconf LEVEL1_DCACHE_LINESIZE OUTPUT_VARIABLE L1_CACHE_LINESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
-execute_process(COMMAND getconf PAGESIZE OUTPUT_VARIABLE PAGESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(COMMAND getconf LEVEL1_DCACHE_LINESIZE OUTPUT_VARIABLE DEFAULT_L1_CACHE_LINESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(COMMAND getconf PAGESIZE OUTPUT_VARIABLE DEFAULT_PAGESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+option(multiqueue_BUILD_TESTS "Build unit tests for multiqueue" OFF)
+option(multiqueue_BUILD_EXAMPLES "Build examples" OFF)
+option(multiqueue_ABORT_MISALIGNMENT "Check if data is not aligned as expected" OFF)
+option(multiqueue_ELEMENT_DISTRIBUTION "Support functions to examine element distributions" OFF)
+option(multiqueue_BUILD_DOCUMENTATION "Build documentation" OFF)
+set(L1_CACHE_LINESIZE ${DEFAULT_L1_CACHE_LINESIZE} CACHE STRING "Specify the assumed L1 cache linesize (bytes)")
+set(PAGESIZE ${DEFAULT_PAGESIZE} CACHE STRING "Specify the assumed pagesize (bytes)")
 
 if(NOT "${L1_CACHE_LINESIZE}" MATCHES "^[0-9]+")
-  message(WARNING "Could not read L1 cache-line size, using default: 64")
-  set(L1_CACHE_LINESIZE 64)
+  message(SEND_ERROR "Invalid L1 cache linesize")
 endif()
 
 if(NOT "${PAGESIZE}" MATCHES "^[0-9]+")
-  message(WARNING "Could not read page size, using default: 4096")
-  set(PAGESIZE 4096)
+  message(SEND_ERROR "Invalid pagesize")
 endif()
-
-# Generate header containing definitions for L1 cache-line size and page size
-configure_file(
-  "system_config.hpp.in"
-  "system_config.hpp"
-)
 
 # The target to be linked against by other targets. This library is header-only
 # and as such does not compile by itself. This target rather sets include
@@ -51,9 +45,7 @@ target_include_directories(
   multiqueue
   INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/multiqueue>
 )
 
 # We require c++17 or above
@@ -62,6 +54,14 @@ target_compile_features(
   INTERFACE
   cxx_std_17
 )
+
+target_compile_definitions(multiqueue INTERFACE L1_CACHE_LINESIZE PAGESIZE)
+if(multiqueue_ABORT_MISALIGNMENT)
+  target_compile_definitions(multiqueue INTERFACE MQ_ABORT_MISALIGNMENT)
+endif()
+if(multiqueue_ELEMENT_DISTRIBUTION)
+  target_compile_definitions(multiqueue INTERFACE MQ_ELEMENT_DISTRIBUTION)
+endif()
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads)
@@ -80,25 +80,26 @@ if(multiqueue_BUILD_TESTS)
 endif()
 
 find_package(Doxygen)
-if(Doxygen_FOUND)
-  doxygen_add_docs(
-    doxygen
-    "${CMAKE_CURRENT_LIST_DIR}/include/multiqueue"
-    COMMENT
-    "Generate documentation"
-  )
-else()
-  message(WARNING "Doxygen not found, documentation cannot be built")
+if(multiqueue_BUILD_DOCUMENTATION)
+  if(Doxygen_FOUND)
+    doxygen_add_docs(
+      doxygen
+      "${CMAKE_CURRENT_LIST_DIR}/include/multiqueue"
+      COMMENT
+      "Generate documentation"
+    )
+  else()
+    message(WARNING "Doxygen not found, documentation cannot be built")
+  endif()
 endif()
-
 
 if(multiqueue_BUILD_TESTS)
   set(TEST_RUNNER_PARAMS "" CACHE STRING "Options added to the test runner")
-  add_subdirectory(unit_tests)
+  add_subdirectory(tests)
 endif()
 
 if(multiqueue_BUILD_BENCHMARKS)
-  add_subdirectory(micro_benchmarks)
+  add_subdirectory(benchmarks)
 endif()
 
 if(multiqueue_BUILD_EXAMPLES)
@@ -151,14 +152,6 @@ install(
   Development
   FILES_MATCHING PATTERN
   "*.hpp"
-)
-
-# Also copy the artefacts generated at build time into the include directory.
-install(
-  FILES
-  "${CMAKE_CURRENT_BINARY_DIR}/system_config.hpp"
-  DESTINATION
-  "${CMAKE_INSTALL_INCLUDEDIR}/multiqueue"
 )
 
 # Copy the package config file to the appropriate directory so that it can be found by find_package()

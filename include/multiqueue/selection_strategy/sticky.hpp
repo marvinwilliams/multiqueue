@@ -108,12 +108,12 @@ struct sticky {
                 }
             } else {
                 // Both keys are sentinels
-                thread_data.delete_count[0] = 0;
-                thread_data.delete_count[1] = 0;
                 break;
             }
 
         } while (true);
+        thread_data.delete_count[0] = 0;
+        thread_data.delete_count[1] = 0;
         return nullptr;
     }
 };

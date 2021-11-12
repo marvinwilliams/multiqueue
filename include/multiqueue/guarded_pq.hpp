@@ -58,7 +58,7 @@ struct LockImpl<Key, /*ImplicitLock = */ true> {
 template <typename Key, typename T, typename Compare, typename Allocator, typename Configuration>
 class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
    private:
-    using pq_type = std::conditional_t<Configuration::UseBuffers, BufferedPQ<Key, T, Compare, Configuration, Allocator>,
+    using pq_type = std::conditional_t<Configuration::UseBuffers, BufferedPQ<Key, T, Compare, Allocator, Configuration>,
                                        Heap<Key, T, Compare, Configuration::HeapDegree, Allocator>>;
     using key_of = detail::key_extractor<Key, T>;
 

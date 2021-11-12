@@ -70,7 +70,6 @@ class RingBufferIterator {
     }
 
     constexpr RingBufferIterator& operator++() noexcept {
-        assert(pos_ < Capacity);
         ++pos_;
         return *this;
     }
@@ -82,7 +81,7 @@ class RingBufferIterator {
     }
 
     constexpr RingBufferIterator& operator--() noexcept {
-        assert(pos > 0);
+        assert(pos_ > 0);
         --pos_;
         return *this;
     }
@@ -94,7 +93,6 @@ class RingBufferIterator {
     }
 
     constexpr RingBufferIterator& operator+=(difference_type n) noexcept {
-        assert(pos_ + n <= Capacity);
         pos_ += n;
         return *this;
     }
@@ -119,19 +117,17 @@ class RingBufferIterator {
 
     reference operator[](size_type n) {
         assert(ring_buffer_);
-        assert(pos_ + n <= Capacity);
         return (*ring_buffer_)[pos_ + n];
     }
 
     const_reference operator[](size_type n) const {
         assert(ring_buffer_);
-        assert(pos_ + n <= Capacity);
         return (*ring_buffer_)[pos_ + n];
     }
 
-    constexpr difference_type operator-(RingBufferIterator const& other) noexcept {
-        assert(pos_ >= other.pos_);
-        return pos_ - other.pos_;
+    friend constexpr difference_type operator-(RingBufferIterator const& lhs, RingBufferIterator const& rhs) noexcept {
+        assert(lhs.pos_ >= rhs.pos_);
+        return lhs.pos_ - rhs.pos_;
     }
 
     friend constexpr bool operator==(RingBufferIterator const& lhs, RingBufferIterator const& rhs) noexcept {
@@ -144,7 +140,8 @@ class RingBufferIterator {
 };
 
 template <typename T, std::size_t LogSize>
-struct RingBuffer {
+class RingBuffer {
+   public:
     using value_type = T;
     using size_type = std::size_t;
     using difference_type = std::ptrdiff_t;
@@ -157,9 +154,8 @@ struct RingBuffer {
     using reverse_iterator = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
-    static constexpr size_type Capacity = size_type(1) << LogSize;
-
    private:
+    static constexpr size_type Capacity = size_type(1) << LogSize;
     static constexpr size_type capacity_mask = Capacity - 1;
 
     std::aligned_storage_t<sizeof(T), alignof(T)> data_[Capacity];
@@ -195,8 +191,12 @@ struct RingBuffer {
         return size_ == Capacity;
     }
 
-    constexpr std::size_t size() const noexcept {
+    constexpr size_type size() const noexcept {
         return size_;
+    }
+
+    static constexpr size_type capacity() noexcept {
+        return Capacity;
     }
 
     void push_front(const_reference value) {

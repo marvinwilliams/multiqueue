@@ -16,7 +16,6 @@
 #include "multiqueue/heap.hpp"
 #include "multiqueue/ring_buffer.hpp"
 #include "multiqueue/value.hpp"
-#include "system_config.hpp"
 
 #include <cstddef>
 #include <memory>
