@@ -39,6 +39,8 @@ namespace multiqueue {
 
 template <typename Key, typename T, typename Compare, unsigned int Degree, typename Allocator>
 class Heap {
+    static_assert(Degree >= 2, "Degree must be at least two");
+
    public:
     using key_type = Key;
     using value_type = detail::value_type<Key, T>;
@@ -54,14 +56,18 @@ class Heap {
         }
     };
     using allocator_type = Allocator;
-    using container_type = std::vector<value_type, allocator_type>;
+
+   private:
+    using value_allocator_type = typename std::allocator_traits<allocator_type>::template rebind_alloc<value_type>;
+
+   public:
+    using container_type = std::vector<value_type, value_allocator_type>;
     using reference = typename container_type::reference;
     using const_reference = typename container_type::const_reference;
 
     using size_type = typename container_type::size_type;
 
    private:
-    static_assert(Degree >= 2, "Degree must be at least two");
     static constexpr size_type degree_ = Degree;
     static constexpr size_type root = size_type{0};
 
@@ -108,15 +114,15 @@ class Heap {
         return smallest;
     }
 
-    size_type sift_up(size_type index, key_type key) {
+    size_type sift_up_hole(size_type index, key_type const &key) {
         HEAP_ASSERT(index < size());
         for (size_type p; index != root && (p = parent(index), comp_(key, key_of{}(data_[p]))); index = p) {
-            data_[index] = std::move(data_[parent]);
+            data_[index] = std::move(data_[p]);
         }
         return index;
     }
 
-    size_type sift_down(size_type index, key_type key) {
+    size_type sift_down_hole(size_type index, key_type const &key) {
         HEAP_ASSERT(index < size());
         size_type const first_nonfull = first_nonfull_parent();
         while (index < first_nonfull) {
@@ -142,8 +148,11 @@ class Heap {
     }
 
    public:
-    explicit Heap(key_compare const &comp, allocator_type const &alloc = allocator_type()) noexcept
+    explicit Heap(key_compare const &comp = key_compare(), allocator_type const &alloc = allocator_type()) noexcept
         : comp_{comp}, data_(alloc) {
+    }
+
+    explicit Heap(allocator_type const &alloc) noexcept : Heap(key_compare(), alloc) {
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept {
@@ -161,7 +170,8 @@ class Heap {
     void pop() {
         HEAP_ASSERT(!empty());
         if (size() > size_type(1)) {
-            auto const index = sift_down(0, key_of{}(data_.back()));
+            auto last_key = key_of{}(data_.back());
+            auto const index = sift_down_hole(0, last_key);
             if (index + size_type(1) < size()) {
                 data_[index] = std::move(data_.back());
             }
@@ -181,12 +191,13 @@ class Heap {
         if (empty()) {
             data_.push_back(value);
         } else {
-            size_type p = parent(size());
-            if (!comp_(key_of{}(value)), key_of{}(data_[p])) {
+            size_type next_parent = parent(size());
+            if (!comp_(key_of{}(value), key_of{}(data_[next_parent]))) {
                 data_.push_back(value);
             } else {
-                data_.push_back(std::move(data_[p]));
-                auto const index = sift_up(p, key_of{}(value));
+                data_.push_back(std::move(data_[next_parent]));
+                auto key = key_of{}(value);
+                auto const index = sift_up_hole(next_parent, key);
                 data_[index] = value;
             }
         }
@@ -198,11 +209,11 @@ class Heap {
             data_.push_back(std::move(value));
         } else {
             size_type p = parent(size());
-            if (!comp_(key_of{}(value)), key_of{}(data_[p])) {
+            if (!comp_(key_of{}(value), key_of{}(data_[p]))) {
                 data_.push_back(std::move(value));
             } else {
                 data_.push_back(std::move(data_[p]));
-                auto const index = sift_up(p, key_of{}(value));
+                auto const index = sift_up_hole(p, key_of{}(value));
                 data_[index] = std::move(value);
             }
         }

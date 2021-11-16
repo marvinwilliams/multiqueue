@@ -100,30 +100,34 @@ class BufferedPQ {
     };
 
     void push(const_reference value) {
-        auto it = deletion_buffer_.end();
-        while (it != deletion_buffer_.begin() && comp_(key_of{}(value), key_of{}(*(it - 1)))) {
-            --it;
-        }
-        if (!deletion_buffer_.empty() && it == deletion_buffer_.end()) {
-            // Insert into insertion buffer
-            if (insertion_buffer_.full()) {
-                flush_insertion_buffer();
-                heap_.insert(value);
-            } else {
-                insertion_buffer_.push_back(value);
-            }
+        if (deletion_buffer_.empty()) {
+            deletion_buffer_.insert(it, value);
         } else {
-            // Insert into deletion buffer
-            if (deletion_buffer_.full()) {
+            auto it = deletion_buffer_.end();
+            while (it != deletion_buffer_.begin() && comp_(key_of{}(value), key_of{}(*(it - 1)))) {
+                --it;
+            }
+            if (it == deletion_buffer_.end() && !deletion_buffer_.empty()) {
+                // Insert into insertion buffer
                 if (insertion_buffer_.full()) {
                     flush_insertion_buffer();
-                    heap_.insert(std::move(deletion_buffer_.back()));
+                    heap_.insert(value);
                 } else {
-                    insertion_buffer_.push_back(std::move(deletion_buffer_.back()));
+                    insertion_buffer_.push_back(value);
                 }
-                deletion_buffer_.pop_back();
+            } else {
+                // Insert into deletion buffer
+                if (deletion_buffer_.full()) {
+                    if (insertion_buffer_.full()) {
+                        flush_insertion_buffer();
+                        heap_.insert(std::move(deletion_buffer_.back()));
+                    } else {
+                        insertion_buffer_.push_back(std::move(deletion_buffer_.back()));
+                    }
+                    deletion_buffer_.pop_back();
+                }
+                deletion_buffer_.insert(it, value);
             }
-            deletion_buffer_.insert(it, value);
         }
     }
 

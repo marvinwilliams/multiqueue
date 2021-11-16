@@ -10,12 +10,22 @@ struct nocopy {
     nocopy& operator=(nocopy const&) = delete;
     nocopy(nocopy&&) = default;
     nocopy& operator=(nocopy&&) = default;
+    bool operator<(nocopy const& other) const {
+        return i < other.i;
+    }
+
+    int i;
 };
 
 struct nodefault {
     nodefault() = delete;
-    explicit nodefault(int) {
+    explicit nodefault(int i) : i{i} {
     }
+    bool operator<(nodefault const& other) const {
+        return i < other.i;
+    }
+
+    int i;
 };
 
 struct countingdtor {
