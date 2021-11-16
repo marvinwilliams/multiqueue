@@ -23,22 +23,20 @@ namespace multiqueue {
 template <typename T, std::size_t LogSize>
 class Buffer;
 
-template <typename T, std::size_t LogSize>
+template <typename T, std::size_t LogSize, bool IsConst>
 class BufferIterator {
-    template <typename T_, std::size_t LogSize_>
-    friend class Buffer;
-    template <typename T_, std::size_t LogSize_>
-    friend class BufferIterator;
+    friend class Buffer<T, LogSize>;
+    friend class BufferIterator<T, LogSize, true>;  // const iterator is friend for converting constructor
 
    public:
     using iterator_category = std::random_access_iterator_tag;
-    using value_type = T;
+    using value_type = std::conditional_t<IsConst, T const, T>;
     using size_type = std::size_t;
     using difference_type = std::ptrdiff_t;
     using reference = value_type&;
-    using const_reference = value_type const&;
+    using const_reference = T const&;
     using pointer = value_type*;
-    using const_pointer = value_type const*;
+    using const_pointer = T const*;
 
    protected:
     pointer p_;
@@ -53,22 +51,18 @@ class BufferIterator {
     constexpr BufferIterator(BufferIterator const& other) noexcept : p_{other.p_} {
     }
 
-    template <typename T_ = T, typename = std::enable_if_t<std::is_const_v<T_>>>
-    constexpr BufferIterator(BufferIterator<std::remove_const_t<T>, LogSize> const& other) noexcept : p_{other.p_} {
+    template <bool EnableConverting = IsConst, typename = std::enable_if_t<EnableConverting>>
+    constexpr BufferIterator(BufferIterator<T, LogSize, false> const& other) noexcept : p_{other.p_} {
     }
 
     constexpr BufferIterator& operator=(BufferIterator const& other) noexcept {
         p_ = other.p_;
     }
 
-    template <typename T_ = T, typename = std::enable_if_t<std::is_const_v<T_>>>
-    constexpr BufferIterator& operator=(BufferIterator<std::remove_const_t<T> const, LogSize> const& other) noexcept {
+    template <bool EnableConverting = IsConst, typename = std::enable_if_t<EnableConverting>>
+    constexpr BufferIterator& operator=(BufferIterator<T, LogSize, false> const& other) noexcept {
         p_ = other.p_;
     }
-
-    /* constexpr operator BufferIterator<T const, LogSize>() const noexcept { */
-    /*     return BufferIterator<T const, LogSize>(p_); */
-    /* } */
 
     const_reference operator*() const {
         assert(p_);
@@ -157,6 +151,8 @@ class BufferIterator {
 
 template <typename T, std::size_t LogSize>
 class Buffer {
+    static_assert(std::is_same_v<T, std::remove_cv_t<T>>, "value type must be non-const, non-volatile");
+
    public:
     using value_type = T;
     using size_type = std::size_t;
@@ -165,8 +161,8 @@ class Buffer {
     using const_reference = value_type const&;
     using pointer = value_type*;
     using const_pointer = value_type const*;
-    using iterator = BufferIterator<T, LogSize>;
-    using const_iterator = BufferIterator<T const, LogSize>;
+    using iterator = BufferIterator<T, LogSize, false>;
+    using const_iterator = BufferIterator<T, LogSize, true>;
     using reverse_iterator = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 

@@ -1,12 +1,21 @@
 #include "multiqueue/buffer.hpp"
+#include "multiqueue/ring_buffer.hpp"
 #include "test_types.hpp"
 
 #include "catch2/catch_template_test_macros.hpp"
 #include "catch2/catch_test_macros.hpp"
 
 #include <algorithm>
+#include <string>
+#include <utility>
 
-TEST_CASE("basic functionality", "[buffer]") {
+template <typename T>
+using buffer_wrapper_t = multiqueue::Buffer<T, 4>;
+
+template <typename T>
+using ring_buffer_wrapper_t = multiqueue::RingBuffer<T, 4>;
+
+TEST_CASE("buffer supports basic operations", "[buffer][basic]") {
     multiqueue::Buffer<unsigned int, 4> buffer;
     REQUIRE(buffer.empty());
     REQUIRE(buffer.capacity() == (1 << 4));
@@ -57,17 +66,79 @@ TEST_CASE("basic functionality", "[buffer]") {
     }
 }
 
-TEMPLATE_TEST_CASE("buffer works with different types", "[buffer]", int, std::string, (std::pair<int, double>)) {
-    multiqueue::Buffer<TestType, 4> buffer;
-    buffer.push_back(TestType());
-    TestType t1{};
+TEST_CASE("ring buffer supports basic operations", "[ring_buffer][basic]") {
+    multiqueue::RingBuffer<unsigned int, 4> buffer;
+    REQUIRE(buffer.empty());
+    REQUIRE(buffer.capacity() == (1 << 4));
+
+    for (unsigned int i = 0; i < buffer.capacity(); ++i) {
+        REQUIRE(!buffer.full());
+        REQUIRE(buffer.size() == i);
+        buffer.push_back(i);
+    }
+
+    REQUIRE(buffer.full());
+    REQUIRE(buffer.size() == buffer.capacity());
+
+    SECTION("bracket") {
+        for (unsigned int i = 0; i < buffer.capacity(); ++i) {
+            REQUIRE(buffer[i] == i);
+        }
+
+        REQUIRE(buffer.back() == buffer.capacity() - 1);
+        REQUIRE(buffer.front() == 0);
+
+        for (unsigned int i = 0; i < buffer.capacity(); ++i) {
+            buffer[i] = buffer.capacity() - i - 1;
+        }
+        for (unsigned int i = 0; i < buffer.capacity(); ++i) {
+            REQUIRE(buffer[i] == buffer.capacity() - i - 1);
+        }
+        buffer.clear();
+        REQUIRE(buffer.empty());
+    }
+
+    SECTION("pop_back/pop_front") {
+        buffer.pop_back();
+        buffer.pop_front();
+        buffer.pop_back();
+        REQUIRE(buffer.back() == buffer.capacity() - 3);
+        buffer.push_back(buffer.back() + 1);
+        buffer.push_front(0);
+        buffer.push_back(buffer.back() + 1);
+        for (unsigned int i = buffer.capacity(); i-- > buffer.capacity() / 2;) {
+            REQUIRE(buffer.back() == i);
+            buffer.pop_back();
+            buffer.pop_front();
+        }
+        REQUIRE(buffer.empty());
+        while (!buffer.full()) {
+            buffer.push_back(static_cast<unsigned int>(buffer.size()));
+        }
+        for (unsigned int i = 0; i != buffer.capacity(); ++i) {
+            REQUIRE(buffer.front() == i);
+            buffer.pop_front();
+        }
+
+        REQUIRE(buffer.empty());
+        REQUIRE(buffer.size() == 0);
+    }
+}
+
+TEMPLATE_PRODUCT_TEST_CASE("buffer supports different types", "[types][buffer]",
+                           (buffer_wrapper_t, ring_buffer_wrapper_t), (int, std::string, (std::pair<int, double>))) {
+    using value_t = typename TestType::value_type;
+    TestType buffer;
+    buffer.push_back(value_t{});
+    value_t t1{};
     buffer[0] = t1;
-    [[maybe_unused]] TestType t2 = buffer[0];
+    [[maybe_unused]] value_t t2 = buffer[0];
     buffer.pop_back();
 }
 
-TEST_CASE("buffer works with non-copyable types", "[buffer]") {
-    multiqueue::Buffer<test_types::nocopy, 2> buffer;
+TEMPLATE_TEST_CASE("buffer works with non-copyable types", "[buffer][types]",
+                   (multiqueue::Buffer<test_types::nocopy, 4>), (multiqueue::RingBuffer<test_types::nocopy, 4>)) {
+    TestType buffer;
     buffer.push_back(test_types::nocopy());
     test_types::nocopy t1;
     buffer.push_back(std::move(t1));
@@ -79,8 +150,9 @@ TEST_CASE("buffer works with non-copyable types", "[buffer]") {
     buffer.pop_back();
 }
 
-TEST_CASE("buffer works with non-default-constructible types", "[buffer]") {
-    multiqueue::Buffer<test_types::nodefault, 2> buffer;
+TEMPLATE_TEST_CASE("buffer works with non-default-constructible types", "[buffer][types]",
+                   (multiqueue::Buffer<test_types::nodefault, 4>), (multiqueue::RingBuffer<test_types::nodefault, 4>)) {
+    TestType buffer;
     buffer.push_back(test_types::nodefault(0));
     test_types::nodefault t1{1};
     buffer.push_back(t1);
@@ -90,10 +162,11 @@ TEST_CASE("buffer works with non-default-constructible types", "[buffer]") {
     buffer.pop_back();
 }
 
-TEST_CASE("buffer destructs", "[buffer]") {
-    int start = test_types::countingdtor::count;
+TEMPLATE_TEST_CASE("buffer destructs", "[buffer][types]", (multiqueue::Buffer<test_types::countingdtor, 4>),
+                   (multiqueue::RingBuffer<test_types::countingdtor, 4>)) {
+    test_types::countingdtor::count = 0;
     {
-        multiqueue::Buffer<test_types::countingdtor, 2> buffer;
+        TestType buffer;
         test_types::countingdtor t1;
         buffer.push_back(t1);
         buffer.push_back(t1);
@@ -102,14 +175,15 @@ TEST_CASE("buffer destructs", "[buffer]") {
         buffer[0] = t2;
         buffer.pop_back();  // + 1
         buffer.pop_back();  // + 1
-                            // destruct t1, t2 // + 2
-                            // destruct buffer // + 1
+        // destruct t1, t2 // + 2
+        // destruct buffer // + 1
     }
-    REQUIRE(test_types::countingdtor::count - start == 5);
+    REQUIRE(test_types::countingdtor::count == 5);
 }
 
-TEST_CASE("buffer iterator tests", "[buffer]") {
-    multiqueue::Buffer<int, 4> buffer;
+TEMPLATE_TEST_CASE("buffer iterator tests", "[buffer][iterator]", (multiqueue::Buffer<int, 4>),
+                   (multiqueue::RingBuffer<int, 4>)) {
+    TestType buffer;
     buffer.insert(buffer.begin(), 1);
     buffer.insert(buffer.end(), 2);
     buffer.insert(buffer.cbegin(), 0);

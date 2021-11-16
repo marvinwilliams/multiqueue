@@ -23,34 +23,40 @@ namespace multiqueue {
 template <typename T, std::size_t LogSize>
 struct RingBuffer;
 
-template <typename T, std::size_t LogSize>
+template <typename T, std::size_t LogSize, bool IsConst>
 class RingBufferIterator {
-    using ring_buffer_type = RingBuffer<std::decay_t<T>, LogSize>;
-    friend ring_buffer_type;
+    friend class RingBufferIterator<T, LogSize, true>;  // const iterator is friend for converting constructor
 
    public:
     using iterator_category = std::random_access_iterator_tag;
-    using value_type = T;
+    using value_type = std::conditional_t<IsConst, T const, T>;
     using size_type = std::size_t;
     using difference_type = std::ptrdiff_t;
     using reference = value_type&;
-    using const_reference = value_type const&;
+    using const_reference = T const&;
     using pointer = value_type*;
-    using const_pointer = value_type const*;
+    using const_pointer = T const*;
 
    protected:
-    ring_buffer_type* ring_buffer_;
-    size_type pos_;
+    using ring_buffer_ptr_t = std::conditional_t<IsConst, RingBuffer<T, LogSize> const*, RingBuffer<T, LogSize>*>;
 
-    explicit constexpr RingBufferIterator(ring_buffer_type* ring_buffer, size_type pos) noexcept
-        : ring_buffer_{ring_buffer}, pos_{pos} {
-    }
+    ring_buffer_ptr_t ring_buffer_;
+    size_type pos_;
 
    public:
     constexpr RingBufferIterator() noexcept : ring_buffer_{nullptr}, pos_{0} {
     }
 
-    explicit constexpr RingBufferIterator(RingBufferIterator const& other) noexcept
+    explicit constexpr RingBufferIterator(ring_buffer_ptr_t ring_buffer, size_type pos) noexcept
+        : ring_buffer_{ring_buffer}, pos_{pos} {
+    }
+
+    constexpr RingBufferIterator(RingBufferIterator const& other) noexcept
+        : ring_buffer_{other.ring_buffer_}, pos_{other.pos_} {
+    }
+
+    template <bool EnableConverting = IsConst, typename = std::enable_if_t<EnableConverting>>
+    constexpr RingBufferIterator(RingBufferIterator<T, LogSize, false> const& other) noexcept
         : ring_buffer_{other.ring_buffer_}, pos_{other.pos_} {
     }
 
@@ -59,12 +65,28 @@ class RingBufferIterator {
         pos_ = other.pos_;
     }
 
-    reference operator*() const {
+    template <bool EnableConverting = IsConst, typename = std::enable_if_t<EnableConverting>>
+    constexpr RingBufferIterator& operator=(RingBufferIterator<T, LogSize, false> const& other) noexcept {
+        ring_buffer_ = other.ring_buffer_;
+        pos_ = other.pos_;
+    }
+
+    const_reference operator*() const {
         assert(ring_buffer_);
         return (*ring_buffer_)[pos_];
     }
 
-    pointer operator->() const {
+    const_pointer operator->() const {
+        assert(ring_buffer_);
+        return &((*ring_buffer_)[pos_]);
+    }
+
+    reference operator*() {
+        assert(ring_buffer_);
+        return (*ring_buffer_)[pos_];
+    }
+
+    pointer operator->() {
         assert(ring_buffer_);
         return &((*ring_buffer_)[pos_]);
     }
@@ -97,7 +119,7 @@ class RingBufferIterator {
         return *this;
     }
 
-    constexpr RingBufferIterator operator+(difference_type n) noexcept {
+    constexpr RingBufferIterator operator+(difference_type n) const noexcept {
         auto tmp = *this;
         tmp += n;
         return tmp;
@@ -109,18 +131,18 @@ class RingBufferIterator {
         return *this;
     }
 
-    constexpr RingBufferIterator operator-(difference_type n) noexcept {
+    constexpr RingBufferIterator operator-(difference_type n) const noexcept {
         auto tmp = *this;
         tmp -= n;
         return tmp;
     }
 
-    reference operator[](size_type n) {
+    const_reference operator[](size_type n) const {
         assert(ring_buffer_);
         return (*ring_buffer_)[pos_ + n];
     }
 
-    const_reference operator[](size_type n) const {
+    reference operator[](size_type n) {
         assert(ring_buffer_);
         return (*ring_buffer_)[pos_ + n];
     }
@@ -141,6 +163,8 @@ class RingBufferIterator {
 
 template <typename T, std::size_t LogSize>
 class RingBuffer {
+    static_assert(std::is_same_v<T, std::remove_cv_t<T>>, "value type must be non-const, non-volatile");
+
    public:
     using value_type = T;
     using size_type = std::size_t;
@@ -149,8 +173,8 @@ class RingBuffer {
     using const_reference = value_type const&;
     using pointer = value_type*;
     using const_pointer = value_type const*;
-    using iterator = RingBufferIterator<T, LogSize>;
-    using const_iterator = RingBufferIterator<T const, LogSize>;
+    using iterator = RingBufferIterator<T, LogSize, false>;
+    using const_iterator = RingBufferIterator<T, LogSize, true>;
     using reverse_iterator = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
@@ -225,50 +249,74 @@ class RingBuffer {
         ++size_;
     }
 
-    void insert(iterator pos, const_reference value) {
+    iterator insert(const_iterator pos, const_reference value) {
         assert(!full());
-        if (pos == begin()) {
+        auto it = begin() + (pos - cbegin());
+        if (it == begin()) {
             begin_ = into_range(begin_ - 1);
             new (&data_[begin_]) value_type(value);
-        } else if (pos == end()) {
+        } else if (it == end()) {
             new (&data_[into_range(begin_ + size_)]) value_type(value);
         } else {
             // Copy value, as it could exist in the buffer
             auto value_cpy = value;
             // Determine which side of the ring buffer has fewer elements
-            if (end() - pos <= pos - begin()) {
+            if (end() - it <= it - begin()) {
                 new (&data_[into_range(begin_ + size_)]) value_type(std::move(back()));
-                std::move_backward(pos, end() - 1, end());
+                std::move_backward(it, end() - 1, end());
             } else {
                 new (&data_[into_range(begin_ - 1)]) value_type(std::move(front()));
-                std::move(begin() + 1, pos, begin());
+                std::move(begin() + 1, it, begin());
             }
-            *pos = std::move(value_cpy);
+            *it = std::move(value_cpy);
         }
         ++size_;
+        return it;
     }
 
-    void insert(iterator pos, value_type&& value) {
+    iterator insert(const_iterator pos, value_type&& value) {
         assert(!full());
-        if (pos == begin()) {
+        auto it = begin() + (pos - cbegin());
+        if (it == begin()) {
             begin_ = into_range(begin_ - 1);
-            new (&data_[begin_]) value_type(value);
-        } else if (pos == end()) {
-            new (&data_[into_range(begin_ + size_)]) value_type(value);
+            new (&data_[begin_]) value_type(std::move(value));
+        } else if (it == end()) {
+            new (&data_[into_range(begin_ + size_)]) value_type(std::move(value));
         } else {
-            // Move value, as it could exist in the buffer
+            // Copy value, as it could exist in the buffer
             auto value_cpy = std::move(value);
             // Determine which side of the ring buffer has fewer elements
-            if (end() - pos <= pos - begin()) {
+            if (end() - it <= it - begin()) {
                 new (&data_[into_range(begin_ + size_)]) value_type(std::move(back()));
-                std::move_backward(pos, end() - 1, end());
+                std::move_backward(it, end() - 1, end());
             } else {
                 new (&data_[into_range(begin_ - 1)]) value_type(std::move(front()));
-                std::move(begin() + 1, pos, begin());
+                std::move(begin() + 1, it, begin());
             }
-            *pos = std::move(value_cpy);
+            *it = std::move(value_cpy);
         }
         ++size_;
+        return it;
+    }
+
+    iterator erase(const_iterator pos) {
+        if (pos == cbegin()) {
+            pop_front();
+            return begin();
+        } else if (pos == cend()) {
+            pop_back();
+            return end();
+        } else {
+            iterator it = begin() + (pos - cbegin());
+            if (end() - it <= it - begin()) {
+                std::move(it + 1, end(), it);
+                pop_back();
+            } else {
+                std::move_backward(begin(), it, it + 1);
+                pop_front();
+            }
+            return it;
+        }
     }
 
     void pop_front() {
@@ -320,7 +368,7 @@ class RingBuffer {
     }
 
     constexpr iterator begin() noexcept {
-        return iterator{this, 0};
+        return iterator{this, size_type(0)};
     }
 
     constexpr const_iterator begin() const noexcept {
