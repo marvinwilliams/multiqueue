@@ -68,7 +68,7 @@ class Multiqueue {
         using data_t = typename selection_strategy::thread_data_t;
 
         alignas(2 * L1_CACHE_LINESIZE) data_t data_;
-        Multiqueue &mq_;
+        std::reference_wrapper<Multiqueue> mq_;
 
        public:
         Handle(Handle const &) = delete;
@@ -87,6 +87,7 @@ class Multiqueue {
             }
             pq->extract_top(retval);
             pq->unlock();
+            return true;
         }
 
         void push(const_reference value) {
@@ -104,9 +105,9 @@ class Multiqueue {
         }
 
         bool try_extract_from(size_type pos, value_type &retval) {
-            assert(pos < mq_.num_pqs_);
-            key_type key = mq_.pq_list_[pos].concurrent_top_key();
-            if (key != Multiqueue::sentinel && mq_.pq_list_[pos].try_lock_if_key(key)) {
+            assert(pos < mq_.get().num_pqs_);
+            key_type key = mq_.get().pq_list_[pos].concurrent_top_key();
+            if (key != sentinel && mq_.get().pq_list_[pos].try_lock_if_key(key)) {
                 mq_.pq_list_[pos].extract_top(retval);
                 return true;
             }

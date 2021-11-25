@@ -52,7 +52,7 @@ class BufferedPQ {
    private:
     void flush_insertion_buffer() {
         for (auto it = insertion_buffer_.begin(); it != insertion_buffer_.end(); ++it) {
-            heap_.insert(std::move(*it));
+            heap_.push(std::move(*it));
         }
         insertion_buffer_.clear();
     }
@@ -61,15 +61,18 @@ class BufferedPQ {
         assert(deletion_buffer_.empty());
         flush_insertion_buffer();
         size_type num_refill = std::min(deletion_buffer_type::Capacity, heap_.size());
-        for (size_type i = 0; i < num_refill; ++i) {
+        for (size_type i = 0; i != num_refill; ++i) {
             deletion_buffer_.push_back(heap_.top());
             heap_.pop();
         }
     }
 
    public:
-    explicit BufferedPQ(key_compare const& comp, allocator_type const& alloc = allocator_type())
-        : comp_{comp}, heap_(comp, alloc) {
+    explicit BufferedPQ(key_compare const& comp = key_compare(), allocator_type const& alloc = allocator_type())
+        : heap_(comp, alloc), comp_{comp} {
+    }
+
+    explicit BufferedPQ(allocator_type const& alloc) : BufferedPQ(key_compare(), alloc) {
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept {
@@ -101,17 +104,17 @@ class BufferedPQ {
 
     void push(const_reference value) {
         if (deletion_buffer_.empty()) {
-            deletion_buffer_.insert(it, value);
+            deletion_buffer_.push_back(value);
         } else {
             auto it = deletion_buffer_.end();
             while (it != deletion_buffer_.begin() && comp_(key_of{}(value), key_of{}(*(it - 1)))) {
                 --it;
             }
-            if (it == deletion_buffer_.end() && !deletion_buffer_.empty()) {
+            if (it == deletion_buffer_.end()) {
                 // Insert into insertion buffer
                 if (insertion_buffer_.full()) {
                     flush_insertion_buffer();
-                    heap_.insert(value);
+                    heap_.push(value);
                 } else {
                     insertion_buffer_.push_back(value);
                 }
@@ -120,7 +123,7 @@ class BufferedPQ {
                 if (deletion_buffer_.full()) {
                     if (insertion_buffer_.full()) {
                         flush_insertion_buffer();
-                        heap_.insert(std::move(deletion_buffer_.back()));
+                        heap_.push(std::move(deletion_buffer_.back()));
                     } else {
                         insertion_buffer_.push_back(std::move(deletion_buffer_.back()));
                     }
@@ -132,30 +135,34 @@ class BufferedPQ {
     }
 
     void push(value_type&& value) {
-        auto it = deletion_buffer_.end();
-        while (it != deletion_buffer_.begin() && comp_(key_of{}(value), key_of{}(*(it - 1)))) {
-            --it;
-        }
-        if (!deletion_buffer_.empty() && it == deletion_buffer_.end()) {
-            // Insert into insertion buffer
-            if (insertion_buffer_.full()) {
-                flush_insertion_buffer();
-                heap_.insert(std::move(value));
-            } else {
-                insertion_buffer_.push_back(std::move(value));
-            }
+        if (deletion_buffer_.empty()) {
+            deletion_buffer_.push_back(std::move(value));
         } else {
-            // Insert into deletion buffer
-            if (deletion_buffer_.full()) {
+            auto it = deletion_buffer_.end();
+            while (it != deletion_buffer_.begin() && comp_(key_of{}(value), key_of{}(*(it - 1)))) {
+                --it;
+            }
+            if (it == deletion_buffer_.end()) {
+                // Insert into insertion buffer
                 if (insertion_buffer_.full()) {
                     flush_insertion_buffer();
-                    heap_.insert(std::move(deletion_buffer_.back()));
+                    heap_.push(std::move(value));
                 } else {
-                    insertion_buffer_.push_back(std::move(deletion_buffer_.back()));
+                    insertion_buffer_.push_back(std::move(value));
                 }
-                deletion_buffer_.pop_back();
+            } else {
+                // Insert into deletion buffer
+                if (deletion_buffer_.full()) {
+                    if (insertion_buffer_.full()) {
+                        flush_insertion_buffer();
+                        heap_.push(std::move(deletion_buffer_.back()));
+                    } else {
+                        insertion_buffer_.push_back(std::move(deletion_buffer_.back()));
+                    }
+                    deletion_buffer_.pop_back();
+                }
+                deletion_buffer_.insert(it, std::move(value));
             }
-            deletion_buffer_.insert(it, std::move(value));
         }
     }
 

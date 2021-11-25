@@ -84,9 +84,9 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
 
    public:
     explicit GuardedPQ(key_compare const& comp, allocator_type const& alloc = allocator_type())
-        : data_({}, sentinel, {comp, alloc}) {
+        : data_{{}, sentinel, pq_type(comp, alloc)} {
         if constexpr (Configuration::ImplicitLock) {
-            if (!Data::is_unlocked(sentinel)) {
+            if (Data::is_locked(sentinel)) {
                 throw std::invalid_argument("Sentinel must not use the highest bit of the key");
             }
         }
@@ -111,7 +111,7 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
     }
 
     bool try_lock_if_key(key_type const& key) noexcept {
-        assert(key != sentinel_);
+        assert(key != sentinel);
         if constexpr (Configuration::ImplicitLock) {
             assert(!Data::is_locked(key));
             key_type current_key = data_.top_key.load(std::memory_order_acquire);
@@ -120,13 +120,15 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
                 return false;
             }
             // ABA problem is no issue here
-            return data_.top_key.compare_exchange_strong(key, Data::to_locked(key), std::memory_order_release,
+            auto key_cpy = key;
+            return data_.top_key.compare_exchange_strong(key_cpy, Data::to_locked(key), std::memory_order_release,
                                                          std::memory_order_relaxed);
         } else {
             if (data_.lock.load(std::memory_order_acquire) || data_.lock.exchange(true, std::memory_order_release)) {
                 return false;
             }
-            if (key_of{}(top()) != key) {
+            key_type current_key = data_.top_key.load(std::memory_order_acquire);
+            if (key != current_key) {
                 data_.lock.store(false, std::memory_order_release);
                 return false;
             }
@@ -153,8 +155,20 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
         }
     }
 
+    static bool is_valid_key(key_type const& key) noexcept {
+        if constexpr (Configuration::ImplicitLock) {
+            return !Data::is_locked(key) && key != sentinel;
+        } else {
+            return key != sentinel;
+        }
+    }
+
     key_type concurrent_top_key() const noexcept {
-        return Data::to_unlocked(data_.top_key.load(std::memory_order_acquire));
+        if constexpr (Configuration::ImplicitLock) {
+            return Data::to_unlocked(data_.top_key.load(std::memory_order_acquire));
+        } else {
+            return data_.top_key.load(std::memory_order_acquire);
+        }
     }
 
     [[nodiscard]] bool concurrent_empty() const noexcept {
@@ -191,13 +205,13 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
 
     void push(const_reference value) {
         assert(is_locked());
-        assert(!Data::is_locked(key_of{}(value)) && key_of{}(value) != sentinel_);
+        assert(is_valid_key(key_of{}(value)));
         data_.pq.push(value);
     }
 
     void push(value_type&& value) {
         assert(is_locked());
-        assert(!Data::is_locked(key_of{}(value)) && key_of{}(value) != sentinel_);
+        assert(is_valid_key(key_of{}(value)));
         data_.pq.push(std::move(value));
     }
 
@@ -207,7 +221,7 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
     }
 
     constexpr void clear() noexcept {
-        assert(guard_.is_locked());
+        assert(is_locked());
         data_.pq.clear();
     }
 };

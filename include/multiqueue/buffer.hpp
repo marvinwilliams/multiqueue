@@ -12,6 +12,7 @@
 #define BUFFER_HPP_INCLUDED
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <iterator>
@@ -23,65 +24,81 @@ namespace multiqueue {
 template <typename T, std::size_t LogSize>
 class Buffer;
 
-template <typename T, std::size_t LogSize, bool IsConst>
+template <typename T>
 class BufferIterator {
-    friend class Buffer<T, LogSize>;
-    friend class BufferIterator<T, LogSize, true>;  // const iterator is friend for converting constructor
+    friend std::conditional_t<!std::is_const_v<T>, BufferIterator<T const>,
+                              void>;  // const iterator is friend for converting constructor
 
    public:
     using iterator_category = std::random_access_iterator_tag;
-    using value_type = std::conditional_t<IsConst, T const, T>;
+    using value_type = T;
     using size_type = std::size_t;
     using difference_type = std::ptrdiff_t;
     using reference = value_type&;
-    using const_reference = T const&;
+    using const_reference = value_type const&;
     using pointer = value_type*;
-    using const_pointer = T const*;
+    using const_pointer = value_type const*;
 
    protected:
-    pointer p_;
+    using underlying_type = std::remove_cv_t<T>;
+    using underlying_data_type =
+        std::conditional_t<std::is_const_v<T>,
+                           std::aligned_storage_t<sizeof(underlying_type), alignof(underlying_type)> const,
+                           std::aligned_storage_t<sizeof(underlying_type), alignof(underlying_type)>>;
+
+    underlying_data_type* p_;
+
+   private:
+    pointer as_value_pointer(underlying_data_type* p) noexcept {
+        return std::launder(reinterpret_cast<pointer>(p));
+    }
+
+    const_pointer as_value_pointer(underlying_data_type* p) const noexcept {
+        return std::launder(reinterpret_cast<const_pointer>(p));
+    }
 
    public:
     constexpr BufferIterator() noexcept : p_{nullptr} {
     }
 
-    explicit constexpr BufferIterator(pointer p) noexcept : p_{p} {
+    constexpr explicit BufferIterator(underlying_data_type* p) noexcept : p_{p} {
     }
 
     constexpr BufferIterator(BufferIterator const& other) noexcept : p_{other.p_} {
     }
 
-    template <bool EnableConverting = IsConst, typename = std::enable_if_t<EnableConverting>>
-    constexpr BufferIterator(BufferIterator<T, LogSize, false> const& other) noexcept : p_{other.p_} {
+    template <bool EnableConverting = std::is_const_v<T>, typename = std::enable_if_t<EnableConverting>>
+    // NOLINTNEXTLINE(google-explicit-constructor)
+    constexpr BufferIterator(BufferIterator<std::remove_const_t<T>> const& other) noexcept : p_{other.p_} {
     }
 
     constexpr BufferIterator& operator=(BufferIterator const& other) noexcept {
         p_ = other.p_;
     }
 
-    template <bool EnableConverting = IsConst, typename = std::enable_if_t<EnableConverting>>
-    constexpr BufferIterator& operator=(BufferIterator<T, LogSize, false> const& other) noexcept {
+    template <bool EnableConverting = std::is_const_v<T>, typename = std::enable_if_t<EnableConverting>>
+    constexpr BufferIterator& operator=(BufferIterator<std::remove_const_t<T>> const& other) noexcept {
         p_ = other.p_;
     }
 
-    const_reference operator*() const {
+    reference operator*() noexcept {
         assert(p_);
-        return *std::launder(p_);
+        return *as_value_pointer(p_);
     }
 
-    const_pointer operator->() const {
+    const_reference operator*() const noexcept {
         assert(p_);
-        return std::launder(p_);
+        return *as_value_pointer(p_);
     }
 
-    reference operator*() {
+    pointer operator->() noexcept {
         assert(p_);
-        return *std::launder(p_);
+        return as_value_pointer(p_);
     }
 
-    pointer operator->() {
+    const_pointer operator->() const noexcept {
         assert(p_);
-        return std::launder(p_);
+        return as_value_pointer(p_);
     }
 
     constexpr BufferIterator& operator++() noexcept {
@@ -128,12 +145,12 @@ class BufferIterator {
         return tmp;
     }
 
-    const_reference operator[](difference_type n) const {
-        return *std::launder(p_ + n);
+    reference operator[](difference_type n) {
+        return *as_value_pointer(p_ + n);
     }
 
-    reference operator[](difference_type n) {
-        return *std::launder(p_ + n);
+    const_reference operator[](difference_type n) const {
+        return *as_value_pointer(p_ + n);
     }
 
     friend constexpr difference_type operator-(BufferIterator const& lhs, BufferIterator const& rhs) noexcept {
@@ -151,8 +168,6 @@ class BufferIterator {
 
 template <typename T, std::size_t LogSize>
 class Buffer {
-    static_assert(std::is_same_v<T, std::remove_cv_t<T>>, "value type must be non-const, non-volatile");
-
    public:
     using value_type = T;
     using size_type = std::size_t;
@@ -161,72 +176,77 @@ class Buffer {
     using const_reference = value_type const&;
     using pointer = value_type*;
     using const_pointer = value_type const*;
-    using iterator = BufferIterator<T, LogSize, false>;
-    using const_iterator = BufferIterator<T, LogSize, true>;
+    using iterator = BufferIterator<T>;
+    using const_iterator = BufferIterator<T const>;
     using reverse_iterator = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
     static constexpr size_type Capacity = size_type(1) << LogSize;
 
    private:
-    std::aligned_storage_t<sizeof(T), alignof(T)> data_[Capacity];
-    pointer end_;
+    using underlying_type = std::remove_cv_t<T>;
+    using underlying_data_type = std::aligned_storage_t<sizeof(underlying_type), alignof(underlying_type)>;
 
    private:
-    // Returns a pointer to the data. If this pointer is to dereferenced, it has to be laundered!
-    const_pointer to_pointer(size_type pos) const noexcept {
-        return reinterpret_cast<const_pointer>(&data_[pos]);
+    std::array<underlying_data_type, Capacity> data_;
+    underlying_data_type* end_;
+
+   private:
+    pointer as_value_pointer(underlying_data_type* p) noexcept {
+        return std::launder(reinterpret_cast<pointer>(p));
     }
 
-    pointer to_pointer(size_type pos) noexcept {
-        return reinterpret_cast<pointer>(&data_[pos]);
+    const_pointer as_value_pointer(underlying_data_type* p) const noexcept {
+        return std::launder(reinterpret_cast<const_pointer>(p));
     }
 
    public:
-    Buffer() noexcept : end_{to_pointer(0)} {
+    Buffer() noexcept : end_{std::begin(data_)} {
     }
 
     ~Buffer() noexcept {
         clear();
     }
+
     [[nodiscard]] constexpr bool empty() const noexcept {
-        return end_ == to_pointer(0);
+        return end_ == std::begin(data_);
     }
 
     constexpr bool full() const noexcept {
-        return end_ == to_pointer(Capacity);
+        return end_ == std::begin(data_) + Capacity;
     }
 
     constexpr size_type size() const noexcept {
-        return static_cast<size_type>(end_ - to_pointer(0));
+        return static_cast<size_type>(end_ - std::begin(data_));
     }
 
     static constexpr size_type capacity() noexcept {
         return Capacity;
     }
 
-    void push_back(const_reference value) {
+    void push_back(const_reference value) noexcept(std::is_nothrow_copy_constructible_v<value_type>) {
         assert(!full());
-        new (end_) value_type(value);
+        ::new (static_cast<void*>(end_)) value_type(value);
         ++end_;
     }
 
-    void push_back(value_type&& value) {
+    void push_back(value_type&& value) noexcept(std::is_nothrow_move_constructible_v<value_type>) {
         assert(!full());
-        new (end_) value_type(std::move(value));
+        ::new (static_cast<void*>(end_)) value_type(std::move(value));
         ++end_;
     }
 
-    iterator insert(const_iterator pos, const_reference value) {
+    iterator insert(const_iterator pos, const_reference value) noexcept(
+        std::is_nothrow_copy_constructible_v<value_type>&& std::is_nothrow_move_constructible_v<value_type>&&
+            std::is_nothrow_move_assignable_v<value_type>&& std::is_nothrow_copy_assignable_v<value_type>) {
         assert(!full());
         auto it = begin() + (pos - cbegin());
         if (it == end()) {
-            new (end_) value_type(value);
+            ::new (static_cast<void*>(end_)) value_type(value);
         } else {
             // Copy value, as it could exist in the buffer
             auto value_cpy = value;
-            // Determine which side of the ring buffer has fewer elements
-            new (end_) value_type(std::move(back()));
+            ::new (static_cast<void*>(end_)) value_type(std::move(back()));
             std::move_backward(it, end() - 1, end());
             *it = std::move(value_cpy);
         }
@@ -234,16 +254,16 @@ class Buffer {
         return it;
     }
 
-    iterator insert(const_iterator pos, value_type&& value) {
+    iterator insert(const_iterator pos, value_type&& value) noexcept(
+        std::is_nothrow_move_constructible_v<value_type>&& std::is_nothrow_move_assignable_v<value_type>) {
         assert(!full());
         auto it = begin() + (pos - cbegin());
         if (it == end()) {
-            new (end_) value_type(std::move(value));
+            ::new (static_cast<void*>(end_)) value_type(std::move(value));
         } else {
             // Copy value, as it could exist in the buffer
             auto value_cpy = std::move(value);
-            // Determine which side of the ring buffer has fewer elements
-            new (end_) value_type(std::move(back()));
+            ::new (static_cast<void*>(end_)) value_type(std::move(back()));
             std::move_backward(it, end() - 1, end());
             *it = std::move(value_cpy);
         }
@@ -251,7 +271,7 @@ class Buffer {
         return it;
     }
 
-    iterator erase(const_iterator pos) {
+    iterator erase(const_iterator pos) noexcept {
         iterator it = begin() + (pos - cbegin());
         if (it + 1 != end()) {
             std::move(it + 1, end(), it);
@@ -260,57 +280,57 @@ class Buffer {
         return it;
     }
 
-    void pop_back() {
+    void pop_back() noexcept {
         assert(!empty());
         --end_;
-        std::launder(end_)->~value_type();
+        as_value_pointer(end_)->~value_type();
     }
 
     void clear() noexcept {
         std::for_each(begin(), end(), [](value_type& v) { v.~value_type(); });
-        end_ = to_pointer(0);
+        end_ = std::begin(data_);
+    }
+
+    reference operator[](size_type pos) {
+        assert(pos < size());
+        return *as_value_pointer(std::begin(data_) + pos);
     }
 
     const_reference operator[](size_type pos) const {
         assert(pos < size());
-        return *std::launder(to_pointer(pos));
+        return *as_value_pointer(std::begin(data_) + pos);
     }
 
-    reference operator[](size_type pos) {
-        assert(pos < size_);
-        return *std::launder(to_pointer(pos));
+    reference front() noexcept {
+        assert(!empty());
+        return *as_value_pointer(std::begin(data_));
     }
 
     const_reference front() const {
         assert(!empty());
-        return *std::launder(to_pointer(0));
+        return *as_value_pointer(std::begin(data_));
     }
 
-    reference front() {
+    reference back() noexcept {
         assert(!empty());
-        return *std::launder(to_pointer(0));
+        return *as_value_pointer(end_ - 1);
     }
 
-    const_reference back() const {
+    const_reference back() const noexcept {
         assert(!empty());
-        return *std::launder(end_ - 1);
-    }
-
-    reference back() {
-        assert(!empty());
-        return *std::launder(end_ - 1);
+        return *as_value_pointer(end_ - 1);
     }
 
     constexpr iterator begin() noexcept {
-        return iterator{to_pointer(0)};
+        return iterator{std::begin(data_)};
     }
 
     constexpr const_iterator begin() const noexcept {
-        return const_iterator{to_pointer(0)};
+        return const_iterator{std::begin(data_)};
     }
 
     constexpr const_iterator cbegin() const noexcept {
-        return const_iterator{to_pointer(0)};
+        return const_iterator{std::begin(data_)};
     }
 
     constexpr iterator end() noexcept {
@@ -321,7 +341,7 @@ class Buffer {
         return const_iterator{end_};
     }
 
-    constexpr const const_iterator cend() const noexcept {
+    constexpr const_iterator cend() const noexcept {
         return const_iterator{end_};
     }
 
@@ -333,7 +353,7 @@ class Buffer {
         return const_reverse_iterator{cend()};
     }
 
-    constexpr const const_reverse_iterator crbegin() const noexcept {
+    constexpr const_reverse_iterator crbegin() const noexcept {
         return const_reverse_iterator{cend()};
     }
 

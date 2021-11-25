@@ -26,16 +26,16 @@ TEST_CASE("buffer supports basic operations", "[buffer][basic]") {
         buffer.push_back(i);
     }
 
-    REQUIRE(buffer.full());
-    REQUIRE(buffer.size() == buffer.capacity());
+    CHECK(buffer.full());
+    CHECK(buffer.size() == buffer.capacity());
 
     SECTION("bracket") {
         for (unsigned int i = 0; i < buffer.capacity(); ++i) {
             REQUIRE(buffer[i] == i);
         }
 
-        REQUIRE(buffer.back() == buffer.capacity() - 1);
-        REQUIRE(buffer.front() == 0);
+        CHECK(buffer.back() == buffer.capacity() - 1);
+        CHECK(buffer.front() == 0);
 
         for (unsigned int i = 0; i < buffer.capacity(); ++i) {
             buffer[i] = buffer.capacity() - i - 1;
@@ -44,14 +44,14 @@ TEST_CASE("buffer supports basic operations", "[buffer][basic]") {
             REQUIRE(buffer[i] == buffer.capacity() - i - 1);
         }
         buffer.clear();
-        REQUIRE(buffer.empty());
+        CHECK(buffer.empty());
     }
 
     SECTION("pop_back") {
         buffer.pop_back();
         buffer.pop_back();
         buffer.pop_back();
-        REQUIRE(buffer.back() == buffer.capacity() - 4);
+        CHECK(buffer.back() == buffer.capacity() - 4);
         buffer.push_back(buffer.back() + 1);
         buffer.push_back(buffer.back() + 1);
         buffer.push_back(buffer.back() + 1);
@@ -61,8 +61,8 @@ TEST_CASE("buffer supports basic operations", "[buffer][basic]") {
             REQUIRE(buffer.size() == i);
         }
 
-        REQUIRE(buffer.empty());
-        REQUIRE(buffer.size() == 0);
+        CHECK(buffer.empty());
+        CHECK(buffer.size() == 0);
     }
 }
 
@@ -77,16 +77,16 @@ TEST_CASE("ring buffer supports basic operations", "[ring_buffer][basic]") {
         buffer.push_back(i);
     }
 
-    REQUIRE(buffer.full());
-    REQUIRE(buffer.size() == buffer.capacity());
+    CHECK(buffer.full());
+    CHECK(buffer.size() == buffer.capacity());
 
     SECTION("bracket") {
         for (unsigned int i = 0; i < buffer.capacity(); ++i) {
             REQUIRE(buffer[i] == i);
         }
 
-        REQUIRE(buffer.back() == buffer.capacity() - 1);
-        REQUIRE(buffer.front() == 0);
+        CHECK(buffer.back() == buffer.capacity() - 1);
+        CHECK(buffer.front() == 0);
 
         for (unsigned int i = 0; i < buffer.capacity(); ++i) {
             buffer[i] = buffer.capacity() - i - 1;
@@ -95,7 +95,7 @@ TEST_CASE("ring buffer supports basic operations", "[ring_buffer][basic]") {
             REQUIRE(buffer[i] == buffer.capacity() - i - 1);
         }
         buffer.clear();
-        REQUIRE(buffer.empty());
+        CHECK(buffer.empty());
     }
 
     SECTION("pop_back/pop_front") {

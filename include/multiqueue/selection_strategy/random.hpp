@@ -44,15 +44,15 @@ struct random {
     static inline auto lock_push_pq(Multiqueue &mq, thread_data_t &thread_data) {
         auto pq = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
         while (!pq->try_lock()) {
-            pq = mq.spqs_ + fastrange64(thread_data.gen(), mq.num_spqs_);
+            pq = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
         }
         return pq;
     }
 
     template <typename Multiqueue>
-    static inline auto lock_delete_pq(Multiqueue &mq, thread_data_t &thread_data) {
-        auto first = mq.spqs_ + fastrange64(thread_data.gen(), mq.num_spqs_);
-        auto second = mq.spqs_ + fastrange64(thread_data.gen(), mq.num_spqs_);
+    static inline auto lock_delete_pq(Multiqueue &mq, thread_data_t &thread_data) -> typename Multiqueue::pq_type * {
+        auto first = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
+        auto second = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
         auto first_key = first->concurrent_top_key();
         auto second_key = second->concurrent_top_key();
         do {
@@ -61,14 +61,14 @@ struct random {
                 if (first->try_lock_if_key(first_key)) {
                     return first;
                 } else {
-                    first = mq.spqs_ + fastrange64(thread_data.gen(), mq.num_spqs_);
+                    first = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
                     first_key = first->concurrent_top_key();
                 }
             } else if (second_key != Multiqueue::sentinel) {
                 if (second->try_lock_if_key(second_key)) {
                     return second;
                 } else {
-                    second = mq.spqs_ + fastrange64(thread_data.gen(), mq.num_spqs_);
+                    second = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
                     second_key = second->concurrent_top_key();
                 }
             } else {

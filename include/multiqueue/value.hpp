@@ -15,9 +15,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace multiqueue {
-
-namespace detail {
+namespace multiqueue::detail {
 
 template <typename Key, typename T>
 using value_type = std::conditional_t<std::is_same_v<T, void>, Key, std::pair<Key, T>>;
@@ -49,6 +47,6 @@ struct key_extractor {
     }
 };
 
-}  // namespace detail
-}  // namespace multiqueue
+}  // namespace multiqueue::detail
+
 #endif  //! VALUE_HPP_INCLUDED

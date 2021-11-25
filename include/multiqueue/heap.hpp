@@ -149,7 +149,7 @@ class Heap {
 
    public:
     explicit Heap(key_compare const &comp = key_compare(), allocator_type const &alloc = allocator_type()) noexcept
-        : comp_{comp}, data_(alloc) {
+        : data_(alloc), comp_{comp}{
     }
 
     explicit Heap(allocator_type const &alloc) noexcept : Heap(key_compare(), alloc) {

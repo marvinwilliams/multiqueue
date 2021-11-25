@@ -21,13 +21,150 @@ namespace multiqueue {
 
 namespace detail {
 
+template <typename T, std::size_t Size>
+struct BufferStorageBase;
+
+}
+
+template <typename T, std::size_t Size>
+class StorageIterator {
+    friend detail::BufferStorageBase<T, Size>;
+    friend std::conditional_t<!std::is_const_v<T>, BufferIterator<T const, Size>,
+                              void>;  // const iterator is friend for converting constructor
+
+   public:
+    using iterator_category = std::random_access_iterator_tag;
+    using value_type = T;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+    using reference = value_type &;
+    using const_reference = value_type const &;
+    using pointer = value_type *;
+    using const_pointer = value_type const *;
+
+   protected:
+    using internal_pointer_type = typename detail::BufferStorageBase<T, Size>::slot_type *;
+
+    internal_pointer_type p_;
+
+   public:
+    constexpr StorageIterator() noexcept : p_{nullptr} {
+    }
+
+    explicit constexpr StorageIterator(internal_pointer_type p) noexcept : p_{p} {
+    }
+
+    constexpr StorageIterator(StorageIterator const &other) noexcept : p_{other.p_} {
+    }
+
+    template <bool EnableConverting = std::is_const_v<T>, typename = std::enable_if_t<EnableConverting>>
+    constexpr StorageIterator(StorageIterator<std::remove_const_t<T>, Size> const &other) noexcept : p_{other.p_} {
+    }
+
+    constexpr StorageIterator &operator=(StorageIterator const &other) noexcept {
+        p_ = other.p_;
+    }
+
+    template <bool EnableConverting = std::is_const_v<T>, typename = std::enable_if_t<EnableConverting>>
+    constexpr StorageIterator &operator=(StorageIterator<std::remove_const_t<T>, Size> const &other) noexcept {
+        p_ = other.p_;
+    }
+
+    reference operator*() {
+        assert(p_);
+        return p_->value;
+    }
+
+    const_reference operator*() const {
+        assert(p_);
+        return p_->value;
+    }
+
+    pointer operator->() {
+        assert(p_);
+        return p_->value;
+    }
+
+    const_pointer operator->() const {
+        assert(p_);
+        return p_->value;
+    }
+
+    constexpr StorageIterator &operator++() noexcept {
+        ++p_;
+        return *this;
+    }
+
+    constexpr StorageIterator operator++(int) noexcept {
+        auto tmp = *this;
+        operator++();
+        return tmp;
+    }
+
+    constexpr StorageIterator &operator--() noexcept {
+        --p_;
+        return *this;
+    }
+
+    constexpr StorageIterator operator--(int) noexcept {
+        auto tmp = *this;
+        operator--();
+        return tmp;
+    }
+
+    constexpr StorageIterator &operator+=(difference_type n) noexcept {
+        p_ += n;
+        return *this;
+    }
+
+    constexpr StorageIterator operator+(difference_type n) const noexcept {
+        auto tmp = *this;
+        tmp += n;
+        return tmp;
+    }
+
+    constexpr StorageIterator &operator-=(difference_type n) noexcept {
+        p_ -= n;
+        return *this;
+    }
+
+    constexpr StorageIterator operator-(difference_type n) const noexcept {
+        auto tmp = *this;
+        tmp -= n;
+        return tmp;
+    }
+
+    const_reference operator[](difference_type n) const {
+        return (p_ + n)->value;
+    }
+
+    reference operator[](difference_type n) {
+        return (p_ + n)->value;
+    }
+
+    friend constexpr difference_type operator-(StorageIterator const &lhs, StorageIterator const &rhs) noexcept {
+        return lhs.p_ - rhs.p_;
+    }
+
+    friend constexpr bool operator==(StorageIterator const &lhs, StorageIterator const &rhs) noexcept {
+        return lhs.p_ == rhs.p_;
+    }
+
+    friend constexpr bool operator!=(StorageIterator const &lhs, StorageIterator const &rhs) noexcept {
+        return !(lhs == rhs);
+    }
+};
+
+namespace detail {
+
+template <typename Iter, typename IterType>
+using is_iter_type_v = std::is_base_of_v<IterType, typename std::iterator_traits<Iter>::iterator_category>;
+
 template <typename T, std::size_t N>
 struct BufferStorageBase {
     using stored_type = std::remove_const_t<T>;
-
-    template <typename Iter>
-    using is_forward_iter_v =
-        std::is_base_of_v<std::forward_iterator_tag, typename std::iterator_traits<Iter>::iterator_category>;
+    using iterator = StorageIterator<T, N>;
+    using const_iterator = StorageIterator<T const, N>;
 
     struct Empty {};
 
@@ -77,6 +214,7 @@ struct BufferStorageBase {
     };
 
    public:
+    using slot_type = StorageSlot<stored_type>;
     StorageSlot<stored_type> slots[N];
     std::size_t size = 0;
 
@@ -90,243 +228,221 @@ struct BufferStorageBase {
     BufferStorageBase &operator=(BufferStorageBase const &) = default;
     BufferStorageBase &operator=(BufferStorageBase &&) = default;
 
-    template <typename Iter, typename = std::enable_if_t<is_forward_iter_v<Iter>>>
-    constexpr void construct(Iter first, Iter last) noexcept(
-        std::is_nothrow_constructible_v<T, typename std::iterator_traits<Iter>::reference>) {
-        auto slot_first = std::begin(slots);
-        for (; first != end; ++first, ++slot_first) {
-            construct_at(*slot_first, *first);
-        }
-        size = slot_first - std::begin(slots);
+    template <typename Iter, typename = std::enable_if_t<is_iter_type_v<Iter, std::input_iterator_tag>>>
+    constexpr BufferStorageBase(Iter first, Iter last) {
+        auto end = construct_copy_range(begin(), first, last);
+        size = end - begin();
     }
 
-    constexpr void construct(std::size_t n, T const &value) noexcept(std::is_nothrow_copy_constructible_v<T>) {
-        auto slot_first = std::begin(slots);
-        auto slot_end = std::begin(slots) + size;
-        size = n;
-        for (; n != 0; ++slot_first, --n) {
-            construct_at(*slot_first, value);
-        }
+    constexpr BufferStorageBase(std::size_t n, T const &value) noexcept(std::is_nothrow_copy_constructible_v<T>)
+        : size{n} {
+        construct_fill(begin(), n, value);
     }
 
-    constexpr void construct(BufferStorageBase const &other) {
-        auto slot_first = std::begin(slots);
-        auto first = std::begin(other.slots);
-        auto end = std::begin(other.slots) + other.size;
-        for (; first != end; ++first, ++slot_first) {
-            construct_at(*slot_first, first->value);
-        }
-        size = other.size;
+    constexpr BufferStorageBase(int, BufferStorageBase const &other) noexcept(
+        std::is_nothrow_copy_constructible_v<stored_type>)
+        : size{other.size} {
+        construct_copy_range(begin(), other.begin(), other.end());
     }
 
-    constexpr void construct(BufferStorageBase &&other) noexcept(std::is_nothrow_move_constructible_v<stored_type>) {
-        auto slot_first = std::begin(slots);
-        auto first = std::begin(other.slots);
-        auto end = std::begin(other.slots) + other.size;
-        for (; first != end; ++first, ++slot_first) {
-            construct_at(*slot_first, std::move(first->value));
-        }
-        size = other.size;
+    constexpr BufferStorageBase(int,
+                                BufferStorageBase &&other) noexcept(std::is_nothrow_move_constructible_v<stored_type>)
+        : size{other.size} {
+        construct_move_range(begin(), other.begin(), other.end());
     }
 
-    template <typename Iter, typename = std::enable_if_t<is_forward_iter_v<Iter>>>
-    constexpr void assign(Iter first, Iter last) noexcept(
-        std::conjunction_v<std::is_nothrow_constructible<T, typename std::iterator_traits<Iter>::reference>,
-                           std::is_nothrow_assignable<T, std::iterator_traits<Iter>::reference>>) {
-        auto slot_first = std::begin(slots);
-        auto slot_end = std::begin(slots) + size;
-        for (; slot_first != slot_end && first != end; ++slot_first, ++first) {
-            *slot_first = *first;
+    template <typename Iter>
+    constexpr void assign(Iter first, Iter last, std::input_iterator_tag) {
+        auto it = begin();
+        while (it != end && first != last) {
+            *it++ = *first++;
         }
-        for (; first != end; ++slot_first, ++first) {
-            construct_at(*slot_first, *first);
+        if (first == last) {
+            destroy_range(it, end());
+        } else {
+            construct_at(it++, *first++);
+            it = construct_copy_range(it, first, last);
         }
-        for (; slot_first != slot_end; ++slot_first) {
-            slot_first->.value ~stored_type();
+        size = it - begin();
+    }
+
+    template <typename Iter>
+    constexpr void assign(Iter first, Iter last, std::forward_iterator_tag) {
+        auto n = std::distance(first, last);
+        if (n < size) {
+            std::copy(first, last, begin());
+            destroy_range(begin() + n, end());
+        } else {
+            std::copy_n(first, size, begin());
+            construct_copy_range(end(), first + size, last);
         }
-        size = slot_first - std::begin(slots);
+        size = std::distance(first, last);
     }
 
     constexpr void assign(std::size_t n, T const &value) noexcept(
         std::conjunction_v<std::is_nothrow_copy_constructible<T>, std::is_nothrow_copy_assignable<T>>) {
-        auto slot_first = std::begin(slots);
-        auto slot_end = std::begin(slots) + size;
+        if (n < size) {
+            std::fill_n(begin(), n, value);
+            destroy_range(begin() + n, end());
+        } else {
+            std::fill(it, end(), value);
+            construct_fill(end(), n - size, value);
+        }
         size = n;
-        for (; n != 0 && slot_first != slot_end; ++slot_first, --n) {
-            *slot_first = value;
-        }
-        for (; n != 0; ++slot_first, --n) {
-            construct_at(*slot_first, value);
-        }
-        for (; slot_first != slot_end; ++slot_first) {
-            slot_first->value.~stored_type();
-        }
     }
 
-    constexpr void assign(BufferStorageBase const &other) {
-        auto slot_first = std::begin(slots);
-        auto slot_end = std::begin(slots) + size;
-        auto first = std::begin(other.slots);
-        auto end = std::begin(other.slots) + other.size;
-        for (; slot_first != slot_end && first != end; ++slot_first, ++first) {
-            *slot_first = first->value;
-        }
-        for (; first != end; ++slot_first, ++first) {
-            construct_at(*slot_first, first->value);
-        }
-        for (; slot_first != slot_end; ++slot_first) {
-            slot_first->.value ~stored_type();
-        }
-        size = other.size;
+    constexpr void assign(BufferStorageBase const &other) noexcept(
+        std::conjunction_v<std::is_nothrow_copy_constructible_v<stored_type>,
+                           std::is_nothrow_copy_assignable<stored_type>>) {
+        assign(other.begin(), other.end());
     }
 
     constexpr void assign(BufferStorageBase &&other) noexcept(
         std::conjunction_v<std::is_nothrow_move_constructible_v<stored_type>,
                            std::is_nothrow_move_assignable<stored_type>>) {
-        auto slot_first = std::begin(slots);
-        auto slot_end = std::begin(slots) + size;
-        auto first = std::begin(other.slots);
-        auto end = std::begin(other.slots) + other.size;
-        for (; slot_first != slot_end && first != end; ++slot_first, ++first) {
-            *slot_first = std::move(first->value);
-        }
-        for (; first != end; ++slot_first, ++first) {
-            construct_at(*slot_first, std::move(first->value));
-        }
-        for (; slot_first != slot_end; ++slot_first) {
-            slot_first->value.~stored_type();
-        }
-        size = other.size;
+        assign(std::make_move_iterator(other.begin()), std::make_move_iterator(other.end()));
     }
 
-    constexpr void insert(StorageSlot<stored_type> *pos, T const &value) noexcept(
+    constexpr void insert(iterator pos, T const &value) noexcept(
         std::conjunction_v<std::is_nothrow_copy_constructible<T>, std::is_nothrow_move_constructible<T>,
                            std::is_nothrow_move_assignable<T>>) {
-        if (pos == std::begin(slots) + size) {
-            construct_at(std::begin(slots) + size, value);
-        } else {
-            auto it = std::begin(slots) + size - 1;
-            construct_at(it + 1, std::move(it->value));
-            for (; it != pos; --it) {
-                it->value = std::move((it - 1)->value);
-            }
-            it->value = value;
-        }
+        construct_at(end(), std::move(*(end - 1)));
+        std::move_backward(pos, end(), end());
+        it->value = value;
         ++size;
     }
 
-    constexpr void insert(StorageSlot<stored_type> *pos, T &&value) noexcept(
+    constexpr void insert(iterator pos, T &&value) noexcept(
         std::conjunction_v<std::is_nothrow_move_constructible<T>, std::is_nothrow_move_assignable<T>>) {
-        if (pos == std::begin(slots) + size) {
-            construct_at(std::begin(slots) + size, std::move(value));
-        } else {
-            auto it = std::begin(slots) + size - 1;
-            construct_at(it + 1, std::move(it->value));
-            for (; it != pos; --it) {
-                it->value = std::move((it - 1)->value);
-            }
-            *it = std::move(value);
-        }
+        construct_at(end(), std::move(*(end - 1)));
+        std::move_backward(pos, end(), end());
+        it->value = std::move(value);
         ++size;
     }
 
-    template <typename Iter, typename = std::enable_if_t<is_forward_iter_v<Iter>>>
-    constexpr void insert(StorageSlot<stored_type> *pos, Iter first, Iter last) noexcept(
+    template <typename Iter, typename = std::enable_if_t<is_iter_type_v<Iter, std::forward_iterator_tag>>>
+    constexpr void insert(iterator pos, Iter first, Iter last) noexcept(
         std::conjunction_v<std::is_nothrow_constructible<T, typename std::iterator_traits<Iter>::reference>,
                            std::is_nothrow_assignable<T, typename std::iterator_traits<Iter>::reference>,
                            std::is_nothrow_move_constructible<T>, std::is_nothrow_move_assignable<T>>) {
-        if (first == last) {
-            return;
-        }
-        auto const end = std::begin(slots) + size;
         std::size_t const num_insert = std::distance(first, last);
-        std::size_t const slots_after = end - pos;
+        std::size_t const slots_after = end() - pos;
         if (slots_after > num_insert) {
-            auto const split_pos = end - num_insert;
-            for (auto it = split_pos; it != end; ++it) {
-                construct_at(it + num_insert, std::move(it->value));
-            }
-            for (auto it = split_pos; it != pos; --it) {
-                (it + num_insert - 1)->value = std::move((it - 1)->value);
-            }
-            for (; first != last; ++first, ++pos) {
-                pos->value = *first;
-            }
+            auto const split_pos = end() - num_insert;
+            construct_move_range(end(), split_pos, end());
+            std::move_backward(pos, split_pos, end());
+            std::copy(first, last, pos);
         } else {
             auto const split_pos = first + slots_after;
-            auto insert_it = end;
-            for (auto it = split_pos; it != last; ++it, ++insert_it) {
-                construct_at(insert_it, *it);
-            }
-            for (auto it = pos; it != end; ++it, ++insert_it) {
-                construct_at(insert_it, std::move(it->value));
-            }
-            for (; first != split_pos; ++first, ++pos) {
-                pos->value = *first;
-            }
+            auto const it = construct_copy_range(end(), split_pos, last);
+            construct_move_range(it, pos, end());
+            std::copy(first, split_pos, pos);
         }
         size += num_insert;
     }
 
-    constexpr void insert(StorageSlot<stored_type> *pos, std::size_t n, T const &value) noexcept(
+    constexpr void insert(iterator pos, std::size_t n, T const &value) noexcept(
         std::conjunction_v<std::is_nothrow_copy_constructible<T>, std::is_nothrow_copy_assignable<T>,
                            std::is_nothrow_move_constructible<T>, std::is_nothrow_move_assignable<T>>) {
-        if (n == 0) {
-            return;
+        std::size_t const slots_after = end() - pos;
+        if (slots_after > n) {
+            auto const split_pos = end() - num_insert;
+            construct_move_range(end(), split_pos, end());
+            std::move_backward(pos, split_pos, end());
+            std::fill_n(pos, n, value);
+        } else {
+            auto const it = construct_fill(end(), n - slots_after, value);
+            construct_move_range(it, pos, end());
+            std::fill(pos, end(), value);
         }
         size += n;
-        auto const end = std::begin(slots) + size;
-        std::size_t slots_after = end - pos;
-        if (slots_after > n) {
-            auto const split_pos = end - num_insert;
-            for (auto it = split_pos; it != end; ++it) {
-                construct_at(it + num_insert, std::move(it->value));
-            }
-            for (auto it = split_pos; it != pos; --it) {
-                (it + num_insert - 1)->value = std::move((it - 1)->value);
-            }
-            for (; n != 0; --n, ++pos) {
-                pos->value = value;
-            }
-        } else {
-            auto const split_pos = n - after;
-            for (auto it = end; it != end + num_split; ++it) {
-                construct_at(it, value);
-            }
-            for (auto it = pos; it != end; ++it) {
-                construct_at(it + n, std::move(it->value));
-            }
-            for (; pos != end; ++pos) {
-                pos->value = value;
-            }
-        }
     }
 
     template <typename... Args>
-    constexpr void construct_at(StorageSlot<stored_type> *pos,
+    constexpr void emplace(iterator pos, Args &&...args) noexcept(
+        std::conjunction_v<std::is_nothrow_move_constructible<T>, std::is_nothrow_move_assignable<T>,
+                           std::is_nothrow_constructible<T, Args>>) {
+        insert(pos, stored_value(std::forward<Args>(args)...));
+    }
+
+    constexpr void emplace(iterator pos, T &&value) noexcept(
+        std::conjunction_v<std::is_nothrow_move_constructible<T>, std::is_nothrow_move_assignable<T>,
+                           std::is_nothrow_constructible<T, Args>>) {
+        insert(pos, std::move(value));
+    }
+
+    constexpr void erase(iterator pos) noexcept(std::is_nothrow_move_assignable<T>) {
+        if (pos + 1 != end()) {
+            std::move(pos + 1, end(), pos);
+        }
+        --size;
+        destroy_at(end());
+    }
+
+    constexpr void erase(iterator first, iterator last) noexcept(std::is_nothrow_move_assignable<T>) {
+        if (first != last) {
+            if (last != end()) {
+                std::move(last, end(), first);
+            }
+            destroy_range(end() - (last - first), end());
+            size -= last - first;
+        }
+    }
+
+    constexpr iterator construct_fill(iterator pos, std::size_t n,
+                                      T const &value) noexcept(std::is_nothrow_copy_constructible_v<stored_type>) {
+        for (; n != 0; --n) {
+            construct_at(pos++, value);
+        }
+        return pos;
+    }
+
+    template <typename Iter>
+    constexpr iterator construct_copy_range(iterator pos, Iter first, Iter last) {
+        for (; first != last; ++first) {
+            construct_at(pos++, *first);
+        }
+        return pos;
+    }
+
+    template <typename Iter>
+    constexpr iterator construct_move_range(iterator pos, Iter first, Iter last) {
+        for (; first != last; ++first) {
+            construct_at(pos++, std::move(*first));
+        }
+        return pos;
+    }
+
+    template <typename... Args>
+    constexpr void construct_at(iterator pos,
                                 Args &&...args) noexcept(std::is_nothrow_constructible_v<stored_type, Args...>) {
         if constexpr (std::conjunction_v<std::is_trivially_default_constructible<T>,
                                          std::is_trivially_move_assignable<T>, std::is_trivially_destructible<T>>) {
-            pos->value = stored_type(std::forward<Args>(args)...);
+            *pos = stored_type(std::forward<Args>(args)...);
         } else {
-            ::new (static_cast<void *>(std::addressof(pos))) stored_type(std::forward<Args>(args)...);
+            ::new (static_cast<void *>(std::addressof(*pos))) stored_type(std::forward<Args>(args)...);
         }
     }
 
-    template <typename... Args>
-    void emplace_back(Args &&...args) noexcept(std::is_nothrow_constructible_v<stored_type, Args...>) {
-        ::new (static_cast<void *>(std::addressof(slots[size]))) stored_type(std::forward<Args>(args)...);
-        ++size;
+    constexpr void destroy_range(iterator first, iterator last) noexcept {
+        if constexpr (!std::is_trivially_destructible_v<T>) {
+            for (; first != last; ++first) {
+                destroy_at(first);
+            }
+        }
     }
 
-    void pop_back() noexcept {
-        --size;
-        get(size).~stored_type();
+    constexpr void destroy_at(iterator pos) noexcept {
+        if constexpr (!std::is_trivially_destructible_v<T>) {
+            pos->value.~stored_type();
+        }
     }
 
     constexpr void clear() noexcept {
         std::for_each_n(std::begin(slots), size, [](auto &s) { s.value.~stored_type(); });
-        size = 0;
+        for (auto it = std::begin(slots); it != std::begin(slots) + size; ++it) {
+            destroy_at(it);
+        }
     }
 
     constexpr T &get(std::size_t n) noexcept {
@@ -335,6 +451,22 @@ struct BufferStorageBase {
 
     constexpr T const &get(std::size_t n) const noexcept {
         return slots[n].value;
+    }
+
+    constexpr iterator begin() noexcept {
+        return iterator{std::begin(slots)};
+    }
+
+    constexpr const_iterator cbegin() const noexcept {
+        return const_iterator{std::begin(slots)};
+    }
+
+    constexpr iterator end() noexcept {
+        return iterator{std::begin(slots) + n};
+    }
+
+    constexpr const_iterator end() const noexcept {
+        return const_iterator{std::begin(slots) + n};
     }
 };
 
@@ -359,7 +491,7 @@ struct BufferStorage<T, N, true, false, true> : BufferStorageBase<T, N> {
     BufferStorage(BufferStorage &&) = default;
 
     constexpr BufferStorage &operator=(BufferStorage const &other) {
-        this->copy_assign(other);
+        this->assign(other);
         return *this;
     }
 
@@ -379,7 +511,7 @@ struct BufferStorage<T, N, true, true, false> : BufferStorageBase<T, N> {
 
     constexpr BufferStorage &operator=(BufferStorage &&other) noexcept(
         std::conjuction_v<std::is_nothrow_move_constructible<T>, std::is_nothrow_move_assignable<T>>) {
-        this->move_assign(std::move(other));
+        this->assign(std::move(other));
         return *this;
     }
 };
@@ -395,13 +527,13 @@ struct BufferStorage<T, N, true, false, false> : BufferStorageBase<T, N> {
     BufferStorage(BufferStorage &&) = default;
 
     constexpr BufferStorage &operator=(BufferStorage const &other) {
-        this->copy_assign(other);
+        this->assign(other);
         return *this;
     }
 
     constexpr BufferStorage &operator=(BufferStorage &&other) noexcept(
         std::conjuction_v<std::is_nothrow_move_constructible<T>, std::is_nothrow_move_assignable<T>>) {
-        this->move_assign(std::move(other));
+        this->assign(std::move(other));
         return *this;
     }
 };
@@ -438,11 +570,11 @@ struct BufferBase {
     constexpr BufferBase(InputIt first, InputIt last) : storage(first, last) {
     }
 
-    constexpr BufferBase(BufferBase const &other) : storage(true, other.storage) {
+    constexpr BufferBase(BufferBase const &other) : storage(0, other.storage) {
     }
 
     constexpr BufferBase(BufferBase &&other) noexcept(std::is_nothrow_move_constructible_v<T>)
-        : storage(true, std::move(other.storage)) {
+        : storage(0, std::move(other.storage)) {
     }
 
     BufferBase &operator=(BufferBase const &) = default;
@@ -463,7 +595,7 @@ struct BufferBase<T, N, false, true> : BufferBaseImpl<T, N> {
     constexpr BufferBase(InputIt first, InputIt last) : storage(first, last) {
     }
 
-    constexpr BufferBase(BufferBase const &other) : storage(true, other.storage) {
+    constexpr BufferBase(BufferBase const &other) : storage(0, other.storage) {
     }
 
     constexpr BufferBase(BufferBase &&other) = default;
@@ -488,7 +620,7 @@ struct BufferBase<T, N, true, false> : BufferBaseImpl<T, N> {
     constexpr BufferBase(BufferBase const &other) = default;
 
     constexpr BufferBase(BufferBase &&other) noexcept(std::is_nothrow_move_constructible_v<T>)
-        : storage(true, std::move(other.storage)) {
+        : storage(0, std::move(other.storage)) {
     }
 
     BufferBase &operator=(BufferBase const &) = default;
@@ -527,8 +659,8 @@ struct Buffer : private BufferBase<T, N> {
     const_reference = value_type const &;
     pointer = value_type *;
     const_pointer = value_type const *;
-    iterator = BufferIterator<T, N, false>;
-    const_iterator = BufferIterator<T, N, true>;
+    iterator = StorageIterator<T, N, false>;
+    const_iterator = StorageIterator<T, N, true>;
     reverse_iterator = std::reverse_iterator<iterator>;
     const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
@@ -536,10 +668,13 @@ struct Buffer : private BufferBase<T, N> {
     constexpr Buffer() noexcept {
     }
 
-    constexpr Buffer(size_type count, const_reference value) : BufferBase(count, value) {
+    constexpr Buffer(size_type count, const_reference value) noexcept(std::is_nothrow_copy_constructible_v<T>)
+        : BufferBase(count, value) {
     }
 
-    constexpr explicit Buffer(size_type count) : BufferBase(count, value_type()) {
+    constexpr explicit Buffer(size_type count) noexcept(
+        std::conjunction_v<std::is_nothrow_defaul_constructible<T>, std::is_nothrow_copy_constructible<T>>)
+        : BufferBase(count, value_type()) {
     }
 
     template <typename InputIt>
@@ -550,26 +685,12 @@ struct Buffer : private BufferBase<T, N> {
     }
 
     constexpr Buffer &operator=(std::initializer_list<value_type> ilist) {
-        std::size_t i = 0;
-        if (size < other.size) {
-            for (; i < size; ++i) {
-                get(i) = other.get(i);
-            }
-            for (; i < other.size; ++i) {
-                ::new (static_cast<void *>(std::addressof(slots[i]))) stored_type(other.get(i));
-            }
-        } else {
-            for (; i < other.size; ++i) {
-                get(i) = other.get(i);
-            }
-            for (; i < size; ++i) {
-                get(i).~stored_type();
-            }
-        }
-        size = other.size;
+        this->storage.assign(ilist.begin(), ilist.end());
+        return *this;
     }
 
-    constexpr void assign(size_type count, const_reference value) {
+    constexpr void assign(size_type count, const_reference value) noexcept(
+        std::conjunction_v<std::is_nothrow_copy_constructible<T>, std::is_nothrow_copy_assignable<T>>) {
         this->storage.assign(count, value);
     }
 
@@ -582,19 +703,27 @@ struct Buffer : private BufferBase<T, N> {
         this->storage.assign(ilist.begin(), ilist.end());
     }
 
-    constexpr T &operator[](std::size_t n) {
+    constexpr reference operator[](std::size_t n) noexcept {
         return this->get(n);
     }
 
-    constexpr T const &operator[](std::size_t n) const {
+    constexpr const_reference operator[](std::size_t n) const noexcept {
         return this->get(n);
     }
 
-    constexpr T &front() {
+    constexpr reference front() noexcept {
         return this->get(0);
     }
 
-    constexpr T &back() {
+    constexpr const_reference front() const noexcept {
+        return this->get(0);
+    }
+
+    constexpr reference back() {
+        return this->get(this->storage.size - 1);
+    }
+
+    constexpr const_reference back() noexcept {
         return this->get(this->storage.size - 1);
     }
 
@@ -610,61 +739,114 @@ struct Buffer : private BufferBase<T, N> {
         this->storage.clear();
     }
 
-    constexpr iterator insert(const_iterator pos, const_reference value) {
-        // TODO
+    constexpr iterator insert(const_iterator pos, const_reference value) noexcept(
+        std::conjunction_v<std::is_nothrow_copy_constructible<T>, std::is_nothrow_move_constructible<T>,
+                           std::is_nothrow_move_assignable<T>>) {
+        auto it = begin() + (pos - cbegin());
+        if (it == end()) {
+            this->storage.construct_at(at, value);
+            ++this->storage.size;
+        } else {
+            auto value_cpy = value;
+            this->storage.insert(it, std::move(value_cpy));
+        }
+        return it;
     }
 
-    constexpr iterator insert(const_iterator pos, value_type &&value) {
-        // TODO
+    constexpr iterator insert(const_iterator pos, value_type &&value) noexcept(
+        std::conjunction_v<std::is_nothrow_move_constructible<T>, std::is_nothrow_move_constructible<T>,
+                           std::is_nothrow_move_assignable<T>>) {
+        auto it = begin() + (pos - cbegin());
+        if (it == end()) {
+            this->storage.construct_at(at, std::move(value));
+            ++this->storage.size;
+        } else {
+            auto value_cpy = std::move(value);
+            this->storage.insert(it, std::move(value_cpy));
+        }
+        return it;
     }
 
-    constexpr iterator insert(const_iterator pos, size_type count, const_reference value) {
-        // TODO
+    constexpr iterator insert(const_iterator pos, size_type count, const_reference value) noexcept(
+        std::conjunction_v<std::is_nothrow_copy_constructible<T>, std::is_nothrow_move_constructible<T>,
+                           std::is_nothrow_copy_assignable<T>>) {
+        auto it = begin() + (pos - cbegin());
+        if (count != 0) {
+            auto value_cpy = value;
+            this->storage.insert(it, count, value_cpy);
+        }
+        return it;
     }
 
     template <typename InputIter>
     constexpr iterator insert(const_iterator pos, InputIt first, InputIt last) {
-        // TODO
+        auto it = begin() + (pos - cbegin());
+        if (first != last) {
+            this->storage.insert(it, first, last);
+        }
+        return it;
     }
 
     constexpr iterator insert(const_iterator pos, std::initializer_list<value_type> ilist) {
-        // TODO
+        auto it = begin() + (pos - cbegin());
+        if (ilist.size() != 0) {
+            this->storage.insert(it, ilist.begin(), ilist.end());
+        }
+        return it;
     }
 
     template <typename... Args>
-    constexpr iterator emplace(const_iterator pos, Args &&...args) {
-        // TODO
+    constexpr iterator emplace(const_iterator pos, Args &&...args) noexcept(
+        std::conjunction_v<std::is_nothrow_constructible<T, Args>, std::is_nothrow_move_constructible<T>,
+                           std::is_nothrow_copy_assignable<T>>) {
+        auto it = begin() + (pos - cbegin());
+        if (it == end()) {
+            this->storage.construct_at(at, std::move(value));
+            ++this->storage.size;
+        } else {
+            this->storage.emplace(it, std::forward<Args>(args)...);
+        }
+        return it;
     }
 
     constexpr iterator erase(const_iterator pos) {
-        // TODO
+        auto it = begin() + (pos - cbegin());
+        this->storage.erase(it);
+        return it;
     }
 
     constexpr iterator erase(const_iterator first, const_iterator last) {
-        // TODO
+        auto const first_it = begin() + (last - cbegin());
+        auto const last_it = begin() + (last - cbegin());
+        this->storage.erase(first_it, last_it);
+        return first_it;
     }
 
     constexpr void push_back(T const &value) {
-        this->emplace_back(value);
+        this->storage.construct_at(end(), value);
+        ++size;
     }
 
     constexpr void push_back(T &&value) {
-        this->emplace_back(std::move(value));
+        this->storage.construct_at(end(), std::move(value));
+        ++size;
     }
 
     template <typename... Args>
     constexpr void emplace_back(Args &&...args) {
-        this->emplace_back(std::forward<Args>(args)...);
+        this->storage.construct_at(end(), std::forward<Args>(args)...);
+        ++size;
     }
 
     constexpr void pop_back() {
-        this->pop_back();
+        --size;
+        this->storage.destroy_at(end());
     }
 
     void swap(Buffer &other) noexcept(std::conjunction_v < std::is_nothrow_move_constructible<value_type>,
                                       std::is_nothrow_swappable<value_type>) {
         using std::swap;
-        // TODO
+
     }
 };
 

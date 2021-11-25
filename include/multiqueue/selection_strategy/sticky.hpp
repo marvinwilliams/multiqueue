@@ -52,7 +52,7 @@ struct sticky {
     template <typename Multiqueue>
     static inline auto lock_push_pq(Multiqueue &mq, thread_data_t &thread_data) {
         if (thread_data.push_count == 0) {
-            thread_data.push_pq = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_spqs_);
+            thread_data.push_pq = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
             thread_data.push_count = mq.shared_data_.stickiness;
         }
 
@@ -62,20 +62,20 @@ struct sticky {
         }
 
         do {
-            thread_data.push_pq = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_spqs_);
+            thread_data.push_pq = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
         } while (!static_cast<typename Multiqueue::pq_type *>(thread_data.push_pq)->try_lock());
         thread_data.push_count = mq.shared_data_.stickiness - 1;
         return static_cast<typename Multiqueue::pq_type *>(thread_data.push_pq);
     }
 
     template <typename Multiqueue>
-    inline static auto lock_delete_pq(Multiqueue &mq, thread_data_t &thread_data) {
+    static inline auto lock_delete_pq(Multiqueue &mq, thread_data_t &thread_data) -> typename Multiqueue::pq_type * {
         if (thread_data.delete_count[0] == 0) {
-            thread_data.delete_pq[0] = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_spqs_);
+            thread_data.delete_pq[0] = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
             thread_data.delete_count[0] = mq.shared_data_.stickiness;
         }
         if (thread_data.delete_count[1] == 0) {
-            thread_data.delete_pq[1] = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_spqs_);
+            thread_data.delete_pq[1] = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
             thread_data.delete_count[1] = mq.shared_data_.stickiness;
         }
         auto first_key = static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[0])->concurrent_top_key();
@@ -89,7 +89,7 @@ struct sticky {
                     --thread_data.delete_count[1];
                     return static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[0]);
                 } else {
-                    thread_data.delete_pq[0] = mq.spqs_ + fastrange64(thread_data.gen(), mq.num_spqs_);
+                    thread_data.delete_pq[0] = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
                     first_key =
                         static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[0])->concurrent_top_key();
                     thread_data.delete_count[0] = mq.shared_data_.stickiness;
@@ -101,7 +101,7 @@ struct sticky {
                     --thread_data.delete_count[1];
                     return static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[1]);
                 } else {
-                    thread_data.delete_pq[1] = mq.spqs_ + fastrange64(thread_data.gen(), mq.num_spqs_);
+                    thread_data.delete_pq[1] = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
                     second_key =
                         static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[1])->concurrent_top_key();
                     thread_data.delete_count[1] = mq.shared_data_.stickiness;
