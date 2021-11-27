@@ -19,16 +19,13 @@
 #include <sstream>
 #include <string>
 
-namespace multiqueue {
-namespace selection_strategy {
+namespace multiqueue::selection_strategy {
 
 struct random {
     struct shared_data_t {
-        template <typename Configuration>
-        shared_data_t(Configuration const &) {
-        }
+        /* explicit shared_data_t(RandomSelectionConfiguration) {} */ 
 
-        std::string description(shared_data_t const &) const {
+        std::string description() const {
             return "random";
         }
     };
@@ -80,6 +77,6 @@ struct random {
     }
 };
 
-}  // namespace selection_strategy
-}  // namespace multiqueue
+}  // namespace multiqueue::selection_strategy
+
 #endif  //! SELECTION_STRATEGY_RANDOM_HPP_INCLUDED

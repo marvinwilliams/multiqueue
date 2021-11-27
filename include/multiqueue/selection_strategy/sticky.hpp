@@ -20,15 +20,14 @@
 #include <string>
 #include <utility>
 
-namespace multiqueue {
-namespace selection_strategy {
+namespace multiqueue::selection_strategy {
 
 struct sticky {
     struct shared_data_t {
         unsigned int stickiness;
-        template <typename Configuration>
-        shared_data_t(Configuration const &config) : stickiness{config.stickiness} {
-        }
+        /* explicit shared_data_t(StickySelectionConfiguration const &config) noexcept : stickiness{config.stickiness} {
+         */
+        /* } */
 
         std::string description() const {
             std::stringstream ss;
@@ -88,24 +87,21 @@ struct sticky {
                     --thread_data.delete_count[0];
                     --thread_data.delete_count[1];
                     return static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[0]);
-                } else {
-                    thread_data.delete_pq[0] = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
-                    first_key =
-                        static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[0])->concurrent_top_key();
-                    thread_data.delete_count[0] = mq.shared_data_.stickiness;
                 }
+                thread_data.delete_pq[0] = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
+                first_key = static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[0])->concurrent_top_key();
+                thread_data.delete_count[0] = mq.shared_data_.stickiness;
             } else if (second_key != Multiqueue::sentinel) {
                 if (static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[1])
                         ->try_lock_if_key(second_key)) {
                     --thread_data.delete_count[0];
                     --thread_data.delete_count[1];
                     return static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[1]);
-                } else {
-                    thread_data.delete_pq[1] = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
-                    second_key =
-                        static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[1])->concurrent_top_key();
-                    thread_data.delete_count[1] = mq.shared_data_.stickiness;
                 }
+                thread_data.delete_pq[1] = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
+                second_key =
+                    static_cast<typename Multiqueue::pq_type *>(thread_data.delete_pq[1])->concurrent_top_key();
+                thread_data.delete_count[1] = mq.shared_data_.stickiness;
             } else {
                 // Both keys are sentinels
                 break;
@@ -118,6 +114,6 @@ struct sticky {
     }
 };
 
-}  // namespace selection_strategy
-}  // namespace multiqueue
+}  // namespace multiqueue::selection_strategy
+
 #endif  //! SELECTION_STRATEGY_STICKY_HPP_INCLUDED

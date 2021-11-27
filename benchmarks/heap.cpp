@@ -1,7 +1,4 @@
-#include "multiqueue/sequential/heap/full_down_strategy.hpp"
-#include "multiqueue/sequential/heap/full_up_strategy.hpp"
-#include "multiqueue/sequential/heap/heap.hpp"
-#include "multiqueue/util/extractors.hpp"
+#include "multiqueue/heap.hpp"
 
 #include "catch2/benchmark/catch_benchmark.hpp"
 #include "catch2/catch_template_test_macros.hpp"
@@ -51,17 +48,33 @@ TEST_CASE("std::priority_queue", "[benchmark][std]") {
         // to guarantee computation
         return pq.empty();
     };
+
+    BENCHMARK("mixed") {
+        for (int i = 1; i <= reps / 4; ++i) {
+            pq.push(i * 3);
+            pq.push(i);
+            pq.push(i * 4);
+            pq.push(i * 2);
+            pq.pop();
+            pq.pop();
+            pq.pop();
+        }
+        for (int i = 1; i <= reps / 4; ++i) {
+            pq.pop();
+        }
+        // to guarantee computation
+        return pq.empty();
+    };
 }
 
-TEMPLATE_TEST_CASE_SIG("Degree", "[benchmark][heap][degree]", ((unsigned int Degree), Degree), 2, 4, 8, 16) {
-    using heap_t = multiqueue::sequential::heap<int, int, multiqueue::util::identity<int>, std::less<int>, Degree,
-                                                multiqueue::sequential::sift_strategy::FullUp, std::allocator<int>>;
+TEMPLATE_TEST_CASE_SIG("Degree", "[benchmark][heap][degree]", ((unsigned int Degree), Degree), 2, 4, 8, 16, 64) {
+    using heap_t = multiqueue::Heap<int, void, std::less<int>, Degree, std::allocator<int>>;
 
     auto heap = heap_t{};
 
     BENCHMARK("up") {
         for (int i = 1; i <= reps; ++i) {
-            heap.insert(i);
+            heap.push(i);
         }
         for (int i = 1; i <= reps; ++i) {
             heap.pop();
@@ -72,7 +85,7 @@ TEMPLATE_TEST_CASE_SIG("Degree", "[benchmark][heap][degree]", ((unsigned int Deg
 
     BENCHMARK("down") {
         for (int i = reps; i > 0; --i) {
-            heap.insert(i);
+            heap.push(i);
         }
         for (int i = 1; i <= reps; ++i) {
             heap.pop();
@@ -83,28 +96,10 @@ TEMPLATE_TEST_CASE_SIG("Degree", "[benchmark][heap][degree]", ((unsigned int Deg
 
     BENCHMARK("up_down") {
         for (int i = 1; i <= reps / 2; ++i) {
-            heap.insert(i);
+            heap.push(i);
         }
         for (int i = reps; i > reps / 2; --i) {
-            heap.insert(i);
-        }
-        for (int i = 1; i <= reps; ++i) {
-            heap.pop();
-        }
-        // to guarantee computation
-        return heap.empty();
-    };
-}
-
-TEST_CASE("Full Up Strategy", "[benchmark][heap][strategy]") {
-    using heap_t = multiqueue::sequential::heap<int, int, multiqueue::util::identity<int>, std::less<int>, 4,
-                                                multiqueue::sequential::sift_strategy::FullDown, std::allocator<int>>;
-
-    auto heap = heap_t{};
-
-    BENCHMARK("up") {
-        for (int i = 1; i <= reps; ++i) {
-            heap.insert(i);
+            heap.push(i);
         }
         for (int i = 1; i <= reps; ++i) {
             heap.pop();
@@ -113,28 +108,20 @@ TEST_CASE("Full Up Strategy", "[benchmark][heap][strategy]") {
         return heap.empty();
     };
 
-    BENCHMARK("down") {
-        for (int i = reps; i > 0; --i) {
-            heap.insert(i);
+    BENCHMARK("mixed") {
+        for (int i = 1; i <= reps / 4; ++i) {
+            pq.push(i * 3);
+            pq.push(i);
+            pq.push(i * 4);
+            pq.push(i * 2);
+            pq.pop();
+            pq.pop();
+            pq.pop();
         }
-        for (int i = 1; i <= reps; ++i) {
-            heap.pop();
-        }
-        // to guarantee computation
-        return heap.empty();
-    };
-
-    BENCHMARK("up_down") {
-        for (int i = 1; i <= reps / 2; ++i) {
-            heap.insert(i);
-        }
-        for (int i = reps; i > reps / 2; --i) {
-            heap.insert(i);
-        }
-        for (int i = 1; i <= reps; ++i) {
-            heap.pop();
+        for (int i = 1; i <= reps / 4; ++i) {
+            pq.pop();
         }
         // to guarantee computation
-        return heap.empty();
+        return pq.empty();
     };
 }

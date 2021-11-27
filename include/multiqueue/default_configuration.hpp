@@ -38,7 +38,7 @@ struct BaseConfiguration {
     // Lock the pqs implicitly by marking the highest bit of the top key
     // Thus, this bit is not available to use in keys
     // Only integral and unsigned Key types are allowed
-    static constexpr bool ImplicitLock = false;
+    static constexpr bool ImplicitLock = true;
     template <typename T>
     using sentinel = Sentinel<T>;
     // Degree of the heap

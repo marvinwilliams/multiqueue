@@ -1,37 +1,19 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(multiqueue VERSION 2.0.0 LANGUAGES CXX C)
-
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
-
 include(cmake/utils.cmake)
-include(CMakeDependentOption)
 include(CMakePackageConfigHelpers)
-include(CTest)
 include(GNUInstallDirs)
 
 discourage_intree_builds()
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-# Read the system's L1 cache-line size and page size
-execute_process(COMMAND getconf LEVEL1_DCACHE_LINESIZE OUTPUT_VARIABLE DEFAULT_L1_CACHE_LINESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
-execute_process(COMMAND getconf PAGESIZE OUTPUT_VARIABLE DEFAULT_PAGESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
-
 option(multiqueue_BUILD_TESTS "Build unit tests for multiqueue" OFF)
+option(multiqueue_BUILD_BENCHMARKS "Build micro benchmarks for multiqueue internals" OFF)
 option(multiqueue_BUILD_EXAMPLES "Build examples" OFF)
 option(multiqueue_ABORT_MISALIGNMENT "Check if data is not aligned as expected" OFF)
 option(multiqueue_ELEMENT_DISTRIBUTION "Support functions to examine element distributions" OFF)
-option(multiqueue_BUILD_DOCUMENTATION "Build documentation" OFF)
-set(L1_CACHE_LINESIZE ${DEFAULT_L1_CACHE_LINESIZE} CACHE STRING "Specify the assumed L1 cache linesize (bytes)")
-set(PAGESIZE ${DEFAULT_PAGESIZE} CACHE STRING "Specify the assumed pagesize (bytes)")
 
-if(NOT "${L1_CACHE_LINESIZE}" MATCHES "^[0-9]+")
-  message(SEND_ERROR "Invalid L1 cache linesize")
-endif()
-
-if(NOT "${PAGESIZE}" MATCHES "^[0-9]+")
-  message(SEND_ERROR "Invalid pagesize")
-endif()
+project(multiqueue VERSION 2.0.0 LANGUAGES CXX)
 
 # The target to be linked against by other targets. This library is header-only
 # and as such does not compile by itself. This target rather sets include
@@ -55,7 +37,6 @@ target_compile_features(
   cxx_std_17
 )
 
-target_compile_definitions(multiqueue INTERFACE L1_CACHE_LINESIZE PAGESIZE)
 if(multiqueue_ABORT_MISALIGNMENT)
   target_compile_definitions(multiqueue INTERFACE MQ_ABORT_MISALIGNMENT)
 endif()
@@ -72,38 +53,36 @@ add_library("multiqueue::multiqueue" ALIAS multiqueue)
 
 set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/external")
 
-if(multiqueue_BUILD_TESTS)
+if(multiqueue_BUILD_TESTS OR multiqueue_BUILD_BENCHMARKS)
   if(IS_DIRECTORY "${EXTERNAL_DIR}/Catch2")
     add_subdirectory("${EXTERNAL_DIR}/Catch2" EXCLUDE_FROM_ALL)
-    list(APPEND CMAKE_MODULE_PATH "${EXTERNAL_DIR}/Catch2/extras")
-  endif()
-endif()
-
-find_package(Doxygen)
-if(multiqueue_BUILD_DOCUMENTATION)
-  if(Doxygen_FOUND)
-    doxygen_add_docs(
-      doxygen
-      "${CMAKE_CURRENT_LIST_DIR}/include/multiqueue"
-      COMMENT
-      "Generate documentation"
-    )
   else()
-    message(WARNING "Doxygen not found, documentation cannot be built")
+    message(FATAL_ERROR "Catch2 not found in ${EXTERNAL_DIR}/Catch2")
   endif()
-endif()
-
-if(multiqueue_BUILD_TESTS)
-  set(TEST_RUNNER_PARAMS "" CACHE STRING "Options added to the test runner")
-  add_subdirectory(tests)
-endif()
-
-if(multiqueue_BUILD_BENCHMARKS)
-  add_subdirectory(benchmarks)
+  if(multiqueue_BUILD_TESTS)
+    include(CTest)
+    set(TEST_RUNNER_PARAMS "" CACHE STRING "Options added to the test runner")
+    add_subdirectory(tests)
+  endif()
+  if(multiqueue_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
+  endif()
 endif()
 
 if(multiqueue_BUILD_EXAMPLES)
   add_subdirectory(examples)
+endif()
+
+find_package(Doxygen)
+if(Doxygen_FOUND)
+  doxygen_add_docs(
+    doxygen
+    "${CMAKE_CURRENT_LIST_DIR}/include/multiqueue"
+    COMMENT
+    "Generate documentation"
+  )
+else()
+  message(WARNING "Doxygen not found, skipping documentation generation")
 endif()
 
 include(InstallRequiredSystemLibraries)
@@ -175,14 +154,12 @@ install(
   multiqueueTargets.cmake
 )
 
-if(multiqueue_INSTALL_DOCS)
-  install(
-    DIRECTORY
-    "${CMAKE_CURRENT_BINARY_DIR}/html"
-    DESTINATION
-    "${CMAKE_INSTALL_DOCDIR}"
-  )
-endif()
+install(
+  DIRECTORY
+  "${CMAKE_CURRENT_BINARY_DIR}/html"
+  DESTINATION
+  "${CMAKE_INSTALL_DOCDIR}"
+)
 
 # This target is only used by internal targets that use the multiqueue.
 add_library(multiqueue_internal INTERFACE)
