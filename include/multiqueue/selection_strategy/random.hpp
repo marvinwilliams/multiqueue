@@ -13,7 +13,6 @@
 #define SELECTION_STRATEGY_RANDOM_HPP_INCLUDED
 
 #include "multiqueue/external/fastrange.h"
-#include "multiqueue/external/xoroshiro128plus.hpp"
 
 #include <cstdint>
 #include <sstream>
@@ -22,59 +21,62 @@
 namespace multiqueue::selection_strategy {
 
 struct random {
-    struct shared_data_t {
-        /* explicit shared_data_t(RandomSelectionConfiguration) {} */ 
+    struct Parameters {};
 
-        std::string description() const {
+    template <typename MultiQueue>
+    struct Strategy {
+        using pq_type = typename MultiQueue::pq_type;
+
+        struct handle_data_t {};
+
+        MultiQueue &mq;
+
+        Strategy(MultiQueue &mq_ref, Parameters const &) noexcept : mq{mq_ref} {
+        }
+
+        static std::string description() {
             return "random";
         }
-    };
 
-    struct thread_data_t {
-        xoroshiro128plus gen;
-
-        explicit thread_data_t(std::uint64_t seed) : gen(seed) {
-        }
-    };
-
-    template <typename Multiqueue>
-    static inline auto lock_push_pq(Multiqueue &mq, thread_data_t &thread_data) {
-        auto pq = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
-        while (!pq->try_lock()) {
-            pq = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
-        }
-        return pq;
-    }
-
-    template <typename Multiqueue>
-    static inline auto lock_delete_pq(Multiqueue &mq, thread_data_t &thread_data) -> typename Multiqueue::pq_type * {
-        auto first = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
-        auto second = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
-        auto first_key = first->concurrent_top_key();
-        auto second_key = second->concurrent_top_key();
-        do {
-            if (first_key != Multiqueue::sentinel &&
-                (second_key == Multiqueue::sentinel || mq.comp_(first_key, second_key))) {
-                if (first->try_lock_if_key(first_key)) {
-                    return first;
-                } else {
-                    first = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
-                    first_key = first->concurrent_top_key();
-                }
-            } else if (second_key != Multiqueue::sentinel) {
-                if (second->try_lock_if_key(second_key)) {
-                    return second;
-                } else {
-                    second = mq.pq_list_ + fastrange64(thread_data.gen(), mq.num_pqs_);
-                    second_key = second->concurrent_top_key();
-                }
-            } else {
-                // Both keys are sentinels
-                break;
+        template <typename Generator>
+        pq_type *lock_push_pq(handle_data_t &, Generator &g) {
+            auto pq = mq.pq_list_.get() + fastrange64(g(), mq.num_pqs());
+            while (!pq->try_lock()) {
+                pq = mq.pq_list_.get() + fastrange64(g(), mq.num_pqs());
             }
-        } while (true);
-        return nullptr;
-    }
+            return pq;
+        }
+
+        template <typename Generator>
+        pq_type *lock_delete_pq(handle_data_t &, Generator &g) {
+            auto first = mq.pq_list_.get() + fastrange64(g(), mq.num_pqs());
+            auto second = mq.pq_list_.get() + fastrange64(g(), mq.num_pqs());
+            auto first_key = first->top_key();
+            auto second_key = second->top_key();
+            do {
+                if (mq.comp_(first_key, second_key)) {
+                    if (first_key == mq.get_sentinel()) {
+                        break;
+                    }
+                    if (first->try_lock_assume_key(first_key)) {
+                        return first;
+                    }
+                    first = mq.pq_list_.get() + fastrange64(g(), mq.num_pqs());
+                    first_key = first->top_key();
+                } else {
+                    if (second_key == mq.get_sentinel()) {
+                        break;
+                    }
+                    if (second->try_lock_assume_key(second_key)) {
+                        return second;
+                    }
+                    second = mq.pq_list_.get() + fastrange64(g(), mq.num_pqs());
+                    second_key = second->top_key();
+                }
+            } while (true);
+            return nullptr;
+        }
+    };
 };
 
 }  // namespace multiqueue::selection_strategy

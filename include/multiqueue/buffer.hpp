@@ -21,7 +21,7 @@
 
 namespace multiqueue {
 
-template <typename T, std::size_t LogSize>
+template <typename T, std::size_t Size>
 class Buffer;
 
 template <typename T>
@@ -166,7 +166,7 @@ class BufferIterator {
     }
 };
 
-template <typename T, std::size_t LogSize>
+template <typename T, std::size_t Size>
 class Buffer {
    public:
     using value_type = T;
@@ -181,7 +181,7 @@ class Buffer {
     using reverse_iterator = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
-    static constexpr size_type Capacity = size_type(1) << LogSize;
+    static constexpr size_type Capacity = Size;
 
    private:
     using underlying_type = std::remove_cv_t<T>;

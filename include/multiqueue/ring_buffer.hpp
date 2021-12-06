@@ -20,12 +20,12 @@
 
 namespace multiqueue {
 
-template <typename T, std::size_t LogSize>
+template <typename T, std::size_t Size>
 class RingBuffer;
 
-template <typename T, std::size_t LogSize>
+template <typename T, std::size_t Size>
 class RingBufferIterator {
-    friend std::conditional_t<!std::is_const_v<T>, RingBufferIterator<T const, LogSize>,
+    friend std::conditional_t<!std::is_const_v<T>, RingBufferIterator<T const, Size>,
                               void>;  // const iterator is friend for converting constructor
 
    public:
@@ -39,7 +39,7 @@ class RingBufferIterator {
     using const_pointer = value_type const*;
 
    protected:
-    static constexpr size_type Capacity = size_type(1) << LogSize;
+    static constexpr size_type Capacity = Size;
     static constexpr size_type capacity_mask = Capacity - 1;
 
     using underlying_type = std::remove_cv_t<T>;
@@ -78,7 +78,7 @@ class RingBufferIterator {
 
     template <bool EnableConverting = std::is_const_v<T>, typename = std::enable_if_t<EnableConverting>>
     // NOLINTNEXTLINE(google-explicit-constructor)
-    constexpr RingBufferIterator(RingBufferIterator<std::remove_const_t<T>, LogSize> const& other) noexcept
+    constexpr RingBufferIterator(RingBufferIterator<std::remove_const_t<T>, Size> const& other) noexcept
         : begin_{other.begin_}, pos_{other.pos_} {
     }
 
@@ -88,7 +88,7 @@ class RingBufferIterator {
     }
 
     template <bool EnableConverting = std::is_const_v<T>, typename = std::enable_if_t<EnableConverting>>
-    constexpr RingBufferIterator& operator=(RingBufferIterator<std::remove_const_t<T>, LogSize> const& other) noexcept {
+    constexpr RingBufferIterator& operator=(RingBufferIterator<std::remove_const_t<T>, Size> const& other) noexcept {
         begin_ = other.begin_;
         pos_ = other.pos_;
     }
@@ -180,7 +180,7 @@ class RingBufferIterator {
     }
 };
 
-template <typename T, std::size_t LogSize>
+template <typename T, std::size_t Size>
 class RingBuffer {
    public:
     using value_type = T;
@@ -190,12 +190,12 @@ class RingBuffer {
     using const_reference = value_type const&;
     using pointer = value_type*;
     using const_pointer = value_type const*;
-    using iterator = RingBufferIterator<T, LogSize>;
-    using const_iterator = RingBufferIterator<T const, LogSize>;
+    using iterator = RingBufferIterator<T, Size>;
+    using const_iterator = RingBufferIterator<T const, Size>;
     using reverse_iterator = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
-    static constexpr size_type Capacity = size_type(1) << LogSize;
+    static constexpr size_type Capacity = Size;
 
    private:
     static constexpr size_type capacity_mask = Capacity - 1;

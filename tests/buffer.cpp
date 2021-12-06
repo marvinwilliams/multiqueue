@@ -16,9 +16,9 @@ template <typename T>
 using ring_buffer_wrapper_t = multiqueue::RingBuffer<T, 4>;
 
 TEST_CASE("buffer supports basic operations", "[buffer][basic]") {
-    multiqueue::Buffer<unsigned int, 4> buffer;
+    multiqueue::Buffer<unsigned int, 16> buffer;
     REQUIRE(buffer.empty());
-    REQUIRE(buffer.capacity() == (1 << 4));
+    REQUIRE(buffer.capacity() == 16);
 
     for (unsigned int i = 0; i < buffer.capacity(); ++i) {
         REQUIRE(!buffer.full());
@@ -67,9 +67,9 @@ TEST_CASE("buffer supports basic operations", "[buffer][basic]") {
 }
 
 TEST_CASE("ring buffer supports basic operations", "[ring_buffer][basic]") {
-    multiqueue::RingBuffer<unsigned int, 4> buffer;
+    multiqueue::RingBuffer<unsigned int, 16> buffer;
     REQUIRE(buffer.empty());
-    REQUIRE(buffer.capacity() == (1 << 4));
+    REQUIRE(buffer.capacity() == 16);
 
     for (unsigned int i = 0; i < buffer.capacity(); ++i) {
         REQUIRE(!buffer.full());
@@ -182,7 +182,7 @@ TEMPLATE_TEST_CASE("buffer destructs", "[buffer][types]", (multiqueue::Buffer<te
 }
 
 TEMPLATE_TEST_CASE("buffer iterator tests", "[buffer][iterator]", (multiqueue::Buffer<int, 4>),
-                   (multiqueue::RingBuffer<int, 4>)) {
+                   (multiqueue::RingBuffer<int, 16>)) {
     TestType buffer;
     buffer.insert(buffer.begin(), 1);
     buffer.insert(buffer.end(), 2);

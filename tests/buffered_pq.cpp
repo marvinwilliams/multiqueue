@@ -21,7 +21,7 @@
 #include <vector>
 
 TEST_CASE("buffered pq supports basic operations", "[buffered_pq][basic]") {
-    using pq_t = multiqueue::BufferedPQ<int, void, std::less<int>, std::allocator<int>, multiqueue::detail::BaseConfiguration>;
+    using pq_t = multiqueue::BufferedPQ<multiqueue::Heap<int, std::less<>>, 8, 8>;
 
     auto pq = pq_t{};
 
@@ -67,7 +67,7 @@ TEST_CASE("buffered pq supports basic operations", "[buffered_pq][basic]") {
 }
 
 TEST_CASE("buffered pq can use std::greater as comparator", "[buffered_pq][comparator]") {
-    using pq_t = multiqueue::BufferedPQ<int, void, std::greater<int>, std::allocator<int>, multiqueue::detail::BaseConfiguration>;
+    using pq_t = multiqueue::BufferedPQ<multiqueue::Heap<int, std::greater<>>, 8, 8>;
 
     auto pq = pq_t{};
 
@@ -113,7 +113,7 @@ TEST_CASE("buffered pq can use std::greater as comparator", "[buffered_pq][compa
 }
 
 TEST_CASE("buffered pq works with randomized workloads", "[buffered_pq][workloads]") {
-    using pq_t = multiqueue::BufferedPQ<int, void, std::less<int>, std::allocator<int>, multiqueue::detail::BaseConfiguration>;
+    using pq_t = multiqueue::BufferedPQ<multiqueue::Heap<int, std::less<>>, 8, 8>;
 
     auto pq = pq_t{};
     auto ref_pq = std::priority_queue<int, std::vector<int>, std::greater<int>>{};
@@ -192,9 +192,10 @@ TEST_CASE("buffered pq works with randomized workloads", "[buffered_pq][workload
 }
 
 TEST_CASE("pq works with non-default-constructible types", "[pq][types]") {
-    multiqueue::BufferedPQ<test_types::nodefault, test_types::nodefault, std::less<test_types::nodefault>, 
-                           std::allocator<test_types::nodefault>, multiqueue::detail::BaseConfiguration>
-        pq{};
+    using pq_t =
+        multiqueue::BufferedPQ<multiqueue::Heap<std::pair<test_types::nodefault, test_types::nodefault>, std::less<>>,
+                               8, 8>;
+    pq_t pq{};
     pq.push({test_types::nodefault(0), test_types::nodefault(1)});
     test_types::nodefault t1(2);
     std::pair<test_types::nodefault, test_types::nodefault> tp(t1, t1);

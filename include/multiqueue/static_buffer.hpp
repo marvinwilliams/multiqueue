@@ -12,24 +12,69 @@
 #define STATIC_BUFFER_HPP_INCLUDED
 
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <initializer_list>
+#include <iostream>
 #include <memory>
 #include <type_traits>
+#include <utility>
 
 namespace multiqueue {
-
-namespace detail {
 
 template <typename T, std::size_t Size>
 struct BufferStorageBase;
 
-}
+struct Empty {};
+
+template <typename U, bool = std::is_trivially_destructible_v<U>, bool = std::is_trivially_default_constructible_v<U>>
+union StorageSlot {
+    Empty empty;
+    U value;
+
+   public:
+    constexpr StorageSlot() noexcept : empty() {
+    }
+
+    template <typename... Args>
+    constexpr StorageSlot(Args &&...args) : value(std::forward<Args>(args)...) {
+    }
+
+    ~StorageSlot() {
+    }
+};
+
+template <typename U>
+union StorageSlot<U, true, false> {
+    Empty empty;
+    U value;
+
+   public:
+    constexpr StorageSlot() noexcept : empty() {
+    }
+
+    template <typename... Args>
+    constexpr StorageSlot(Args &&...args) : value(std::forward<Args>(args)...) {
+    }
+};
+
+template <typename U>
+union StorageSlot<U, true, true> {
+    U value;
+
+   public:
+    constexpr StorageSlot() noexcept : value() {
+    }
+
+    template <typename... Args>
+    constexpr StorageSlot(Args &&...args) : value(std::forward<Args>(args)...) {
+    }
+};
 
 template <typename T, std::size_t Size>
 class StorageIterator {
-    friend detail::BufferStorageBase<T, Size>;
-    friend std::conditional_t<!std::is_const_v<T>, BufferIterator<T const, Size>,
+    friend BufferStorageBase<T, Size>;
+    friend std::conditional_t<!std::is_const_v<T>, StorageIterator<T const, Size>,
                               void>;  // const iterator is friend for converting constructor
 
    public:
@@ -43,7 +88,8 @@ class StorageIterator {
     using const_pointer = value_type const *;
 
    protected:
-    using internal_pointer_type = typename detail::BufferStorageBase<T, Size>::slot_type *;
+    using internal_pointer_type = std::conditional_t<std::is_const_v<T>, StorageSlot<std::remove_const_t<T>> const *,
+                                                     StorageSlot<std::remove_const_t<T>> *>;
 
     internal_pointer_type p_;
 
@@ -82,12 +128,12 @@ class StorageIterator {
 
     pointer operator->() {
         assert(p_);
-        return p_->value;
+        return &p_->value;
     }
 
     const_pointer operator->() const {
         assert(p_);
-        return p_->value;
+        return &p_->value;
     }
 
     constexpr StorageIterator &operator++() noexcept {
@@ -155,63 +201,15 @@ class StorageIterator {
     }
 };
 
-namespace detail {
-
 template <typename Iter, typename IterType>
-using is_iter_type_v = std::is_base_of_v<IterType, typename std::iterator_traits<Iter>::iterator_category>;
+static constexpr bool is_iter_type_v =
+    std::is_base_of_v<IterType, typename std::iterator_traits<Iter>::iterator_category>;
 
 template <typename T, std::size_t N>
 struct BufferStorageBase {
     using stored_type = std::remove_const_t<T>;
     using iterator = StorageIterator<T, N>;
     using const_iterator = StorageIterator<T const, N>;
-
-    struct Empty {};
-
-    template <typename U, bool = std::is_trivially_destructible_v<U>,
-              bool = std::is_trivially_default_constructible_v<U>>
-    union StorageSlot {
-        Empty empty;
-        U value;
-
-       public:
-        constexpr StorageSlot() noexcept : empty() {
-        }
-
-        template <typename... Args>
-        constexpr StorageSlot(Args &&...args) : value(std::forward<Args>(args)...) {
-        }
-
-        ~StorageSlot() {
-        }
-    };
-
-    template <typename U>
-    union StorageSlot<U, true, false> {
-        Empty empty;
-        U value;
-
-       public:
-        constexpr StorageSlot() noexcept : empty() {
-        }
-
-        template <typename... Args>
-        constexpr StorageSlot(Args &&...args) : value(std::forward<Args>(args)...) {
-        }
-    };
-
-    template <typename U>
-    union StorageSlot<U, true, true> {
-        U value;
-
-       public:
-        constexpr StorageSlot() noexcept : value() {
-        }
-
-        template <typename... Args>
-        constexpr StorageSlot(Args &&...args) : value(std::forward<Args>(args)...) {
-        }
-    };
 
    public:
     using slot_type = StorageSlot<stored_type>;
@@ -242,7 +240,7 @@ struct BufferStorageBase {
     constexpr BufferStorageBase(int, BufferStorageBase const &other) noexcept(
         std::is_nothrow_copy_constructible_v<stored_type>)
         : size{other.size} {
-        construct_copy_range(begin(), other.begin(), other.end());
+        construct_copy_range(begin(), other.cbegin(), other.cend());
     }
 
     constexpr BufferStorageBase(int,
@@ -254,7 +252,7 @@ struct BufferStorageBase {
     template <typename Iter>
     constexpr void assign(Iter first, Iter last, std::input_iterator_tag) {
         auto it = begin();
-        while (it != end && first != last) {
+        while (it != end() && first != last) {
             *it++ = *first++;
         }
         if (first == last) {
@@ -285,20 +283,20 @@ struct BufferStorageBase {
             std::fill_n(begin(), n, value);
             destroy_range(begin() + n, end());
         } else {
-            std::fill(it, end(), value);
+            std::fill(begin(), end(), value);
             construct_fill(end(), n - size, value);
         }
         size = n;
     }
 
     constexpr void assign(BufferStorageBase const &other) noexcept(
-        std::conjunction_v<std::is_nothrow_copy_constructible_v<stored_type>,
+        std::conjunction_v<std::is_nothrow_copy_constructible<stored_type>,
                            std::is_nothrow_copy_assignable<stored_type>>) {
         assign(other.begin(), other.end());
     }
 
     constexpr void assign(BufferStorageBase &&other) noexcept(
-        std::conjunction_v<std::is_nothrow_move_constructible_v<stored_type>,
+        std::conjunction_v<std::is_nothrow_move_constructible<stored_type>,
                            std::is_nothrow_move_assignable<stored_type>>) {
         assign(std::make_move_iterator(other.begin()), std::make_move_iterator(other.end()));
     }
@@ -306,17 +304,17 @@ struct BufferStorageBase {
     constexpr void insert(iterator pos, T const &value) noexcept(
         std::conjunction_v<std::is_nothrow_copy_constructible<T>, std::is_nothrow_move_constructible<T>,
                            std::is_nothrow_move_assignable<T>>) {
-        construct_at(end(), std::move(*(end - 1)));
+        construct_at(end(), std::move(*(end() - 1)));
         std::move_backward(pos, end(), end());
-        it->value = value;
+        pos->value = value;
         ++size;
     }
 
     constexpr void insert(iterator pos, T &&value) noexcept(
         std::conjunction_v<std::is_nothrow_move_constructible<T>, std::is_nothrow_move_assignable<T>>) {
-        construct_at(end(), std::move(*(end - 1)));
+        construct_at(end(), std::move(*(end() - 1)));
         std::move_backward(pos, end(), end());
-        it->value = std::move(value);
+        pos->value = std::move(value);
         ++size;
     }
 
@@ -346,7 +344,7 @@ struct BufferStorageBase {
                            std::is_nothrow_move_constructible<T>, std::is_nothrow_move_assignable<T>>) {
         std::size_t const slots_after = end() - pos;
         if (slots_after > n) {
-            auto const split_pos = end() - num_insert;
+            auto const split_pos = end() - n;
             construct_move_range(end(), split_pos, end());
             std::move_backward(pos, split_pos, end());
             std::fill_n(pos, n, value);
@@ -361,17 +359,17 @@ struct BufferStorageBase {
     template <typename... Args>
     constexpr void emplace(iterator pos, Args &&...args) noexcept(
         std::conjunction_v<std::is_nothrow_move_constructible<T>, std::is_nothrow_move_assignable<T>,
-                           std::is_nothrow_constructible<T, Args>>) {
+                           std::is_nothrow_constructible<T, Args...>>) {
         insert(pos, stored_value(std::forward<Args>(args)...));
     }
 
     constexpr void emplace(iterator pos, T &&value) noexcept(
         std::conjunction_v<std::is_nothrow_move_constructible<T>, std::is_nothrow_move_assignable<T>,
-                           std::is_nothrow_constructible<T, Args>>) {
+                           std::is_nothrow_move_constructible<T>>) {
         insert(pos, std::move(value));
     }
 
-    constexpr void erase(iterator pos) noexcept(std::is_nothrow_move_assignable<T>) {
+    constexpr void erase(iterator pos) noexcept(std::is_nothrow_move_assignable_v<T>) {
         if (pos + 1 != end()) {
             std::move(pos + 1, end(), pos);
         }
@@ -379,7 +377,7 @@ struct BufferStorageBase {
         destroy_at(end());
     }
 
-    constexpr void erase(iterator first, iterator last) noexcept(std::is_nothrow_move_assignable<T>) {
+    constexpr void erase(iterator first, iterator last) noexcept(std::is_nothrow_move_assignable_v<T>) {
         if (first != last) {
             if (last != end()) {
                 std::move(last, end(), first);
@@ -434,13 +432,13 @@ struct BufferStorageBase {
 
     constexpr void destroy_at(iterator pos) noexcept {
         if constexpr (!std::is_trivially_destructible_v<T>) {
-            pos->value.~stored_type();
+            pos->~stored_type();
         }
     }
 
     constexpr void clear() noexcept {
         std::for_each_n(std::begin(slots), size, [](auto &s) { s.value.~stored_type(); });
-        for (auto it = std::begin(slots); it != std::begin(slots) + size; ++it) {
+        for (auto it = begin(); it != end(); ++it) {
             destroy_at(it);
         }
     }
@@ -458,15 +456,15 @@ struct BufferStorageBase {
     }
 
     constexpr const_iterator cbegin() const noexcept {
-        return const_iterator{std::begin(slots)};
+        return const_iterator{std::cbegin(slots)};
     }
 
     constexpr iterator end() noexcept {
-        return iterator{std::begin(slots) + n};
+        return iterator{std::begin(slots) + size};
     }
 
-    constexpr const_iterator end() const noexcept {
-        return const_iterator{std::begin(slots) + n};
+    constexpr const_iterator cend() const noexcept {
+        return const_iterator{std::cbegin(slots) + size};
     }
 };
 
@@ -510,7 +508,7 @@ struct BufferStorage<T, N, true, true, false> : BufferStorageBase<T, N> {
     constexpr BufferStorage &operator=(BufferStorage const &) = default;
 
     constexpr BufferStorage &operator=(BufferStorage &&other) noexcept(
-        std::conjuction_v<std::is_nothrow_move_constructible<T>, std::is_nothrow_move_assignable<T>>) {
+        std::conjunction_v<std::is_nothrow_move_constructible<T>, std::is_nothrow_move_assignable<T>>) {
         this->assign(std::move(other));
         return *this;
     }
@@ -532,7 +530,7 @@ struct BufferStorage<T, N, true, false, false> : BufferStorageBase<T, N> {
     }
 
     constexpr BufferStorage &operator=(BufferStorage &&other) noexcept(
-        std::conjuction_v<std::is_nothrow_move_constructible<T>, std::is_nothrow_move_assignable<T>>) {
+        std::conjunction_v<std::is_nothrow_move_constructible<T>, std::is_nothrow_move_assignable<T>>) {
         this->assign(std::move(other));
         return *this;
     }
@@ -582,7 +580,7 @@ struct BufferBase {
 };
 
 template <typename T, std::size_t N>
-struct BufferBase<T, N, false, true> : BufferBaseImpl<T, N> {
+struct BufferBase<T, N, false, true> {
     BufferStorage<T, N> storage;
 
    public:
@@ -604,7 +602,7 @@ struct BufferBase<T, N, false, true> : BufferBaseImpl<T, N> {
 };
 
 template <typename T, std::size_t N>
-struct BufferBase<T, N, true, false> : BufferBaseImpl<T, N> {
+struct BufferBase<T, N, true, false> {
     BufferStorage<T, N> storage;
 
    public:
@@ -628,7 +626,7 @@ struct BufferBase<T, N, true, false> : BufferBaseImpl<T, N> {
 };
 
 template <typename T, std::size_t N>
-struct BufferBase<T, N, true, true> : BufferBaseImpl<T, N> {
+struct BufferBase<T, N, true, true> {
     BufferStorage<T, N> storage;
 
    public:
@@ -647,41 +645,38 @@ struct BufferBase<T, N, true, true> : BufferBaseImpl<T, N> {
     BufferBase &operator=(BufferBase &&) = default;
 };
 
-template <typename T, std::size_t N, bool IsConst>
-class BufferIterator;
-
 template <typename T, std::size_t N>
 struct Buffer : private BufferBase<T, N> {
     using value_type = T;
-    size_type = std::size_t;
-    difference_type = std::ptrdiff_t;
-    reference = value_type &;
-    const_reference = value_type const &;
-    pointer = value_type *;
-    const_pointer = value_type const *;
-    iterator = StorageIterator<T, N, false>;
-    const_iterator = StorageIterator<T, N, true>;
-    reverse_iterator = std::reverse_iterator<iterator>;
-    const_reverse_iterator = std::reverse_iterator<const_iterator>;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+    using reference = value_type &;
+    using const_reference = value_type const &;
+    using pointer = value_type *;
+    using const_pointer = value_type const *;
+    using iterator = StorageIterator<T, N>;
+    using const_iterator = StorageIterator<T const, N>;
+    using reverse_iterator = std::reverse_iterator<iterator>;
+    using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
    public:
     constexpr Buffer() noexcept {
     }
 
     constexpr Buffer(size_type count, const_reference value) noexcept(std::is_nothrow_copy_constructible_v<T>)
-        : BufferBase(count, value) {
+        : BufferBase<T, N>(count, value) {
     }
 
     constexpr explicit Buffer(size_type count) noexcept(
-        std::conjunction_v<std::is_nothrow_defaul_constructible<T>, std::is_nothrow_copy_constructible<T>>)
-        : BufferBase(count, value_type()) {
+        std::conjunction_v<std::is_nothrow_default_constructible<T>, std::is_nothrow_copy_constructible<T>>)
+        : BufferBase<T, N>(count, value_type()) {
     }
 
     template <typename InputIt>
-    constexpr Buffer(InputIt first, InputIt last) : BufferBase(first, last) {
+    constexpr Buffer(InputIt first, InputIt last) : BufferBase<T, N>(first, last) {
     }
 
-    constexpr Buffer(std::initializer_list<value_type> init) : BufferBase(init.begin(), init.end()) {
+    constexpr Buffer(std::initializer_list<value_type> init) : BufferBase<T, N>(init.begin(), init.end()) {
     }
 
     constexpr Buffer &operator=(std::initializer_list<value_type> ilist) {
@@ -704,7 +699,7 @@ struct Buffer : private BufferBase<T, N> {
     }
 
     constexpr reference operator[](std::size_t n) noexcept {
-        return this->get(n);
+        return this->storage.get(n);
     }
 
     constexpr const_reference operator[](std::size_t n) const noexcept {
@@ -712,7 +707,7 @@ struct Buffer : private BufferBase<T, N> {
     }
 
     constexpr reference front() noexcept {
-        return this->get(0);
+        return this->storage.get(0);
     }
 
     constexpr const_reference front() const noexcept {
@@ -720,10 +715,10 @@ struct Buffer : private BufferBase<T, N> {
     }
 
     constexpr reference back() {
-        return this->get(this->storage.size - 1);
+        return this->storage.get(this->storage.size - 1);
     }
 
-    constexpr const_reference back() noexcept {
+    constexpr const_reference back() const noexcept {
         return this->get(this->storage.size - 1);
     }
 
@@ -744,7 +739,7 @@ struct Buffer : private BufferBase<T, N> {
                            std::is_nothrow_move_assignable<T>>) {
         auto it = begin() + (pos - cbegin());
         if (it == end()) {
-            this->storage.construct_at(at, value);
+            this->storage.construct_at(it, value);
             ++this->storage.size;
         } else {
             auto value_cpy = value;
@@ -758,7 +753,7 @@ struct Buffer : private BufferBase<T, N> {
                            std::is_nothrow_move_assignable<T>>) {
         auto it = begin() + (pos - cbegin());
         if (it == end()) {
-            this->storage.construct_at(at, std::move(value));
+            this->storage.construct_at(it, std::move(value));
             ++this->storage.size;
         } else {
             auto value_cpy = std::move(value);
@@ -778,7 +773,7 @@ struct Buffer : private BufferBase<T, N> {
         return it;
     }
 
-    template <typename InputIter>
+    template <typename InputIt>
     constexpr iterator insert(const_iterator pos, InputIt first, InputIt last) {
         auto it = begin() + (pos - cbegin());
         if (first != last) {
@@ -797,11 +792,11 @@ struct Buffer : private BufferBase<T, N> {
 
     template <typename... Args>
     constexpr iterator emplace(const_iterator pos, Args &&...args) noexcept(
-        std::conjunction_v<std::is_nothrow_constructible<T, Args>, std::is_nothrow_move_constructible<T>,
+        std::conjunction_v<std::is_nothrow_constructible<T, Args...>, std::is_nothrow_move_constructible<T>,
                            std::is_nothrow_copy_assignable<T>>) {
         auto it = begin() + (pos - cbegin());
         if (it == end()) {
-            this->storage.construct_at(at, std::move(value));
+            this->storage.construct_at(it, std::forward<Args>(args)...);
             ++this->storage.size;
         } else {
             this->storage.emplace(it, std::forward<Args>(args)...);
@@ -824,33 +819,40 @@ struct Buffer : private BufferBase<T, N> {
 
     constexpr void push_back(T const &value) {
         this->storage.construct_at(end(), value);
-        ++size;
+        ++this->storage.size;
     }
 
     constexpr void push_back(T &&value) {
         this->storage.construct_at(end(), std::move(value));
-        ++size;
+        ++this->storage.size;
     }
 
     template <typename... Args>
     constexpr void emplace_back(Args &&...args) {
         this->storage.construct_at(end(), std::forward<Args>(args)...);
-        ++size;
+        ++this->storage.size;
     }
 
     constexpr void pop_back() {
-        --size;
+        --this->storage.size;
         this->storage.destroy_at(end());
     }
+    constexpr iterator begin() noexcept {
+        return this->storage.begin();
+    }
 
-    void swap(Buffer &other) noexcept(std::conjunction_v < std::is_nothrow_move_constructible<value_type>,
-                                      std::is_nothrow_swappable<value_type>) {
-        using std::swap;
+    constexpr const_iterator cbegin() const noexcept {
+        return this->storage.cbegin();
+    }
 
+    constexpr iterator end() noexcept {
+        return this->storage.end();
+    }
+
+    constexpr const_iterator end() const noexcept {
+        return this->storage.end();
     }
 };
-
-}  // namespace detail
 
 }  // namespace multiqueue
 

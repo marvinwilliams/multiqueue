@@ -21,7 +21,7 @@
 
 TEMPLATE_TEST_CASE_SIG("heap supports basic operations", "[heap][basic]", ((unsigned int Degree), Degree), 2, 3, 4,
                        99) {
-    using heap_t = multiqueue::Heap<int, void, std::less<int>, Degree, std::allocator<int>>;
+    using heap_t = multiqueue::Heap<int, std::less<>, Degree>;
 
     auto heap = heap_t{};
 
@@ -67,7 +67,7 @@ TEMPLATE_TEST_CASE_SIG("heap supports basic operations", "[heap][basic]", ((unsi
 }
 
 TEST_CASE("heap can use std::greater as comparator", "[heap][comparator]") {
-    using heap_t = multiqueue::Heap<int, void, std::greater<int>, 4, std::allocator<int>>;
+    using heap_t = multiqueue::Heap<int, std::greater<>>;
 
     auto heap = heap_t{};
 
@@ -113,7 +113,7 @@ TEST_CASE("heap can use std::greater as comparator", "[heap][comparator]") {
 }
 
 TEST_CASE("heap works with randomized workloads", "[heap][workloads]") {
-    using heap_t = multiqueue::Heap<int, void, std::less<int>, 4, std::allocator<int>>;
+    using heap_t = multiqueue::Heap<int, std::less<>>;
 
     auto heap = heap_t{};
     auto ref_pq = std::priority_queue<int, std::vector<int>, std::greater<int>>{};
@@ -192,9 +192,8 @@ TEST_CASE("heap works with randomized workloads", "[heap][workloads]") {
 }
 
 TEST_CASE("heap works with non-default-constructible types", "[heap][types]") {
-    multiqueue::Heap<test_types::nodefault, test_types::nodefault, std::less<test_types::nodefault>, 4,
-                     std::allocator<test_types::nodefault>>
-        heap{};
+    using heap_t = multiqueue::Heap<std::pair<test_types::nodefault, test_types::nodefault>, std::less<>>;
+    heap_t heap{};
     heap.push({test_types::nodefault(0), test_types::nodefault(1)});
     test_types::nodefault t1(2);
     std::pair<test_types::nodefault, test_types::nodefault> tp(t1, t1);

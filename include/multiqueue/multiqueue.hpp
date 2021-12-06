@@ -11,10 +11,17 @@
 #ifndef MULTIQUEUE_HPP_INCLUDED
 #define MULTIQUEUE_HPP_INCLUDED
 
-#include "multiqueue/default_configuration.hpp"
-#include "multiqueue/external/xoroshiro128plus.hpp"
+#ifndef L1_CACHE_LINESIZE
+#define L1_CACHE_LINESIZE 64
+#endif
+
+#ifndef PAGESIZE
+#define PAGESIZE 4096
+#endif
+
+#include "multiqueue/external/xoroshiro256starstar.hpp"
 #include "multiqueue/guarded_pq.hpp"
-#include "multiqueue/heap.hpp"
+#include "multiqueue/selection_strategy/sticky.hpp"
 
 #include <cassert>
 #include <cstddef>
@@ -32,46 +39,43 @@
 #include <vector>
 #endif
 
-#ifndef L1_CACHE_LINESIZE
-#define L1_CACHE_LINESIZE 64
-#endif
-
-#ifndef PAGESIZE
-#define PAGESIZE 4096
-#endif
-
 namespace multiqueue {
 
-template <typename Key, typename T = void, typename Compare = std::less<Key>, typename Allocator = std::allocator<Key>,
-          typename Configuration = multiqueue::StickySelectionConfiguration>
-class alignas(2 * L1_CACHE_LINESIZE) Multiqueue {
+template <typename... Configs>
+struct MultiqueueParameters : Configs::Parameters... {
+    std::size_t c = 4;
+    std::uint64_t seed = 1;
+};
+
+template <typename Key, typename T, typename Compare, template <typename, typename> typename PriorityQueue,
+          typename StrategyType = selection_strategy::sticky, bool ImplicitLock = false,
+          typename Allocator = std::allocator<Key>>
+class Multiqueue {
    private:
-    using this_t = Multiqueue<Key, T, Compare, Allocator, Configuration>;
-    using pq_type = GuardedPQ<Key, T, Compare, Allocator, Configuration>;
+    using pq_type = GuardedPQ<Key, T, Compare, PriorityQueue, ImplicitLock>;
 
    public:
     using key_type = typename pq_type::key_type;
     using value_type = typename pq_type::value_type;
     using key_compare = typename pq_type::key_compare;
-    using value_compare = typename pq_type::value_compare;
-    using allocator_type = Allocator;
     using reference = typename pq_type::reference;
     using const_reference = typename pq_type::const_reference;
     using size_type = typename pq_type::size_type;
-    using configuration = Configuration;
+    using allocator_type = Allocator;
+    using param_type = MultiqueueParameters<StrategyType>;
 
    private:
-    using selection_strategy = typename Configuration::selection_strategy;
-    friend selection_strategy;
-    using shared_data_type = typename selection_strategy::shared_data_t;
+    using Strategy = typename StrategyType::template Strategy<Multiqueue>;
+    friend Strategy;
 
    public:
     class alignas(2 * L1_CACHE_LINESIZE) Handle {
-        friend this_t;
-        using data_t = typename selection_strategy::thread_data_t;
+        friend Multiqueue;
+        using data_t = typename Strategy::handle_data_t;
 
-        alignas(2 * L1_CACHE_LINESIZE) data_t data_;
         std::reference_wrapper<Multiqueue> mq_;
+        xoroshiro256starstar rng_;
+        data_t data_;
 
        public:
         Handle(Handle const &) = delete;
@@ -79,12 +83,12 @@ class alignas(2 * L1_CACHE_LINESIZE) Multiqueue {
         Handle(Handle &&) = default;
 
        private:
-        explicit constexpr Handle(this_t &mq) noexcept : data_{mq.rng_()}, mq_{mq} {
+        explicit Handle(Multiqueue &mq, std::uint64_t seed) noexcept : mq_{mq}, rng_{seed} {
         }
 
        public:
-        bool try_extract_top(reference retval) {
-            pq_type *pq = selection_strategy::lock_delete_pq(mq_.get(), data_);
+        bool try_extract_top(reference retval) noexcept {
+            auto pq = mq_.get().strategy_.lock_delete_pq(data_, rng_);
             if (!pq) {
                 return false;
             }
@@ -93,49 +97,68 @@ class alignas(2 * L1_CACHE_LINESIZE) Multiqueue {
             return true;
         }
 
-        void push(const_reference value) {
-            pq_type *pq = selection_strategy::lock_push_pq(mq_.get(), data_);
+        void push(const_reference value) noexcept {
+            auto pq = mq_.get().strategy_.lock_push_pq(data_, rng_);
             assert(pq);
             pq->push(value);
             pq->unlock();
         }
 
-        void push(value_type &&value) {
-            pq_type *pq = selection_strategy::lock_push_pq(mq_.get(), data_);
+        void push(value_type &&value) noexcept {
+            auto pq = mq_.get().strategy_.lock_push_pq(data_, rng_);
             assert(pq);
             pq->push(std::move(value));
             pq->unlock();
         }
 
-        bool try_extract_from(size_type pos, value_type &retval) {
-            assert(pos < mq_.get().num_pqs_);
-            key_type key = mq_.get().pq_list_[pos].concurrent_top_key();
-            if (key != sentinel && mq_.get().pq_list_[pos].try_lock_if_key(key)) {
-                mq_.pq_list_[pos].extract_top(retval);
-                return true;
+        bool try_extract_from(size_type pos, value_type &retval) noexcept {
+            assert(pos < mq_.get().num_pqs());
+            auto &pq = mq_.get().pq_list_[pos];
+            if (pq.try_lock()) {
+                if (!pq.empty()) {
+                    pq.extract_top(retval);
+                    pq.unlock();
+                    return true;
+                }
+                pq.unlock();
             }
             return false;
         }
     };
 
-   public:
+   private:
     using pq_alloc_type = typename std::allocator_traits<allocator_type>::template rebind_alloc<pq_type>;
-    using pq_alloc_traits = std::allocator_traits<pq_alloc_type>;
+    using pq_alloc_traits = typename std::allocator_traits<pq_alloc_type>;
 
-    static inline key_type sentinel = Configuration::template sentinel<key_type>::value;
+    struct Deleter {
+        size_type num_pqs;
+        [[no_unique_address]] pq_alloc_type alloc;
+        Deleter(allocator_type a) : num_pqs{0}, alloc{a} {
+        }
+        Deleter(size_type n, allocator_type a) : num_pqs{n}, alloc{a} {
+        }
+        void operator()(pq_type *pq_list) noexcept {
+            for (pq_type *s = pq_list; s != pq_list + num_pqs; ++s) {
+                pq_alloc_traits::destroy(alloc, s);
+            }
+            pq_alloc_traits::deallocate(alloc, pq_list, num_pqs);
+        }
+    };
 
    private:
-    // No padding needed, as these members are not written to concurrently (false sharing is avoided by the alignment of
-    // the class itself)
-    pq_type *pq_list_;
-    size_type num_pqs_;
-    xoroshiro128plus rng_;
+    // False sharing is avoided by class alignment, but the members do not need to reside in individual cache lines, as
+    // they are not written concurrently
+    std::unique_ptr<pq_type[], Deleter> pq_list_;
+    key_type sentinel_;
     [[no_unique_address]] key_compare comp_;
-    [[no_unique_address]] shared_data_type shared_data_;
-    [[no_unique_address]] pq_alloc_type alloc_;
+    std::unique_ptr<std::uint64_t[]> handle_seeds_;
+    std::atomic_uint handle_index_ = 0;
+
+    // strategy data in separate cache line, as it might be written to
+    [[no_unique_address]] alignas(2 * L1_CACHE_LINESIZE) Strategy strategy_;
 
     void abort_on_data_misalignment() {
-        for (pq_type *s = pq_list_; s != pq_list_ + num_pqs_; ++s) {
+        for (pq_type *s = pq_list_.get(); s != pq_list_.get() + num_pqs(); ++s) {
             if (reinterpret_cast<std::uintptr_t>(s) % (2 * L1_CACHE_LINESIZE) != 0) {
                 std::abort();
             }
@@ -143,102 +166,89 @@ class alignas(2 * L1_CACHE_LINESIZE) Multiqueue {
     }
 
    public:
-    explicit Multiqueue(unsigned int num_threads, Configuration const &config = Configuration(),
-                        key_compare const &comp = key_compare(), allocator_type const &alloc = allocator_type())
-        : num_pqs_{num_threads * config.c}, rng_(config.seed), comp_(comp), shared_data_(), alloc_(alloc) {
-        if (num_threads == 0) {
-            throw std::invalid_argument("num_threads cannot be 0");
+    explicit Multiqueue(unsigned int num_threads, param_type const &param, key_compare const &comp = key_compare(),
+                        key_type sentinel = pq_type::max_key, allocator_type const &alloc = allocator_type())
+        : pq_list_(nullptr, Deleter(alloc)), sentinel_{sentinel}, comp_{comp}, strategy_(*this, param) {
+        assert(num_threads > 0);
+        assert(param.c > 0);
+        size_type const num_pqs = num_threads * param.c;
+        pq_type *pq_list = pq_alloc_traits::allocate(pq_list_.get_deleter().alloc, num_pqs);
+        for (pq_type *s = pq_list; s != pq_list + num_pqs; ++s) {
+            pq_alloc_traits::construct(pq_list_.get_deleter().alloc, s, sentinel, comp_);
         }
-        if (config.c == 0) {
-            throw std::invalid_argument("c cannot be 0");
-        }
-        pq_list_ = pq_alloc_traits::allocate(alloc_, num_pqs_);
-        for (pq_type *pq = pq_list_; pq != pq_list_ + num_pqs_; ++pq) {
-            pq_alloc_traits::construct(alloc_, pq, comp);
-        }
+        pq_list_.reset(pq_list);
+        pq_list_.get_deleter().num_pqs = num_pqs;
 #ifdef MQ_ABORT_MISALIGNMENT
         abort_on_data_misalignment();
 #endif
+        handle_seeds_ = std::make_unique<std::uint64_t[]>(num_threads);
+        std::generate(handle_seeds_.get(), handle_seeds_.get() + num_threads, xoroshiro256starstar{param.seed});
     }
 
-    explicit Multiqueue(unsigned int num_threads, Configuration const &config, allocator_type const &alloc)
-        : Multiqueue(num_threads, config, key_compare(), alloc) {
+    explicit Multiqueue(unsigned int num_threads, MultiqueueParameters<StrategyType> const &param,
+                        key_compare const &comp, allocator_type const &alloc)
+        : Multiqueue(num_threads, param, comp, pq_type::max_key, alloc) {
     }
 
-    explicit Multiqueue(unsigned int num_threads, key_compare const &comp,
-                        allocator_type const &alloc = allocator_type())
-        : Multiqueue(num_threads, Configuration(), comp, alloc) {
+    Handle get_handle() noexcept {
+        unsigned int index = handle_index_.fetch_add(1, std::memory_order_relaxed);
+        return Handle(*this, handle_seeds_[index]);
     }
 
-    explicit Multiqueue(unsigned int num_threads, allocator_type const &alloc)
-        : Multiqueue(num_threads, Configuration(), key_compare(), alloc) {
+    constexpr key_type const &get_sentinel() noexcept {
+        return sentinel_;
     }
 
-    ~Multiqueue() noexcept {
-        for (pq_type *pq = pq_list_; pq != pq_list_ + num_pqs_; ++pq) {
-            pq_alloc_traits::destroy(alloc_, pq);
-        }
-        pq_alloc_traits::deallocate(alloc_, pq_list_, num_pqs_);
-    }
-
-    constexpr Handle get_handle() noexcept {
-        return Handle(*this);
-    }
-
-    void reserve_per_spq(size_type cap) {
-        for (pq_type *pq = pq_list_; pq != pq_list_ + num_pqs_; ++pq) {
-            pq->reserve(cap);
+    void reserve(size_type cap) {
+        std::size_t const cap_per_pq = (2 * cap) / num_pqs();
+        for (auto &pq : pq_list_) {
+            pq.reserve(cap_per_pq);
         };
     }
 
 #ifdef MQ_ELEMENT_DISTRIBUTION
     std::vector<std::size_t> get_distribution() const {
-        std::vector<std::size_t> distribution(num_pqs_);
-        std::transform(pq_list_, pq_list_ + num_pqs_, distribution.begin(), [](auto const &spq) { return spq.size(); });
+        std::vector<std::size_t> distribution(num_pqs());
+        std::transform(pq_list_.get(), pq_list_.get() + num_pqs(), distribution.begin(),
+                       [](auto const &pq) { return pq.unsafe_size(); });
         return distribution;
     }
 
     std::vector<std::size_t> get_top_distribution(std::size_t k) {
         std::vector<std::pair<value_type, std::size_t>> removed_elements;
         removed_elements.reserve(k);
-        std::vector<std::size_t> distribution(num_pqs_, 0);
+        std::vector<std::size_t> distribution(num_pqs(), 0);
         for (std::size_t i = 0; i < k; ++i) {
-            auto min = std::min_element(pq_list_, pq_list_ + num_pqs_, [](auto const &lhs, auto const &rhs) {
-                return lhs.get_min_key() < rhs.get_min_key();
-            });
-            if (min->get_min_key() == empty_key) {
+            auto min = std::min_element(pq_list_.get(), pq_list_.get() + num_pqs(),
+                                        [](auto const &lhs, auto const &rhs) { return lhs.top_key() < rhs.top_key(); });
+            if (min->min_key() == sentinel) {
                 break;
             }
             assert(!min->empty());
             std::pair<value_type, std::size_t> result;
-            [[maybe_unused]] bool success = min->try_lock();
-            assert(success);
-            result.first = min->extract_top_and_unlock();
-            result.second = static_cast<std::size_t>(min - pq_list_);
+            min->extract_top(result.first);
+            result.second = static_cast<std::size_t>(min - std::begin(pq_list_));
             removed_elements.push_back(result);
             ++distribution[result.second];
         }
         for (auto [val, index] : removed_elements) {
-            [[maybe_unused]] bool success = pq_list_[index].try_lock();
-            assert(success);
-            pq_list_[index].push_and_unlock(val);
+            pq_list_[index].push(std::move(val));
         }
         return distribution;
     }
 #endif
 
     constexpr size_type num_pqs() const noexcept {
-        return num_pqs_;
+        return pq_list_.get_deleter().num_pqs;
     }
 
     std::string description() const {
         std::stringstream ss;
         ss << "multiqueue\n\t";
-        ss << "# PQs: " << num_pqs_ << "\n\t";
-        ss << "Deletion buffer size: " << Configuration::DeletionBufferSize << "\n\t";
-        ss << "Insertion buffer size: " << Configuration::InsertionBufferSize << "\n\t";
-        ss << "Heap degree: " << Configuration::HeapDegree << "\n\t";
-        ss << "Selection strategy: " << shared_data_.description();
+        ss << "PQs: " << num_pqs() << "\n\t";
+        ss << "Sentinel: " << sentinel_ << "\n\t";
+        ss << "Selection strategy: " << strategy_.description() << "\n\t";
+        ss << pq_type::description();
         return ss.str();
     }
 };
