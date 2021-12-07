@@ -60,7 +60,7 @@ struct perm {
 
         std::string description() const {
             std::stringstream ss;
-            ss << "swapping\n";
+            ss << "permutation\n";
             ss << "\tStickiness: " << stickiness;
             return ss.str();
         }
