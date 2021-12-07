@@ -43,7 +43,6 @@ namespace multiqueue {
 
 template <typename... Configs>
 struct MultiqueueParameters : Configs::Parameters... {
-    std::size_t c = 4;
     std::uint64_t seed = 1;
 };
 
@@ -83,7 +82,7 @@ class Multiqueue {
         Handle(Handle &&) = default;
 
        private:
-        explicit Handle(Multiqueue &mq, std::uint64_t seed) noexcept : mq_{mq}, rng_{seed} {
+        explicit Handle(Multiqueue &mq, unsigned int id, std::uint64_t seed) noexcept : mq_{mq}, rng_{seed}, data_{id} {
         }
 
        public:
@@ -168,7 +167,10 @@ class Multiqueue {
    public:
     explicit Multiqueue(unsigned int num_threads, param_type const &param, key_compare const &comp = key_compare(),
                         key_type sentinel = pq_type::max_key, allocator_type const &alloc = allocator_type())
-        : pq_list_(nullptr, Deleter(alloc)), sentinel_{sentinel}, comp_{comp}, strategy_(*this, param) {
+        : pq_list_(nullptr, Deleter(num_threads * param.c, alloc)),
+          sentinel_{sentinel},
+          comp_{comp},
+          strategy_(*this, param) {
         assert(num_threads > 0);
         assert(param.c > 0);
         size_type const num_pqs = num_threads * param.c;
@@ -176,6 +178,7 @@ class Multiqueue {
         for (pq_type *s = pq_list; s != pq_list + num_pqs; ++s) {
             pq_alloc_traits::construct(pq_list_.get_deleter().alloc, s, sentinel, comp_);
         }
+        pq_list_.get_deleter().num_pqs = 0;
         pq_list_.reset(pq_list);
         pq_list_.get_deleter().num_pqs = num_pqs;
 #ifdef MQ_ABORT_MISALIGNMENT
@@ -192,7 +195,7 @@ class Multiqueue {
 
     Handle get_handle() noexcept {
         unsigned int index = handle_index_.fetch_add(1, std::memory_order_relaxed);
-        return Handle(*this, handle_seeds_[index]);
+        return Handle(*this, index, handle_seeds_[index]);
     }
 
     constexpr key_type const &get_sentinel() noexcept {

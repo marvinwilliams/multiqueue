@@ -21,13 +21,18 @@
 namespace multiqueue::selection_strategy {
 
 struct random {
-    struct Parameters {};
+    struct Parameters {
+        std::size_t c = 4;
+    };
 
     template <typename MultiQueue>
     struct Strategy {
         using pq_type = typename MultiQueue::pq_type;
 
-        struct handle_data_t {};
+        struct handle_data_t {
+            handle_data_t(unsigned int) {
+            }
+        };
 
         MultiQueue &mq;
 

@@ -14,9 +14,9 @@
 
 #include "multiqueue/external/fastrange.h"
 
+#include <cassert>
 #include <cstdint>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -24,6 +24,7 @@ namespace multiqueue::selection_strategy {
 
 struct sticky {
     struct Parameters {
+        std::size_t c = 4;
         unsigned int stickiness = 4;
     };
 
@@ -36,15 +37,15 @@ struct sticky {
             unsigned int delete_count[2] = {0, 0};
             std::size_t push_index;
             std::size_t delete_index[2];
+            handle_data_t(unsigned int) {
+            }
         };
 
         MultiQueue &mq;
         unsigned int stickiness;
 
         Strategy(MultiQueue &mq_ref, Parameters const &param) : mq{mq_ref}, stickiness{param.stickiness} {
-            if (stickiness == 0) {
-                throw std::invalid_argument("stickiness cannot be 0");
-            }
+            assert(stickiness > 0);
         }
 
         std::string description() const {
