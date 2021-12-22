@@ -50,6 +50,8 @@ template <typename Key, typename T, typename Compare, template <typename, typena
           typename StrategyType = selection_strategy::sticky, bool ImplicitLock = false,
           typename Allocator = std::allocator<Key>>
 class Multiqueue {
+    static_assert(std::is_integral_v<T>, "Value must be integral");
+
    private:
     using pq_type = GuardedPQ<Key, T, Compare, PriorityQueue, ImplicitLock>;
 
@@ -91,6 +93,8 @@ class Multiqueue {
             if (!pq) {
                 return false;
             }
+            mq_.get().element_info_[static_cast<std::size_t>(pq->unsafe_top().second)].pq.store(
+                nullptr, std::memory_order_relaxed);
             pq->extract_top(retval);
             pq->unlock();
             return true;
@@ -100,6 +104,7 @@ class Multiqueue {
             auto pq = mq_.get().strategy_.lock_push_pq(data_, rng_);
             assert(pq);
             pq->push(value);
+            mq_.get().element_info_[static_cast<std::size_t>(value.second)].pq.store(pq, std::memory_order_relaxed);
             pq->unlock();
         }
 
@@ -107,7 +112,17 @@ class Multiqueue {
             auto pq = mq_.get().strategy_.lock_push_pq(data_, rng_);
             assert(pq);
             pq->push(std::move(value));
+            mq_.get().element_info_[static_cast<std::size_t>(value.second)].pq.store(pq, std::memory_order_relaxed);
             pq->unlock();
+        }
+
+        bool try_update(const_reference new_val) noexcept {
+            auto pq =
+                mq_.get().element_info_[static_cast<std::size_t>(new_val.second)].pq.load(std::memory_order_relaxed);
+            if (!pq) {
+                return false;
+            }
+            return pq->try_update(new_val);
         }
 
         bool try_extract_from(size_type pos, value_type &retval) noexcept {
@@ -115,6 +130,8 @@ class Multiqueue {
             auto &pq = mq_.get().pq_list_[pos];
             if (pq.try_lock()) {
                 if (!pq.empty()) {
+                    mq_.get().element_info_[static_cast<std::size_t>(pq->unsafe_top().second)].pq.store(
+                        nullptr, std::memory_order_relaxed);
                     pq.extract_top(retval);
                     pq.unlock();
                     return true;
@@ -130,17 +147,15 @@ class Multiqueue {
     using pq_alloc_traits = typename std::allocator_traits<pq_alloc_type>;
 
     struct Deleter {
-        size_type num_pqs;
+        Multiqueue *mq = nullptr;
         [[no_unique_address]] pq_alloc_type alloc;
-        Deleter(allocator_type a) : num_pqs{0}, alloc{a} {
-        }
-        Deleter(size_type n, allocator_type a) : num_pqs{n}, alloc{a} {
+        Deleter(Multiqueue *p, allocator_type a) : mq{p}, alloc{a} {
         }
         void operator()(pq_type *pq_list) noexcept {
-            for (pq_type *s = pq_list; s != pq_list + num_pqs; ++s) {
+            for (pq_type *s = pq_list; s != pq_list + mq->num_pqs(); ++s) {
                 pq_alloc_traits::destroy(alloc, s);
             }
-            pq_alloc_traits::deallocate(alloc, pq_list, num_pqs);
+            pq_alloc_traits::deallocate(alloc, pq_list, mq->num_pqs());
         }
     };
 
@@ -148,7 +163,9 @@ class Multiqueue {
     // False sharing is avoided by class alignment, but the members do not need to reside in individual cache lines, as
     // they are not written concurrently
     std::unique_ptr<pq_type[], Deleter> pq_list_;
+    size_type num_pqs_;
     key_type sentinel_;
+    std::unique_ptr<typename pq_type::ElementInfo[]> element_info_;
     [[no_unique_address]] key_compare comp_;
     std::unique_ptr<std::uint64_t[]> handle_seeds_;
     std::atomic_uint handle_index_ = 0;
@@ -165,22 +182,22 @@ class Multiqueue {
     }
 
    public:
-    explicit Multiqueue(unsigned int num_threads, param_type const &param, key_compare const &comp = key_compare(),
-                        key_type sentinel = pq_type::max_key, allocator_type const &alloc = allocator_type())
-        : pq_list_(nullptr, Deleter(num_threads * param.c, alloc)),
+    explicit Multiqueue(unsigned int num_threads, std::size_t num_elements, param_type const &param = param_type{},
+                        key_compare const &comp = key_compare(), key_type sentinel = pq_type::max_key,
+                        allocator_type const &alloc = allocator_type())
+        : pq_list_(nullptr, Deleter(this, alloc)),
+          num_pqs_{num_threads * param.c},
           sentinel_{sentinel},
           comp_{comp},
           strategy_(*this, param) {
         assert(num_threads > 0);
         assert(param.c > 0);
-        size_type const num_pqs = num_threads * param.c;
-        pq_type *pq_list = pq_alloc_traits::allocate(pq_list_.get_deleter().alloc, num_pqs);
-        for (pq_type *s = pq_list; s != pq_list + num_pqs; ++s) {
-            pq_alloc_traits::construct(pq_list_.get_deleter().alloc, s, sentinel, comp_);
+        element_info_ = std::make_unique<typename pq_type::ElementInfo[]>(num_elements);
+        pq_type *pq_list = pq_alloc_traits::allocate(pq_list_.get_deleter().alloc, num_pqs());
+        for (pq_type *pq = pq_list; pq != pq_list + num_pqs(); ++pq) {
+            pq_alloc_traits::construct(pq_list_.get_deleter().alloc, pq, element_info_.get(), sentinel, comp_);
         }
-        pq_list_.get_deleter().num_pqs = 0;
         pq_list_.reset(pq_list);
-        pq_list_.get_deleter().num_pqs = num_pqs;
 #ifdef MQ_ABORT_MISALIGNMENT
         abort_on_data_misalignment();
 #endif
@@ -188,9 +205,9 @@ class Multiqueue {
         std::generate(handle_seeds_.get(), handle_seeds_.get() + num_threads, xoroshiro256starstar{param.seed});
     }
 
-    explicit Multiqueue(unsigned int num_threads, MultiqueueParameters<StrategyType> const &param,
+    explicit Multiqueue(unsigned int num_threads, std::size_t num_elements, param_type const &param,
                         key_compare const &comp, allocator_type const &alloc)
-        : Multiqueue(num_threads, param, comp, pq_type::max_key, alloc) {
+        : Multiqueue(num_threads, num_elements, param, comp, pq_type::max_key, alloc) {
     }
 
     Handle get_handle() noexcept {
@@ -242,7 +259,7 @@ class Multiqueue {
 #endif
 
     constexpr size_type num_pqs() const noexcept {
-        return pq_list_.get_deleter().num_pqs;
+        return num_pqs_;
     }
 
     std::string description() const {

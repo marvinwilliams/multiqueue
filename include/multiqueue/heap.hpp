@@ -51,6 +51,8 @@ class Heap {
 
     using size_type = typename container_type::size_type;
 
+    enum struct Location { Heap };
+
    private:
     static constexpr size_type degree_ = Degree;
     static constexpr size_type root = size_type{0};
@@ -93,7 +95,8 @@ class Heap {
         return top;
     }
 
-    void sift_up(size_type index) {
+    template <typename Info>
+    void sift_up(size_type index, Info *info) {
         HEAP_ASSERT(index < size());
         if (index == root) {
             return;
@@ -101,6 +104,7 @@ class Heap {
         value_type value = std::move(data_[index]);
         size_type p = parent(index);
         while (comp_(value, data_[p])) {
+            info[static_cast<std::size_t>(data_[p].second)].index = index;
             data_[index] = std::move(data_[p]);
             index = p;
             if (index == root) {
@@ -108,10 +112,12 @@ class Heap {
             }
             p = parent(index);
         }
+        info[static_cast<std::size_t>(value.second)].index = index;
         data_[index] = std::move(value);
     }
 
-    void sift_down(size_type index) {
+    template <typename Info>
+    void sift_down(size_type index, Info *info) {
         HEAP_ASSERT(index < size());
         value_type value = std::move(data_[index]);
         size_type const first_nonfull = current_parrent();
@@ -119,9 +125,11 @@ class Heap {
             auto const first = first_child(index);
             auto const next = top_child(first, first + degree_, value);
             if (next == first + degree_) {
+                info[static_cast<std::size_t>(value.second)].index = index;
                 data_[index] = std::move(value);
                 return;
             }
+            info[static_cast<std::size_t>(data_[next].second)].index = index;
             data_[index] = std::move(data_[next]);
             index = next;
         }
@@ -129,10 +137,12 @@ class Heap {
             auto const first = first_child(index);
             auto const next = top_child(first, size(), value);
             if (next != size()) {
+                info[static_cast<std::size_t>(data_[next].second)].index = index;
                 data_[index] = std::move(data_[next]);
                 index = next;
             }
         }
+        info[static_cast<std::size_t>(value.second)].index = index;
         data_[index] = std::move(value);
     }
 
@@ -156,35 +166,79 @@ class Heap {
         return data_.front();
     }
 
-    void pop() {
+    template <typename Info>
+    void pop(Info *info) {
         HEAP_ASSERT(!empty());
         if (size() > size_type(1)) {
+            info[static_cast<std::size_t>(data_.back().second)].index = 0;
             data_.front() = std::move(data_.back());
             data_.pop_back();
-            sift_down(0);
+            sift_down(0, info);
         } else {
             data_.pop_back();
         }
-        HEAP_ASSERT(verify());
+        HEAP_ASSERT(verify(info));
     }
 
-    void extract_top(reference retval) {
-        HEAP_ASSERT(!data_.empty());
+    template <typename Info>
+    void extract_top(reference retval, Info *info) {
         retval = std::move(data_.front());
-        pop();
-        HEAP_ASSERT(verify());
+        pop(info);
+        HEAP_ASSERT(verify(info));
     }
 
-    void push(const_reference value) {
+    template <typename Info>
+    void push(const_reference value, Info *info) {
+        info[static_cast<std::size_t>(value.second)].index = data_.size();
         data_.push_back(value);
-        sift_up(size() - 1);
-        HEAP_ASSERT(verify());
+        sift_up(size() - 1, info);
+        HEAP_ASSERT(verify(info));
     }
 
-    void push(value_type &&value) {
+    template <typename Info>
+    void push(value_type &&value, Info *info) {
+        info[static_cast<std::size_t>(value.second)].index = data_.size();
         data_.push_back(std::move(value));
-        sift_up(size() - 1);
-        HEAP_ASSERT(verify());
+        sift_up(size() - 1, info);
+        HEAP_ASSERT(verify(info));
+    }
+
+    template <typename Info>
+    void update(const_reference new_val, Info *info) {
+        std::size_t i = info[static_cast<std::size_t>(new_val.second)].index;
+        HEAP_ASSERT(i < size());
+        HEAP_ASSERT(data_[i].second == new_val.second);
+        if (new_val.first > data_[i].first) {
+            data_[i].first = new_val.first;
+            sift_down(i, info);
+        } else {
+            data_[i].first = new_val.first;
+            sift_up(i, info);
+        }
+        HEAP_ASSERT(verify(info));
+    }
+
+    template <typename Info>
+    void erase(typename T::second_type value, Info *info) {
+        std::size_t i = info[static_cast<std::size_t>(value)].index;
+        HEAP_ASSERT(i < size());
+        HEAP_ASSERT(data_[i].second == value);
+        if (i == size() - 1) {
+            data_.pop_back();
+            HEAP_ASSERT(verify(info));
+            return;
+        }
+        info[static_cast<std::size_t>(data_.back().second)].index = i;
+        if (comp_(data_[i], data_.back())) {
+            data_[i] = std::move(data_.back());
+            data_.pop_back();
+            sift_down(i, info);
+        } else {
+            data_[i] = std::move(data_.back());
+            data_.pop_back();
+            sift_up(i, info);
+        }
+        HEAP_ASSERT(verify(info));
     }
 
     void reserve(size_type cap) {
@@ -199,12 +253,22 @@ class Heap {
         return comp_;
     }
 
-    bool verify() const noexcept {
+    template <typename Info>
+    bool verify(Info *info) const noexcept {
+        if (empty()) {
+            return true;
+        }
+        if (info[top().second].index != 0) {
+            return false;
+        }
         for (size_type i = 0; i < size(); i++) {
             auto const first = first_child(i);
             for (size_type j = 0; j < Degree; ++j) {
                 if (first + j >= size()) {
                     return true;
+                }
+                if (info[data_[first + j].second].index != first + j) {
+                    return false;
                 }
                 if (comp_(data_[first + j], data_[i])) {
                     return false;

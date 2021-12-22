@@ -68,16 +68,20 @@ TEST_CASE("std::priority_queue", "[benchmark][std]") {
 }
 
 TEMPLATE_TEST_CASE_SIG("Degree", "[benchmark][heap][degree]", ((unsigned int Degree), Degree), 2, 4, 8, 16, 64) {
-    using heap_t = multiqueue::Heap<int, void, std::less<int>, Degree, std::allocator<int>>;
+    struct Info {
+        std::size_t index;
+    };
+    std::vector<Info> infos(reps);
+    using heap_t = multiqueue::Heap<std::pair<int, int>, std::less<>, Degree>;
 
     auto heap = heap_t{};
 
     BENCHMARK("up") {
         for (int i = 1; i <= reps; ++i) {
-            heap.push(i);
+            heap.push({i, i}, infos.data());
         }
         for (int i = 1; i <= reps; ++i) {
-            heap.pop();
+            heap.pop(infos.data());
         }
         // to guarantee computation
         return heap.empty();
@@ -85,10 +89,10 @@ TEMPLATE_TEST_CASE_SIG("Degree", "[benchmark][heap][degree]", ((unsigned int Deg
 
     BENCHMARK("down") {
         for (int i = reps; i > 0; --i) {
-            heap.push(i);
+            heap.push({i, i}, infos.data());
         }
         for (int i = 1; i <= reps; ++i) {
-            heap.pop();
+            heap.pop(infos.data());
         }
         // to guarantee computation
         return heap.empty();
@@ -96,13 +100,13 @@ TEMPLATE_TEST_CASE_SIG("Degree", "[benchmark][heap][degree]", ((unsigned int Deg
 
     BENCHMARK("up_down") {
         for (int i = 1; i <= reps / 2; ++i) {
-            heap.push(i);
+            heap.push({i, i}, infos.data());
         }
         for (int i = reps; i > reps / 2; --i) {
-            heap.push(i);
+            heap.push({i, i}, infos.data());
         }
         for (int i = 1; i <= reps; ++i) {
-            heap.pop();
+            heap.pop(infos.data());
         }
         // to guarantee computation
         return heap.empty();
@@ -110,18 +114,18 @@ TEMPLATE_TEST_CASE_SIG("Degree", "[benchmark][heap][degree]", ((unsigned int Deg
 
     BENCHMARK("mixed") {
         for (int i = 1; i <= reps / 4; ++i) {
-            pq.push(i * 3);
-            pq.push(i);
-            pq.push(i * 4);
-            pq.push(i * 2);
-            pq.pop();
-            pq.pop();
-            pq.pop();
+            heap.push({i * 3, i * 3}, infos.data());
+            heap.push({i, i}, infos.data());
+            heap.push({i * 4, i*4}, infos.data());
+            heap.push({i * 2, i*2}, infos.data());
+            heap.pop(infos.data());
+            heap.pop(infos.data());
+            heap.pop(infos.data());
         }
         for (int i = 1; i <= reps / 4; ++i) {
-            pq.pop();
+            heap.pop(infos.data());
         }
         // to guarantee computation
-        return pq.empty();
+        return heap.empty();
     };
 }

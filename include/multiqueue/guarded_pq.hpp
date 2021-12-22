@@ -12,6 +12,9 @@
 #ifndef GUARDED_PQ
 #define GUARDED_PQ
 
+#include "multiqueue/addressable.hpp"
+
+#include <x86intrin.h>
 #include <atomic>
 #include <limits>
 #include <sstream>
@@ -87,18 +90,26 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
     using const_reference = typename pq_type::const_reference;
     using size_type = typename pq_type::size_type;
 
+    struct ElementInfo {
+        std::atomic<GuardedPQ*> pq = nullptr;
+        Location location;
+        std::size_t index;
+    };
+
    private:
     struct Data : detail::LockImpl<key_type, ImplicitLock> {
         alignas(L1_CACHE_LINESIZE) std::atomic<key_type> top_key;
         alignas(L1_CACHE_LINESIZE) pq_type pq;
+        ElementInfo* element_info;
         key_type const sentinel;
 
-        explicit Data(key_type const& s, key_compare const& comp) : top_key(s), pq(value_compare{comp}), sentinel(s) {
+        explicit Data(ElementInfo* info, key_type const& s, key_compare const& comp)
+            : top_key(s), pq(value_compare{comp}), element_info(info), sentinel(s) {
         }
 
         template <typename Alloc>
-        explicit Data(key_type const& s, key_compare const& comp, Alloc const& alloc)
-            : top_key(s), pq(value_compare{comp}, alloc), sentinel(s) {
+        explicit Data(ElementInfo* info, key_type const& s, key_compare const& comp, Alloc const& alloc)
+            : top_key(s), pq(value_compare{comp}, alloc), element_info(info), sentinel(s) {
         }
     };
 
@@ -107,15 +118,16 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
    public:
     static inline key_type const max_key = Data::max_key;
 
-    explicit GuardedPQ(key_type const& sentinel, key_compare const& comp = key_compare()) : data_(sentinel, comp) {
+    explicit GuardedPQ(ElementInfo* element_info, key_type const& sentinel, key_compare const& comp = key_compare())
+        : data_(element_info, sentinel, comp) {
         if constexpr (ImplicitLock) {
             assert(!Data::is_locked(sentinel));
         }
     }
 
     template <typename Alloc>
-    explicit GuardedPQ(key_type const& sentinel, value_compare const& comp, Alloc const& alloc)
-        : data_(sentinel, comp, alloc) {
+    explicit GuardedPQ(ElementInfo* element_info, key_type const& sentinel, value_compare const& comp, Alloc const& alloc)
+        : data_(element_info, sentinel, comp, alloc) {
         if constexpr (ImplicitLock) {
             assert(!Data::is_locked(sentinel));
         }
@@ -177,9 +189,9 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
 
     bool is_locked() const noexcept {
         if constexpr (ImplicitLock) {
-            return Data::is_locked(data_.top_key.load(std::memory_order_acquire));
+            return Data::is_locked(data_.top_key.load(std::memory_order_relaxed));
         } else {
-            return data_.lock.load(std::memory_order_acquire);
+            return data_.lock.load(std::memory_order_relaxed);
         }
     }
 
@@ -211,23 +223,37 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
     void pop() {
         assert(is_locked());
         assert(!empty());
-        data_.pq.pop();
+        data_.pq.pop(data_.element_info);
     }
 
     void extract_top(reference retval) {
         assert(is_locked());
         assert(!empty());
-        data_.pq.extract_top(retval);
+        data_.pq.extract_top(retval, data_.element_info);
     };
 
     void push(const_reference value) {
         assert(is_locked());
-        data_.pq.push(value);
+        data_.pq.push(value, data_.element_info);
     }
 
     void push(value_type&& value) {
         assert(is_locked());
-        data_.pq.push(std::move(value));
+        data_.pq.push(std::move(value), data_.element_info);
+    }
+
+    bool try_update(const_reference new_val) {
+        while (!try_lock()) {
+            _mm_pause();
+        }
+        if (data_.element_info[static_cast<std::size_t>(new_val.second)].pq.load(std::memory_order_relaxed) == nullptr) {
+            // Element already deleted
+            unlock();
+            return false;
+        }
+        data_.pq.update(new_val, data_.element_info);
+        unlock();
+        return true;
     }
 
     void unsafe_reserve(size_type cap) {

@@ -19,32 +19,37 @@
 #include <utility>
 #include <vector>
 
+struct HeapInfo {
+    std::size_t index;
+};
+
 TEMPLATE_TEST_CASE_SIG("heap supports basic operations", "[heap][basic]", ((unsigned int Degree), Degree), 2, 3, 4,
                        99) {
-    using heap_t = multiqueue::Heap<int, std::less<>, Degree>;
+    std::vector<HeapInfo> infos(1000);
+    using heap_t = multiqueue::Heap<std::pair<int, int>, std::less<>, Degree>;
 
     auto heap = heap_t{};
 
     SECTION("push increasing numbers and pop them") {
         for (int n = 0; n < 1000; ++n) {
-            heap.push(n);
+            heap.push({n, n}, infos.data());
         }
 
         for (int i = 0; i < 1000; ++i) {
-            REQUIRE(heap.top() == i);
-            heap.pop();
+            REQUIRE(heap.top().first == i);
+            heap.pop(infos.data());
         }
         REQUIRE(heap.empty());
     }
 
     SECTION("push decreasing numbers and pop them") {
         for (int n = 999; n >= 0; --n) {
-            heap.push(n);
+            heap.push({n, n}, infos.data());
         }
 
         for (int i = 0; i < 1000; ++i) {
-            REQUIRE(heap.top() == i);
-            heap.pop();
+            REQUIRE(heap.top().first == i);
+            heap.pop(infos.data());
         }
         REQUIRE(heap.empty());
     }
@@ -52,45 +57,46 @@ TEMPLATE_TEST_CASE_SIG("heap supports basic operations", "[heap][basic]", ((unsi
     SECTION(
         "first push increasing numbers, then push decreasing numbers and "
         "pop them") {
-        for (int i = 1; i <= 500; ++i) {
-            heap.push(i);
+        for (int i = 0; i <= 500; ++i) {
+            heap.push({i, i}, infos.data());
         }
-        for (int i = 1000; i > 500; --i) {
-            heap.push(i);
+        for (int i = 999; i > 500; --i) {
+            heap.push({i, i}, infos.data());
         }
-        for (int i = 1; i <= 1000; ++i) {
-            REQUIRE(heap.top() == i);
-            heap.pop();
+        for (int i = 0; i < 1000; ++i) {
+            REQUIRE(heap.top().first == i);
+            heap.pop(infos.data());
         }
         REQUIRE(heap.empty());
     }
 }
 
 TEST_CASE("heap can use std::greater as comparator", "[heap][comparator]") {
-    using heap_t = multiqueue::Heap<int, std::greater<>>;
+    std::vector<HeapInfo> infos(1000);
+    using heap_t = multiqueue::Heap<std::pair<int, int>, std::greater<>>;
 
     auto heap = heap_t{};
 
     SECTION("push increasing numbers and pop them") {
         for (int n = 0; n < 1000; ++n) {
-            heap.push(n);
+            heap.push({n, n}, infos.data());
         }
 
         for (int i = 999; i >= 0; --i) {
-            REQUIRE(heap.top() == i);
-            heap.pop();
+            REQUIRE(heap.top().first == i);
+            heap.pop(infos.data());
         }
         REQUIRE(heap.empty());
     }
 
     SECTION("push decreasing numbers and pop them") {
         for (int n = 999; n >= 0; --n) {
-            heap.push(n);
+            heap.push({n, n}, infos.data());
         }
 
         for (int i = 999; i >= 0; --i) {
-            REQUIRE(heap.top() == i);
-            heap.pop();
+            REQUIRE(heap.top().first == i);
+            heap.pop(infos.data());
         }
         REQUIRE(heap.empty());
     }
@@ -99,21 +105,22 @@ TEST_CASE("heap can use std::greater as comparator", "[heap][comparator]") {
         "first push increasing numbers, then push decreasing numbers and "
         "pop them") {
         for (int i = 0; i < 500; ++i) {
-            heap.push(i);
+            heap.push({i, i}, infos.data());
         }
         for (int i = 999; i >= 500; --i) {
-            heap.push(i);
+            heap.push({i, i}, infos.data());
         }
         for (int i = 999; i >= 0; --i) {
-            REQUIRE(heap.top() == i);
-            heap.pop();
+            REQUIRE(heap.top().first == i);
+            heap.pop(infos.data());
         }
         REQUIRE(heap.empty());
     }
 }
 
 TEST_CASE("heap works with randomized workloads", "[heap][workloads]") {
-    using heap_t = multiqueue::Heap<int, std::less<>>;
+    std::vector<HeapInfo> infos(1000);
+    using heap_t = multiqueue::Heap<std::pair<int, int>, std::less<>>;
 
     auto heap = heap_t{};
     auto ref_pq = std::priority_queue<int, std::vector<int>, std::greater<int>>{};
@@ -124,14 +131,14 @@ TEST_CASE("heap works with randomized workloads", "[heap][workloads]") {
 
         for (std::size_t i = 0; i < 1000; ++i) {
             auto n = dist(gen);
-            heap.push(n);
+            heap.push({n, i}, infos.data());
             ref_pq.push(n);
-            REQUIRE(heap.top() == ref_pq.top());
+            REQUIRE(heap.top().first == ref_pq.top());
         }
 
         for (std::size_t i = 0; i < 1000; ++i) {
-            REQUIRE(heap.top() == ref_pq.top());
-            heap.pop();
+            REQUIRE(heap.top().first == ref_pq.top());
+            heap.pop(infos.data());
             ref_pq.pop();
         }
         REQUIRE(heap.empty());
@@ -141,26 +148,26 @@ TEST_CASE("heap works with randomized workloads", "[heap][workloads]") {
         auto dist = std::uniform_int_distribution{-100, 100};
         auto seq_dist = std::uniform_int_distribution{0, 10};
 
-        for (int s = 0; s < 1000; ++s) {
+        for (int s = 0; s < 100; ++s) {
             auto num_push = seq_dist(gen);
             for (int i = 0; i < num_push; ++i) {
                 auto n = dist(gen);
-                heap.push(n);
+                heap.push({n, s * 10 + i}, infos.data());
                 ref_pq.push(n);
-                REQUIRE(heap.top() == ref_pq.top());
+                REQUIRE(heap.top().first == ref_pq.top());
             }
             auto num_pop = seq_dist(gen);
             for (int i = 0; i > num_pop; --i) {
                 if (!heap.empty()) {
-                    REQUIRE(heap.top() == ref_pq.top());
-                    heap.pop();
+                    REQUIRE(heap.top().first == ref_pq.top());
+                    heap.pop(infos.data());
                     ref_pq.pop();
                 }
             }
         }
         while (!heap.empty()) {
-            REQUIRE(heap.top() == ref_pq.top());
-            heap.pop();
+            REQUIRE(heap.top().first == ref_pq.top());
+            heap.pop(infos.data());
             ref_pq.pop();
         }
     }
@@ -169,37 +176,39 @@ TEST_CASE("heap works with randomized workloads", "[heap][workloads]") {
         auto dist = std::uniform_int_distribution{-100, 100};
         auto seq_dist = std::uniform_int_distribution{1, 10};
 
-        heap.push(0);
+        heap.push({0, 0}, infos.data());
         ref_pq.push(0);
-        for (int s = 0; s < 1000; ++s) {
+        for (int s = 0; s < 100; ++s) {
             auto top = heap.top();
-            heap.pop();
+            heap.pop(infos.data());
             ref_pq.pop();
             auto num_push = seq_dist(gen);
             for (int i = 0; i < num_push; ++i) {
-                auto n = top + dist(gen);
-                heap.push(n);
-                ref_pq.push(n);
-                REQUIRE(heap.top() == ref_pq.top());
+                top.first += dist(gen);
+                top.second = s * 10 + i;
+                heap.push(top, infos.data());
+                ref_pq.push(top.first);
+                REQUIRE(heap.top().first == ref_pq.top());
             }
         }
         while (!heap.empty()) {
-            REQUIRE(heap.top() == ref_pq.top());
-            heap.pop();
+            REQUIRE(heap.top().first == ref_pq.top());
+            heap.pop(infos.data());
             ref_pq.pop();
         }
     }
 }
 
 TEST_CASE("heap works with non-default-constructible types", "[heap][types]") {
-    using heap_t = multiqueue::Heap<std::pair<test_types::nodefault, test_types::nodefault>, std::less<>>;
+    std::vector<HeapInfo> infos(3);
+    using heap_t = multiqueue::Heap<std::pair<test_types::nodefault, int>, std::less<>>;
     heap_t heap{};
-    heap.push({test_types::nodefault(0), test_types::nodefault(1)});
+    heap.push({test_types::nodefault(0), 1}, infos.data());
     test_types::nodefault t1(2);
-    std::pair<test_types::nodefault, test_types::nodefault> tp(t1, t1);
-    heap.push(tp);
-    std::pair<test_types::nodefault, test_types::nodefault> t2{2, 3};
+    std::pair<test_types::nodefault, int> tp(t1, 2);
+    heap.push(tp, infos.data());
+    std::pair<test_types::nodefault, int> t2{2, 3};
     t2 = heap.top();
-    heap.pop();
-    heap.pop();
+    heap.pop(infos.data());
+    heap.pop(infos.data());
 }
