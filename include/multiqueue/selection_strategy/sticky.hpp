@@ -24,8 +24,7 @@ namespace multiqueue::selection_strategy {
 
 struct sticky {
     struct Parameters {
-        std::size_t c = 4;
-        unsigned int stickiness = 4;
+        unsigned int stickiness = 8;
     };
 
     template <typename MultiQueue>

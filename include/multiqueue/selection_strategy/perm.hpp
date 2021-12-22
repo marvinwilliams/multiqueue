@@ -28,7 +28,6 @@ namespace multiqueue::selection_strategy {
 struct perm {
     struct Parameters {
         unsigned int stickiness = 64;
-        std::size_t c = 4;
     };
 
     template <typename MultiQueue>
@@ -46,6 +45,7 @@ struct perm {
         struct alignas(L1_CACHE_LINESIZE) Permutation {
             // Upper half a, lower half b
             // i*a + b mod z
+            static constexpr std::uint64_t mask = ((std::uint64_t(1) << 32) - 1);
             std::atomic_uint64_t n;
         };
 
@@ -66,11 +66,11 @@ struct perm {
         }
 
         static constexpr std::size_t get_perm(std::uint64_t p, std::size_t i, std::size_t num) noexcept {
-            return (i * (p >> 32) + (((std::uint64_t(1) << 32) - 1) & p)) % num;
+            return (i * (p >> 32) + (Permutation::mask & p)) % num;
         }
 
         static constexpr std::uint64_t to_perm(std::uint64_t a, std::uint64_t b) noexcept {
-            return (a << 32 | b);
+            return (a << 32 | (Permutation::mask & b));
         }
 
         template <typename Generator>

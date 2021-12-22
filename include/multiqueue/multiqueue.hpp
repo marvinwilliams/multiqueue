@@ -44,6 +44,7 @@ namespace multiqueue {
 template <typename... Configs>
 struct MultiqueueParameters : Configs::Parameters... {
     std::uint64_t seed = 1;
+    std::size_t c = 4;
 };
 
 template <typename Key, typename T, typename Compare, template <typename, typename> typename PriorityQueue,

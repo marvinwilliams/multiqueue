@@ -22,7 +22,6 @@ namespace multiqueue::selection_strategy {
 
 struct random {
     struct Parameters {
-        std::size_t c = 4;
     };
 
     template <typename MultiQueue>

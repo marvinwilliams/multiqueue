@@ -26,7 +26,6 @@ namespace multiqueue::selection_strategy {
 struct swapping {
     struct Parameters {
         unsigned int stickiness = 64;
-        static constexpr unsigned int c = 3;
     };
 
     template <typename MultiQueue>
