@@ -29,8 +29,6 @@ namespace detail {
 
 template <typename T, bool ImplicitLock /* = false*/>
 struct LockImpl {
-    static inline T const max_key = std::numeric_limits<T>::max();
-
     alignas(L1_CACHE_LINESIZE) std::atomic_bool lock = false;
 };
 
@@ -38,8 +36,6 @@ template <typename T>
 struct LockImpl<T, /*ImplicitLock = */ true> {
     static_assert(std::is_integral_v<T> && std::is_unsigned_v<T>,
                   "Implicit locking is only available with unsigend integrals");
-
-    static inline T const max_key = (std::numeric_limits<T>::max() >> 1);
 
     // LockMask is a 1 in the highest bit position
     static constexpr T LockMask = ~(~T(0) >> 1);
@@ -59,66 +55,41 @@ struct LockImpl<T, /*ImplicitLock = */ true> {
 
 }  // namespace detail
 
-template <typename Key, typename T, typename Compare, template <typename, typename> typename PriorityQueue,
-          bool ImplicitLock>
+template <typename Key, typename T, typename ExtractKey, typename Compare, typename Sentinel, bool ImplicitLock,
+          typename PriorityQueue>
 class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
    public:
     using key_type = Key;
-    using value_type = typename std::conditional_t<std::is_same_v<T, void>, key_type, std::pair<key_type, T>>;
+    using value_type = T;
+    using priority_queue_type = PriorityQueue;
     using key_compare = Compare;
-
-    struct value_compare {
-        key_compare comp;
-
-        constexpr bool operator()(value_type const& lhs, value_type const& rhs) const noexcept {
-            if constexpr (std::is_same_v<T, void>) {
-                return comp(lhs, rhs);
-            } else {
-                return comp(lhs.first, rhs.first);
-            }
-        }
-    };
-
-   private:
-    using pq_type = PriorityQueue<value_type, value_compare>;
-
-   public:
-    using reference = typename pq_type::reference;
-    using const_reference = typename pq_type::const_reference;
-    using size_type = typename pq_type::size_type;
+    using value_compare = typename priority_queue_type::value_compare;
+    using reference = typename priority_queue_type::reference;
+    using const_reference = typename priority_queue_type::const_reference;
+    using size_type = typename priority_queue_type::size_type;
 
    private:
     struct Data : detail::LockImpl<key_type, ImplicitLock> {
         alignas(L1_CACHE_LINESIZE) std::atomic<key_type> top_key;
-        alignas(L1_CACHE_LINESIZE) pq_type pq;
-        key_type const sentinel;
+        alignas(L1_CACHE_LINESIZE) priority_queue_type pq;
 
-        explicit Data(key_type const& s, key_compare const& comp) : top_key(s), pq(value_compare{comp}), sentinel(s) {
+        explicit Data(key_compare const& comp) : top_key(Sentinel()()), pq(value_compare{comp}) {
         }
 
         template <typename Alloc>
-        explicit Data(key_type const& s, key_compare const& comp, Alloc const& alloc)
-            : top_key(s), pq(value_compare{comp}, alloc), sentinel(s) {
+        explicit Data(key_compare const& comp, Alloc const& alloc)
+            : top_key(Sentinel()()), pq(value_compare{comp}, alloc) {
         }
     };
 
     Data data_;
 
    public:
-    static inline key_type const max_key = Data::max_key;
-
-    explicit GuardedPQ(key_type const& sentinel, key_compare const& comp = key_compare()) : data_(sentinel, comp) {
-        if constexpr (ImplicitLock) {
-            assert(!Data::is_locked(sentinel));
-        }
+    explicit GuardedPQ(key_compare const& comp = key_compare()) : data_(comp) {
     }
 
     template <typename Alloc>
-    explicit GuardedPQ(key_type const& sentinel, value_compare const& comp, Alloc const& alloc)
-        : data_(sentinel, comp, alloc) {
-        if constexpr (ImplicitLock) {
-            assert(!Data::is_locked(sentinel));
-        }
+    explicit GuardedPQ(value_compare const& comp, Alloc const& alloc) : data_(comp, alloc) {
     }
 
     bool try_lock() noexcept {
@@ -148,7 +119,7 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
             }
             key_type current_key = data_.top_key.load(std::memory_order_relaxed);
             // Use this to allow inaccuracies but higher success chance
-            /* if (current_key != data_.sentinel) { */
+            /* if (current_key != Sentinel()()) { */
             if (current_key != key) {
                 data_.lock.store(false, std::memory_order_release);
                 return false;
@@ -160,17 +131,11 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
     void unlock() noexcept {
         assert(is_locked());
         if constexpr (ImplicitLock) {
-            if constexpr (std::is_same_v<T, void>) {
-                data_.top_key.store(unsafe_empty() ? data_.sentinel : unsafe_top(), std::memory_order_release);
-            } else {
-                data_.top_key.store(unsafe_empty() ? data_.sentinel : unsafe_top().first, std::memory_order_release);
-            }
+            data_.top_key.store(unsafe_empty() ? Sentinel()() : ExtractKey()(unsafe_top()),
+                                std::memory_order_release);
         } else {
-            if constexpr (std::is_same_v<T, void>) {
-                data_.top_key.store(unsafe_empty() ? data_.sentinel : unsafe_top(), std::memory_order_relaxed);
-            } else {
-                data_.top_key.store(unsafe_empty() ? data_.sentinel : unsafe_top().first, std::memory_order_relaxed);
-            }
+            data_.top_key.store(unsafe_empty() ? Sentinel()() : ExtractKey()(unsafe_top()),
+                                std::memory_order_relaxed);
             data_.lock.store(false, std::memory_order_release);
         }
     }
@@ -192,7 +157,7 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
     }
 
     [[nodiscard]] bool empty() const noexcept {
-        return top_key() == data_.sentinel;
+        return top_key() == Sentinel()();
     }
 
     [[nodiscard]] bool unsafe_empty() const noexcept {
@@ -241,7 +206,7 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
     static std::string description() {
         std::stringstream ss;
         ss << "Locking: " << (ImplicitLock ? "implicit" : "explicit") << "\n\t";
-        ss << pq_type::description();
+        ss << priority_queue_type::description();
         return ss.str();
     }
 };
@@ -253,7 +218,7 @@ namespace std {
 template <typename Key, typename T, typename Compare, template <typename, typename> typename PriorityQueue,
           bool ImplicitLock, typename Alloc>
 struct uses_allocator<multiqueue::GuardedPQ<Key, T, Compare, PriorityQueue, ImplicitLock>, Alloc>
-    : uses_allocator<typename multiqueue::GuardedPQ<Key, T, Compare, PriorityQueue, ImplicitLock>::pq_type,
+    : uses_allocator<typename multiqueue::GuardedPQ<Key, T, Compare, PriorityQueue, ImplicitLock>::priority_queue_type,
                      Alloc>::type {};
 
 }  // namespace std
