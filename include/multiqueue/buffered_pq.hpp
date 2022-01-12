@@ -69,8 +69,8 @@ class BufferedPQ {
     explicit BufferedPQ(value_compare const& comp = value_compare()) : pq_(comp) {
     }
 
-    template <typename Allocator>
-    explicit BufferedPQ(value_compare const& comp, Allocator const& alloc) : pq_(comp, alloc) {
+    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<pq_type, Alloc>>>
+    explicit BufferedPQ(value_compare const& comp, Alloc const& alloc) : pq_(comp, alloc) {
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept {

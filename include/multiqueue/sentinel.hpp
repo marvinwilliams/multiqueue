@@ -25,28 +25,28 @@ struct DefaultSentinel;
                   "std::numeric_limits not specialized for type '" #IntType "'");                     \
     static_assert(std::numeric_limits<IntType>::is_integer, "type '" #IntType "' is not an integer"); \
     template <>                                                                                       \
-    struct DefaultSentinel<std::less<>, IntType> {                                                    \
+    struct DefaultSentinel<IntType, std::less<>> {                                                    \
         constexpr IntType operator()() const noexcept {                                               \
             return std::numeric_limits<IntType>::max();                                               \
         }                                                                                             \
     };                                                                                                \
                                                                                                       \
     template <>                                                                                       \
-    struct DefaultSentinel<std::less<IntType>, IntType> {                                             \
+    struct DefaultSentinel<IntType, std::less<IntType>> {                                             \
         constexpr IntType operator()() const noexcept {                                               \
             return std::numeric_limits<IntType>::max();                                               \
         }                                                                                             \
     };                                                                                                \
                                                                                                       \
     template <>                                                                                       \
-    struct DefaultSentinel<std::greater<>, IntType> {                                                 \
+    struct DefaultSentinel<IntType, std::greater<>> {                                                 \
         constexpr IntType operator()() const noexcept {                                               \
             return std::numeric_limits<IntType>::lowest();                                            \
         }                                                                                             \
     };                                                                                                \
                                                                                                       \
     template <>                                                                                       \
-    struct DefaultSentinel<std::greater<IntType>, IntType> {                                          \
+    struct DefaultSentinel<IntType, std::greater<IntType>> {                                          \
         constexpr IntType operator()() const noexcept {                                               \
             return std::numeric_limits<IntType>::lowest();                                            \
         }                                                                                             \

@@ -13,74 +13,56 @@
 #define SELECTION_STRATEGY_RANDOM_HPP_INCLUDED
 
 #include "multiqueue/external/fastrange.h"
+#include "multiqueue/external/xoroshiro256starstar.hpp"
 
-#include <cstdint>
+#include <cstddef>
 #include <sstream>
 #include <string>
 
 namespace multiqueue::selection_strategy {
 
-struct random {
-    struct Parameters {
-    };
+class Random {
+   public:
+    struct Parameters {};
 
-    template <typename MultiQueue>
-    struct Strategy {
-        using pq_type = typename MultiQueue::pq_type;
-
-        struct handle_data_t {
-            handle_data_t(unsigned int) {
-            }
-        };
-
-        MultiQueue &mq;
-
-        Strategy(MultiQueue &mq_ref, Parameters const &) noexcept : mq{mq_ref} {
-        }
-
-        static std::string description() {
-            return "random";
-        }
-
-        template <typename Generator>
-        pq_type *lock_push_pq(handle_data_t &, Generator &g) {
-            auto pq = mq.pq_list_.get() + fastrange64(g(), mq.num_pqs());
-            while (!pq->try_lock()) {
-                pq = mq.pq_list_.get() + fastrange64(g(), mq.num_pqs());
-            }
-            return pq;
-        }
-
-        template <typename Generator>
-        pq_type *lock_delete_pq(handle_data_t &, Generator &g) {
-            auto first = mq.pq_list_.get() + fastrange64(g(), mq.num_pqs());
-            auto second = mq.pq_list_.get() + fastrange64(g(), mq.num_pqs());
-            auto first_key = first->top_key();
-            auto second_key = second->top_key();
-            do {
-                if (mq.comp_(first_key, second_key)) {
-                    if (first_key == mq.get_sentinel()) {
-                        break;
-                    }
-                    if (first->try_lock_assume_key(first_key)) {
-                        return first;
-                    }
-                    first = mq.pq_list_.get() + fastrange64(g(), mq.num_pqs());
-                    first_key = first->top_key();
-                } else {
-                    if (second_key == mq.get_sentinel()) {
-                        break;
-                    }
-                    if (second->try_lock_assume_key(second_key)) {
-                        return second;
-                    }
-                    second = mq.pq_list_.get() + fastrange64(g(), mq.num_pqs());
-                    second_key = second->top_key();
-                }
-            } while (true);
-            return nullptr;
+    struct handle_data_t {
+        xoroshiro256starstar rng;
+        handle_data_t(std::uint64_t seed, unsigned int /* id */) noexcept : rng{seed} {
         }
     };
+
+   private:
+    std::size_t num_pqs_;
+
+   public:
+    Random(std::size_t num_pqs, Parameters const & /* params */) noexcept : num_pqs_{num_pqs} {
+    }
+
+    static std::string description() {
+        return "random";
+    }
+
+    std::pair<std::size_t, std::size_t> get_delete_pqs(handle_data_t &handle_data) {
+        return {fastrange64(handle_data.rng(), num_pqs_), fastrange64(handle_data.rng(), num_pqs_)};
+    }
+
+    void delete_pq_used(bool /* no_fail */, handle_data_t & /* handle_data */) noexcept {
+    }
+
+    std::pair<std::size_t, std::size_t> get_fallback_delete_pqs(handle_data_t &handle_data) {
+        return {fastrange64(handle_data.rng(), num_pqs_), fastrange64(handle_data.rng(), num_pqs_)};
+    }
+
+    std::size_t get_push_pq(handle_data_t &handle_data) noexcept {
+        return fastrange64(handle_data.rng(), num_pqs_);
+    }
+
+    void push_pq_used(bool /* no_fail */, handle_data_t & /* handle_data */) noexcept {
+    }
+
+    std::size_t get_fallback_push_pq(handle_data_t &handle_data) noexcept {
+        return fastrange64(handle_data.rng(), num_pqs_);
+    }
 };
 
 }  // namespace multiqueue::selection_strategy

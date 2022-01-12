@@ -13,6 +13,7 @@
 #define SELECTION_STRATEGY_STICKY_HPP_INCLUDED
 
 #include "multiqueue/external/fastrange.h"
+#include "multiqueue/external/xoroshiro256starstar.hpp"
 
 #include <cassert>
 #include <cstdint>
@@ -22,99 +23,85 @@
 
 namespace multiqueue::selection_strategy {
 
-struct sticky {
+class Sticky {
+   public:
     struct Parameters {
         unsigned int stickiness = 8;
     };
 
-    template <typename MultiQueue>
-    struct Strategy {
-        using pq_type = typename MultiQueue::pq_type;
+    struct handle_data_t {
+        xoroshiro256starstar rng;
+        unsigned int push_count = 0;
+        unsigned int delete_count = 0;
+        std::size_t push_index;
+        std::pair<std::size_t, std::size_t> delete_index;
 
-        struct handle_data_t {
-            unsigned int push_count = 0;
-            unsigned int delete_count[2] = {0, 0};
-            std::size_t push_index;
-            std::size_t delete_index[2];
-            handle_data_t(unsigned int) {
-            }
-        };
-
-        MultiQueue &mq;
-        unsigned int stickiness;
-
-        Strategy(MultiQueue &mq_ref, Parameters const &param) : mq{mq_ref}, stickiness{param.stickiness} {
-            assert(stickiness > 0);
-        }
-
-        std::string description() const {
-            std::stringstream ss;
-            ss << "sticky\n";
-            ss << "\tStickiness: " << stickiness;
-            return ss.str();
-        }
-
-        template <typename Generator>
-        pq_type *lock_push_pq(handle_data_t &handle_data, Generator &g) {
-            if (handle_data.push_count == 0) {
-                handle_data.push_index = fastrange64(g(), mq.num_pqs());
-                handle_data.push_count = stickiness;
-            }
-
-            if (!mq.pq_list_[handle_data.push_index].try_lock()) {
-                handle_data.push_count = stickiness;
-                do {
-                    handle_data.push_index = fastrange64(g(), mq.num_pqs());
-                } while (!mq.pq_list_[handle_data.push_index].try_lock());
-            }
-            --handle_data.push_count;
-            return &mq.pq_list_[handle_data.push_index];
-        }
-
-        template <typename Generator>
-        pq_type *lock_delete_pq(handle_data_t &handle_data, Generator &g) {
-            if (handle_data.delete_count[0] == 0) {
-                handle_data.delete_index[0] = fastrange64(g(), mq.num_pqs());
-                handle_data.delete_count[0] = stickiness;
-            }
-            if (handle_data.delete_count[1] == 0) {
-                handle_data.delete_index[1] = fastrange64(g(), mq.num_pqs());
-                handle_data.delete_count[1] = stickiness;
-            }
-            auto first_key = mq.pq_list_[handle_data.delete_index[0]].top_key();
-            auto second_key = mq.pq_list_[handle_data.delete_index[1]].top_key();
-            do {
-                if (mq.comp_(first_key, second_key)) {
-                    if (first_key == mq.get_sentinel()) {
-                        break;
-                    }
-                    if (mq.pq_list_[handle_data.delete_index[0]].try_lock_assume_key(first_key)) {
-                        --handle_data.delete_count[0];
-                        --handle_data.delete_count[1];
-                        return &mq.pq_list_[handle_data.delete_index[0]];
-                    }
-                    handle_data.delete_index[0] = fastrange64(g(), mq.num_pqs());
-                    first_key = mq.pq_list_[handle_data.delete_index[0]].top_key();
-                    handle_data.delete_count[0] = stickiness;
-                } else {
-                    if (second_key == mq.get_sentinel()) {
-                        break;
-                    }
-                    if (mq.pq_list_[handle_data.delete_index[1]].try_lock_assume_key(second_key)) {
-                        --handle_data.delete_count[0];
-                        --handle_data.delete_count[1];
-                        return &mq.pq_list_[handle_data.delete_index[1]];
-                    }
-                    handle_data.delete_index[1] = fastrange64(g(), mq.num_pqs());
-                    second_key = mq.pq_list_[handle_data.delete_index[1]].top_key();
-                    handle_data.delete_count[1] = stickiness;
-                }
-            } while (true);
-            handle_data.delete_count[0] = 0;
-            handle_data.delete_count[1] = 0;
-            return nullptr;
+        handle_data_t(std::uint64_t seed, unsigned int /* id */) noexcept : rng{seed} {
         }
     };
+
+   private:
+    std::size_t num_pqs_;
+    unsigned int stickiness_;
+
+   public:
+    Sticky(std::size_t num_pqs, Parameters const &params) noexcept : num_pqs_{num_pqs}, stickiness_{params.stickiness} {
+        assert(stickiness > 0);
+    }
+
+    std::string description() const {
+        std::stringstream ss;
+        ss << "sticky\n";
+        ss << "\tStickiness: " << stickiness_;
+        return ss.str();
+    }
+
+    std::pair<std::size_t, std::size_t> get_delete_pqs(handle_data_t &handle_data) {
+        if (handle_data.delete_count == 0) {
+            handle_data.delete_index = {fastrange64(handle_data.rng(), num_pqs_),
+                                        fastrange64(handle_data.rng(), num_pqs_)};
+            handle_data.delete_count = stickiness_;
+        }
+
+        return handle_data.delete_index;
+    }
+
+    void delete_pq_used(bool no_fail, handle_data_t &handle_data) noexcept {
+        if (no_fail) {
+            --handle_data.delete_count;
+        } else {
+            handle_data.delete_count = stickiness_ - 1;
+        }
+    }
+
+    void delete_pq_empty(handle_data_t & /* handle_data */) noexcept {
+    }
+
+    std::pair<std::size_t, std::size_t> get_fallback_delete_pqs(handle_data_t &handle_data) noexcept {
+        return handle_data.delete_index = {fastrange64(handle_data.rng(), num_pqs_),
+                                           fastrange64(handle_data.rng(), num_pqs_)};
+    }
+
+    std::size_t get_push_pqs(handle_data_t &handle_data) noexcept {
+        if (handle_data.push_count == 0) {
+            handle_data.push_index = fastrange64(handle_data.rng(), num_pqs_);
+            handle_data.push_count = stickiness_;
+        }
+
+        return handle_data.push_index;
+    }
+
+    void push_pq_used(bool no_fail, handle_data_t &handle_data) noexcept {
+        if (no_fail) {
+            --handle_data.push_count;
+        } else {
+            handle_data.push_count = stickiness_ - 1;
+        }
+    }
+
+    std::size_t get_fallback_push_pq(handle_data_t &handle_data) noexcept {
+        return handle_data.push_index = fastrange64(handle_data.rng(), num_pqs_);
+    }
 };
 
 }  // namespace multiqueue::selection_strategy

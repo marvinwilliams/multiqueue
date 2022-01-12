@@ -13,6 +13,7 @@
 #define GUARDED_PQ
 
 #include <atomic>
+#include <cassert>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -27,29 +28,111 @@ namespace multiqueue {
 
 namespace detail {
 
-template <typename T, bool ImplicitLock /* = false*/>
-struct LockImpl {
-    alignas(L1_CACHE_LINESIZE) std::atomic_bool lock = false;
+template <typename Key, bool ImplicitLock /* = false*/>
+struct Guard {
+    alignas(L1_CACHE_LINESIZE) std::atomic_bool lock;
+    alignas(L1_CACHE_LINESIZE) std::atomic<Key> top_key;
+
+    explicit Guard(Key const& key) noexcept : lock(false), top_key(key) {
+    }
+
+    Key load_top_key() const noexcept {
+        return top_key.load(std::memory_order_relaxed);
+    }
+
+    bool is_locked() const noexcept {
+        return lock.load(std::memory_order_relaxed);
+    }
+
+    bool try_lock() noexcept {
+        // Maybe do not to test?
+        return !is_locked() && !lock.exchange(true, std::memory_order_acquire);
+    }
+
+    void unlock(Key const& current_top) noexcept {
+        assert(is_locked());
+        if (load_top_key() != current_top) {
+            top_key.store(current_top, std::memory_order_release);
+        }
+        lock.store(false, std::memory_order_release);
+    }
+
+    bool try_lock_if_key(Key& key) noexcept {
+        if (!try_lock()) {
+            return false;
+        }
+
+        Key current_key = top_key.load(std::memory_order_relaxed);
+        // Use this to allow inaccuracies but higher success chance
+        /* if (current_key != Sentinel()()) { */
+        if (current_key == key) {
+            return true;
+        } else {
+            unlock();
+            key = current_key;
+            return false;
+        }
+    }
 };
 
-template <typename T>
-struct LockImpl<T, /*ImplicitLock = */ true> {
-    static_assert(std::is_integral_v<T> && std::is_unsigned_v<T>,
+template <typename Key>
+struct Guard<Key, /*ImplicitLock = */ true> {
+    static_assert(std::is_integral_v<Key> && std::is_unsigned_v<Key>,
                   "Implicit locking is only available with unsigend integrals");
 
-    // LockMask is a 1 in the highest bit position
-    static constexpr T LockMask = ~(~T(0) >> 1);
+    alignas(L1_CACHE_LINESIZE) std::atomic<Key> top_key;
 
-    static constexpr T to_locked(T key) noexcept {
+    explicit Guard(Key const& key) noexcept : top_key(key) {
+        assert(key == to_unlocked(key));
+    }
+
+    // LockMask is a 1 in the highest bit position
+    static constexpr Key LockMask = ~(~Key(0) >> 1);
+
+    static constexpr Key to_locked(Key key) noexcept {
         return key | LockMask;
     }
 
-    static constexpr T to_unlocked(T key) noexcept {
+    static constexpr Key to_unlocked(Key key) noexcept {
         return key & (~LockMask);
     }
 
-    static constexpr bool is_locked(T key) noexcept {
-        return key & LockMask;
+    Key load_top_key() const noexcept {
+        return to_unlocked(top_key.load(std::memory_order_relaxed));
+    }
+
+    bool is_locked() const noexcept {
+        return top_key.load(std::memory_order_relaxed) & LockMask;
+    }
+
+    bool try_lock() noexcept {
+        Key key = top_key.load(std::memory_order_relaxed);
+        // ABA problem is no issue here
+        return key == to_unlocked(key) &&
+            top_key.compare_exchange_strong(key, to_locked(key), std::memory_order_acquire, std::memory_order_relaxed);
+    }
+
+    bool try_lock_if_key(Key& key) noexcept {
+        assert(key == to_unlocked(key));
+        // ABA problem is no issue here
+        if (top_key.compare_exchange_strong(key, to_locked(key), std::memory_order_acquire,
+                                            std::memory_order_relaxed)) {
+            return true;
+        } else {
+            key = to_unlocked(key);
+            return false;
+        }
+    }
+
+    void unlock(Key current_top) noexcept {
+        assert(is_locked());
+        assert(current_top == to_unlocked(current_top));
+        top_key.store(current_top, std::memory_order_release);
+    }
+
+    std::pair<Key, bool> load_top_key_and_lock() const noexcept {
+        Key key = top_key.load(std::memory_order_relaxed);
+        return {to_unlocked(key), is_locked(key)};
     }
 };
 
@@ -69,138 +152,92 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
     using size_type = typename priority_queue_type::size_type;
 
    private:
-    struct Data : detail::LockImpl<key_type, ImplicitLock> {
-        alignas(L1_CACHE_LINESIZE) std::atomic<key_type> top_key;
-        alignas(L1_CACHE_LINESIZE) priority_queue_type pq;
-
-        explicit Data(key_compare const& comp) : top_key(Sentinel()()), pq(value_compare{comp}) {
-        }
-
-        template <typename Alloc>
-        explicit Data(key_compare const& comp, Alloc const& alloc)
-            : top_key(Sentinel()()), pq(value_compare{comp}, alloc) {
-        }
-    };
-
-    Data data_;
+    detail::Guard<key_type, ImplicitLock> guard_;
+    alignas(L1_CACHE_LINESIZE) priority_queue_type pq_;
 
    public:
-    explicit GuardedPQ(key_compare const& comp = key_compare()) : data_(comp) {
+    explicit GuardedPQ(key_compare const& comp = key_compare())
+        : guard_(get_sentinel()), pq_(typename PriorityQueue::value_compare{comp}) {
     }
 
-    template <typename Alloc>
-    explicit GuardedPQ(value_compare const& comp, Alloc const& alloc) : data_(comp, alloc) {
+    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<priority_queue_type, Alloc>>>
+    explicit GuardedPQ(value_compare const& comp, Alloc const& alloc) : guard_(get_sentinel()), pq_(comp, alloc) {
+    }
+
+    static constexpr key_type get_sentinel() noexcept {
+        if constexpr (ImplicitLock) {
+            return detail::Guard<key_type, ImplicitLock>::to_unlocked(Sentinel()());
+        } else {
+            return Sentinel()();
+        }
     }
 
     bool try_lock() noexcept {
-        if constexpr (ImplicitLock) {
-            key_type key = data_.top_key.load(std::memory_order_relaxed);
-            // ABA problem is no issue here
-            return !Data::is_locked(key) &&
-                data_.top_key.compare_exchange_strong(key, Data::to_locked(key), std::memory_order_acquire,
-                                                      std::memory_order_relaxed);
-        } else {
-            // Maybe do not to test?
-            return !(data_.lock.load(std::memory_order_relaxed) ||
-                     data_.lock.exchange(true, std::memory_order_acquire));
-        }
+        return guard_.try_lock();
     }
 
-    bool try_lock_assume_key(key_type const& key) noexcept {
-        if constexpr (ImplicitLock) {
-            assert(!Data::is_locked(key));
-            // ABA problem is no issue here
-            Key key_cpy = key;
-            return data_.top_key.compare_exchange_strong(key_cpy, Data::to_locked(key), std::memory_order_acquire,
-                                                         std::memory_order_relaxed);
-        } else {
-            if (data_.lock.load(std::memory_order_relaxed) || data_.lock.exchange(true, std::memory_order_acquire)) {
-                return false;
-            }
-            key_type current_key = data_.top_key.load(std::memory_order_relaxed);
-            // Use this to allow inaccuracies but higher success chance
-            /* if (current_key != Sentinel()()) { */
-            if (current_key != key) {
-                data_.lock.store(false, std::memory_order_release);
-                return false;
-            }
-            return true;
-        }
+    bool try_lock_if_key(key_type& key) noexcept {
+        return guard_.try_lock_if_key(key);
     }
 
     void unlock() noexcept {
-        assert(is_locked());
-        if constexpr (ImplicitLock) {
-            data_.top_key.store(unsafe_empty() ? Sentinel()() : ExtractKey()(unsafe_top()),
-                                std::memory_order_release);
-        } else {
-            data_.top_key.store(unsafe_empty() ? Sentinel()() : ExtractKey()(unsafe_top()),
-                                std::memory_order_relaxed);
-            data_.lock.store(false, std::memory_order_release);
-        }
+        guard_.unlock(pq_.empty() ? get_sentinel() : ExtractKey()(pq_.top()));
     }
 
     bool is_locked() const noexcept {
-        if constexpr (ImplicitLock) {
-            return Data::is_locked(data_.top_key.load(std::memory_order_acquire));
-        } else {
-            return data_.lock.load(std::memory_order_acquire);
-        }
+        return guard_.is_locked();
     }
 
     key_type top_key() const noexcept {
-        if constexpr (ImplicitLock) {
-            return Data::to_unlocked(data_.top_key.load(std::memory_order_relaxed));
-        } else {
-            return data_.top_key.load(std::memory_order_relaxed);
-        }
+        return guard_.load_top_key();
     }
 
     [[nodiscard]] bool empty() const noexcept {
-        return top_key() == Sentinel()();
-    }
-
-    [[nodiscard]] bool unsafe_empty() const noexcept {
-        return data_.pq.empty();
-    }
-
-    constexpr size_type unsafe_size() const noexcept {
-        return data_.pq.size();
-    }
-
-    constexpr const_reference unsafe_top() const {
-        assert(!unsafe_empty());
-        return data_.pq.top();
+        return top_key() == get_sentinel();
     }
 
     void pop() {
         assert(is_locked());
-        assert(!empty());
-        data_.pq.pop();
+        assert(!unsafe_empty());
+        pq_.pop();
     }
 
     void extract_top(reference retval) {
         assert(is_locked());
         assert(!empty());
-        data_.pq.extract_top(retval);
+        pq_.extract_top(retval);
     };
 
     void push(const_reference value) {
         assert(is_locked());
-        data_.pq.push(value);
+        pq_.push(value);
     }
 
     void push(value_type&& value) {
         assert(is_locked());
-        data_.pq.push(std::move(value));
+        pq_.push(std::move(value));
+    }
+
+    void clear() noexcept {
+        assert(is_locked());
+        pq_.clear();
+    }
+
+    [[nodiscard]] bool unsafe_empty() const noexcept {
+        return pq_.empty();
+    }
+
+    size_type unsafe_size() const noexcept {
+        return pq_.size();
+    }
+
+    const_reference unsafe_top() const {
+        assert(!unsafe_empty());
+        return pq_.top();
     }
 
     void unsafe_reserve(size_type cap) {
-        data_.pq.reserve(cap);
-    }
-
-    constexpr void unsafe_clear() noexcept {
-        data_.pq.clear();
+        pq_.reserve(cap);
     }
 
     static std::string description() {
@@ -214,7 +251,6 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
 }  // namespace multiqueue
 
 namespace std {
-
 template <typename Key, typename T, typename Compare, template <typename, typename> typename PriorityQueue,
           bool ImplicitLock, typename Alloc>
 struct uses_allocator<multiqueue::GuardedPQ<Key, T, Compare, PriorityQueue, ImplicitLock>, Alloc>

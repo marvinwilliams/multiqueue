@@ -22,6 +22,8 @@
 #include "multiqueue/external/xoroshiro256starstar.hpp"
 #include "multiqueue/guarded_pq.hpp"
 
+#include "multiqueue/external/fastrange.h"
+
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
@@ -46,8 +48,8 @@ struct MultiqueueParameters : Configs::Parameters... {
     std::size_t c = 4;
 };
 
-template <typename Key, typename T, typename ExtractKey, typename Compare, typename Sentinel, typename StrategyType,
-          bool ImplicitLock, typename PriorityQueue, typename Allocator>
+template <typename Key, typename T, typename ExtractKey, typename Compare, typename Sentinel,
+          typename SelectionStrategy, bool ImplicitLock, typename PriorityQueue, typename Allocator>
 class Multiqueue {
    private:
     using guarded_pq_type = GuardedPQ<Key, T, ExtractKey, Compare, Sentinel, ImplicitLock, PriorityQueue>;
@@ -60,19 +62,17 @@ class Multiqueue {
     using const_reference = typename guarded_pq_type::const_reference;
     using size_type = typename guarded_pq_type::size_type;
     using allocator_type = Allocator;
-    using param_type = MultiqueueParameters<StrategyType>;
+    using param_type = MultiqueueParameters<SelectionStrategy>;
 
    private:
-    using Strategy = typename StrategyType::template Strategy<Multiqueue>;
-    friend Strategy;
+    using Selector = typename SelectionStrategy::template Strategy<Multiqueue>;
 
    public:
     class alignas(2 * L1_CACHE_LINESIZE) Handle {
         friend Multiqueue;
-        using data_t = typename Strategy::handle_data_t;
+        using data_t = typename Selector::handle_data_t;
 
-        Multiqueue& mq_;
-        xoroshiro256starstar rng_;
+        Multiqueue &mq_;
         data_t data_;
 
        public:
@@ -81,42 +81,90 @@ class Multiqueue {
         Handle(Handle &&) = default;
 
        private:
-        explicit Handle(Multiqueue &mq, unsigned int id, std::uint64_t seed) noexcept : mq_{mq}, rng_{seed}, data_{id} {
+        explicit Handle(Multiqueue &mq, unsigned int id, std::uint64_t seed) noexcept : mq_{mq}, data_{seed, id} {
         }
 
        public:
         bool try_extract_top(reference retval) noexcept {
-            auto [first, second] = mq_.strategy_.get_delete_pqs(data_, rng_);
-            if (lock_smaller(first, second)) {
-              return 
+            {
+                auto const [first, second] = mq_.selector_.get_delete_pqs(data_);
+                auto const [pq, key] = mq_.select_delete_pq(mq_.pq_list.get() + first, mq_.pq_list.get() + second);
+                if (!pq) {
+                    // Both pqs are empty
+                    mq_.selector_.delete_pq_empty(data_);
+                    return false;
+                }
+                if (pq->try_lock_if_key(key)) {
+                    pq->extract_top(retval);
+                    pq->unlock();
+                    mq_.selector_.delete_pq_used(true, data_);
+                    return true;
+                }
             }
-            if (!pq) {
-                return false;
-            }
-            pq->extract_top(retval);
-            pq->unlock();
-            return true;
+            do {
+                auto const [first, second] = mq_.selector_.get_fallback_delete_pqs(data_);
+                auto const [pq, key] = mq_.select_delete_pq(mq_.pq_list.get() + first, mq_.pq_list.get() + second);
+                if (!pq) {
+                    // Both pqs are empty
+                    mq_.selector_.delete_pq_empty(data_);
+                    return false;
+                }
+                if (pq->try_lock_if_key(key)) {
+                    pq->extract_top(retval);
+                    pq->unlock();
+                    mq_.selector_.delete_pq_used(false, data_);
+                    return true;
+                }
+            } while (true);
         }
 
         void push(const_reference value) noexcept {
-            auto pq = mq_.strategy_.lock_push_pq(data_, rng_);
-            assert(pq);
-            pq->push(value);
-            pq->unlock();
+            {
+                auto const pq = mq_.pq_list.get() + mq_.selector_.get_push_pq(data_);
+                if (pq->try_lock()) {
+                    pq->push(value);
+                    pq->unlock();
+                    mq_.selector_.push_pq_used(true, data_);
+                    return;
+                }
+            }
+            do {
+                auto const pq = mq_.pq_list.get() + mq_.selector_.get_fallback_push_pq(data_);
+                if (pq->try_lock()) {
+                    pq->push(value);
+                    pq->unlock();
+                    mq_.selector_.push_pq_used(false);
+                    return;
+                }
+            } while (true);
         }
 
-        void push(value_type &&value) noexcept {
-            auto pq = mq_.strategy_.lock_push_pq(data_, rng_);
-            assert(pq);
-            pq->push(std::move(value));
-            pq->unlock();
+        void push(key_type &&value) noexcept {
+            {
+                auto const pq = mq_.pq_list.get() + mq_.selector_.get_push_pq(data_);
+                if (pq->try_lock()) {
+                    pq->push(std::move(value));
+                    pq->unlock();
+                    mq_.selector_.push_pq_used(true);
+                    return;
+                }
+            }
+            do {
+                auto const pq = mq_.pq_list.get() + mq_.selector_.get_fallback_push_pq(data_);
+                if (pq->try_lock()) {
+                    pq->push(std::move(value));
+                    pq->unlock();
+                    mq_.selector_.push_pq_used(false);
+                    return;
+                }
+            } while (true);
         }
 
         bool try_extract_from(size_type pos, value_type &retval) noexcept {
             assert(pos < mq_.num_pqs());
             auto &pq = mq_.pq_list_[pos];
             if (pq.try_lock()) {
-                if (!pq.empty()) {
+                if (!pq.unsafe_empty()) {
                     pq.extract_top(retval);
                     pq.unlock();
                     return true;
@@ -156,7 +204,7 @@ class Multiqueue {
     std::atomic_uint handle_index_ = 0;
 
     // strategy data in separate cache line, as it might be written to
-    [[no_unique_address]] alignas(2 * L1_CACHE_LINESIZE) Strategy strategy_;
+    [[no_unique_address]] alignas(2 * L1_CACHE_LINESIZE) Selector selector_;
 
     void abort_on_data_misalignment() {
         for (guarded_pq_type *s = pq_list_.get(); s != pq_list_.get() + num_pqs(); ++s) {
@@ -166,29 +214,18 @@ class Multiqueue {
         }
     }
 
-    /* enum class LockResult { First, Second, Failed, Empty }; */
-    /* LockResult lock_delete_pq(guarded_pq_type *first, guarded_pq_type *second) noexcept { */
-    /*     auto first_key = first->top_key(); */
-    /*     auto second_key = second->top_key(); */
-    /*     if (first_key == Sentinel()() && second_key == Sentinel()()) { */
-    /*         return LockResult::Empty; */
-    /*     } */
-    /*     if (second_key == Sentinel()() || comp_(first_key, second_key)) { */
-    /*         return first->try_lock_assume_key(first_key) ? LockResult::First : LockResult::Failed; */
-    /*     } else { */
-    /*         if (second_key == mq.get_sentinel()) { */
-    /*             break; */
-    /*         } */
-    /*         if (mq.pq_list_[handle_data.delete_index[1]].try_lock_assume_key(second_key)) { */
-    /*             --handle_data.delete_count[0]; */
-    /*             --handle_data.delete_count[1]; */
-    /*             return &mq.pq_list_[handle_data.delete_index[1]]; */
-    /*         } */
-    /*         handle_data.delete_index[1] = fastrange64(g(), mq.num_pqs()); */
-    /*         second_key = mq.pq_list_[handle_data.delete_index[1]].top_key(); */
-    /*         handle_data.delete_count[1] = stickiness; */
-    /*     } */
-    /* } */
+    std::pair<pq_type *, key_type> select_delete_pq(size_type first, size_type second) noexcept {
+        auto const first_key = (pq_list_.get() + first)->top_key();
+        auto const second_key = (pq_list_.get() + second)->top_key();
+        if (first_key == get_sentinel() && second_key == get_sentinel()) {
+            return {nullptr, get_sentinel()};
+        }
+        if (second_key == get_sentinel() || comp_(first_key, second_key)) {
+            return {(pq_list_.get() + first), first_key};
+        } else {
+            return {(pq_list_.get() + second), second_key};
+        }
+    }
 
    public:
     explicit Multiqueue(unsigned int num_threads, param_type const &param, key_compare const &comp = key_compare(),
@@ -197,7 +234,7 @@ class Multiqueue {
           num_pqs_{num_threads * param.c},
           comp_{comp},
           alloc_{alloc},
-          strategy_(*this, param) {
+          selector_(*this, param) {
         assert(num_threads > 0);
         assert(param.c > 0);
         guarded_pq_type *pq_list = pq_alloc_traits::allocate(alloc_, num_pqs_);
@@ -217,7 +254,7 @@ class Multiqueue {
         return Handle(*this, index, handle_seeds_[index]);
     }
 
-    constexpr key_type const &get_sentinel() noexcept {
+    static constexpr key_type get_sentinel() noexcept {
         return guarded_pq_type::get_sentinel();
     }
 
@@ -269,7 +306,7 @@ class Multiqueue {
         ss << "multiqueue\n\t";
         ss << "PQs: " << num_pqs() << "\n\t";
         ss << "Sentinel: " << Sentinel()() << "\n\t";
-        ss << "Selection strategy: " << strategy_.description() << "\n\t";
+        ss << "Selection strategy: " << selector_.description() << "\n\t";
         ss << guarded_pq_type::description();
         return ss.str();
     }
