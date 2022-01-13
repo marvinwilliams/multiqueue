@@ -67,19 +67,24 @@ struct Value<Key, void, Compare> {
 
 }  // namespace detail
 
-template <typename Key, typename T = void, typename Compare = std::less<>, typename Config = DefaultConfiguration,
-          typename Sentinel = DefaultSentinel<Key, Compare>, typename Allocator = std::allocator<Key>>
+template <typename Key, typename T = void, typename Compare = std::less<>>
 struct MultiqueueFactory {
-    using Value = detail::Value<Key, T, Compare>;
-    using InnerPQ = Heap<typename Value::type, typename Value::compare, Config::HeapDegree,
-                         typename Config::template HeapContainer<Value>>;
-    using PriorityQueue =
-        std::conditional_t<Config::UseBuffers,
-                           BufferedPQ<InnerPQ, Config::InsertionBufferSize, Config::DeletionBufferSize>, InnerPQ>;
-    using type = Multiqueue<Key, typename Value::type, typename Value::extract_key, Compare, Sentinel,
-                            typename Config::selection_strategy_t, Config::ImplicitLock, PriorityQueue, Allocator>;
-};
+    using value_type = typename detail::Value<Key, T, Compare>::type;
+    using value_compare = typename detail::Value<Key, T, Compare>::compare;
+    using extract_key = typename detail::Value<Key, T, Compare>::extract_key;
 
+    using default_priority_queue = Heap<value_type, value_compare>;
+
+    template <typename Config = DefaultConfiguration, typename Sentinel = DefaultSentinel<Key, Compare>,
+              typename PriorityQueue = std::conditional_t<
+                  Config::UseBuffers,
+                  BufferedPQ<Config::InsertionBufferSize, Config::DeletionBufferSize, default_priority_queue>,
+                  default_priority_queue>,
+              typename Allocator = std::allocator<Key>>
+    using multiqueue_type =
+        Multiqueue<Key, value_type, extract_key, Compare, Sentinel, typename Config::SelectionStrategy,
+                   Config::ImplicitLock, PriorityQueue, Allocator>;
+};
 }  // namespace multiqueue
 
 #endif  //! FACTORY_HPP_INCLUDED

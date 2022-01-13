@@ -74,9 +74,6 @@ class Sticky {
         }
     }
 
-    void delete_pq_empty(handle_data_t & /* handle_data */) noexcept {
-    }
-
     std::pair<std::size_t, std::size_t> get_fallback_delete_pqs(handle_data_t &handle_data) noexcept {
         return handle_data.delete_index = {fastrange64(handle_data.rng(), num_pqs_),
                                            fastrange64(handle_data.rng(), num_pqs_)};

@@ -160,7 +160,7 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
         : guard_(get_sentinel()), pq_(typename PriorityQueue::value_compare{comp}) {
     }
 
-    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<priority_queue_type, Alloc>>>
+    template <typename Alloc>
     explicit GuardedPQ(value_compare const& comp, Alloc const& alloc) : guard_(get_sentinel()), pq_(comp, alloc) {
     }
 

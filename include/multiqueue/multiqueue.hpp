@@ -91,7 +91,6 @@ class Multiqueue {
                 auto const [pq, key] = mq_.select_delete_pq(mq_.pq_list.get() + first, mq_.pq_list.get() + second);
                 if (!pq) {
                     // Both pqs are empty
-                    mq_.selector_.delete_pq_empty(data_);
                     return false;
                 }
                 if (pq->try_lock_if_key(key)) {
@@ -106,7 +105,6 @@ class Multiqueue {
                 auto const [pq, key] = mq_.select_delete_pq(mq_.pq_list.get() + first, mq_.pq_list.get() + second);
                 if (!pq) {
                     // Both pqs are empty
-                    mq_.selector_.delete_pq_empty(data_);
                     return false;
                 }
                 if (pq->try_lock_if_key(key)) {

@@ -32,7 +32,7 @@ namespace multiqueue {
 #endif
 
 struct DefaultConfiguration {
-    using selection_strategy_t = selection_strategy::sticky;
+    using SelectionStrategy = selection_strategy::Sticky;
     // Use buffers for the sequential pqs
     static constexpr bool UseBuffers = true;
     // Buffer sizes
@@ -44,9 +44,6 @@ struct DefaultConfiguration {
     static constexpr bool ImplicitLock = false;
     // Degree of the heap
     static constexpr unsigned int HeapDegree = MULTIQUEUE_DEFAULT_HEAP_DEGREE;
-
-    template <typename T, typename Compare>
-    using PriorityQueue = Heap<T, Compare>;
 };
 
 }  // namespace multiqueue

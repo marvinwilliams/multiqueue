@@ -18,6 +18,7 @@
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <numeric>
 #include <sstream>
 #include <string>
@@ -35,8 +36,6 @@ class Permuting {
     struct handle_data_t {
         xoroshiro256starstar rng;
         unsigned int id;
-        unsigned int count = 0;
-        std::uint64_t current_perm = to_perm(1, 0);
 
         handle_data_t(std::uint64_t seed, unsigned int id) : rng{seed}, id{id} {
         }
@@ -52,12 +51,19 @@ class Permuting {
 
     std::size_t num_pqs_;
     unsigned int stickiness;
+    unsigned int count;
     Permutation perm;
+    std::vector<std::uint64_t> coprimes;
 
    public:
     Permuting(std::size_t num_pqs, Parameters const &params)
-        : num_pqs_{num_pqs}, stickiness{params.stickiness}, perm{to_perm(1, 0)} {
+        : num_pqs_{num_pqs}, stickiness{params.stickiness}, count{stickiness}, perm{to_perm(1, 0)} {
         assert(stickiness > 0);
+        for (std::size_t i = 1; i < num_pqs; ++i) {
+            if (std::gcd(i, num_pqs_) == 1) {
+                coprimes.push_back(static_cast<std::uint64_t>(i));
+            }
+        }
     }
 
     std::string description() const {
@@ -75,123 +81,54 @@ class Permuting {
         return (a << 32 | (Permutation::mask & b));
     }
 
-    std::uint64_t update_permutation(std::uint64_t current, handle_data_t &handle_data) {
-        std::uint64_t a = fastrange64(handle_data.rng(), num_pqs_ - 1) + 1;
-        while (std::gcd(a, num_pqs_) != 1) {
-            a = fastrange64(handle_data.rng(), num_pqs_ - 1) + 1;
-        }
+    std::uint64_t update_permutation(handle_data_t &handle_data) {
+        std::uint64_t a = coprimes[handle_data.rng(), coprimes.size()];
         std::uint64_t b = fastrange64(handle_data.rng(), num_pqs_);
-        auto p = to_perm(a, b);
-        return perm.n.compare_exchange_strong(current, p, std::memory_order_relaxed) ? p : current;
+        std::uint64_t p = to_perm(a, b);
+        perm.n.store(p, std::memory_order_relaxed);
+        return p;
     }
 
     std::pair<std::size_t, std::size_t> get_delete_pqs(handle_data_t &handle_data) {
-        if (handle_data.delete_count == 0) {
-            handle_data.delete_index = {fastrange64(handle_data.rng(), num_pqs_),
-                                        fastrange64(handle_data.rng(), num_pqs_)};
-            handle_data.delete_count = stickiness_;
+        if (handle_data.id == 0 && count == 0) {
+            std::uint64_t p = update_permutation(handle_data);
+            count = stickiness;
+            return {get_perm(p, 3 * handle_data.id + 1, num_pqs_), get_perm(p, 3 * handle_data.id + 2, num_pqs_)};
         }
-
-        return handle_data.delete_index;
+        std::uint64_t p = perm.n.load(std::memory_order_relaxed);
+        return {get_perm(p, 3 * handle_data.id + 1, num_pqs_), get_perm(p, 3 * handle_data.id + 2, num_pqs_)};
     }
 
-    void delete_pq_used(bool no_fail, handle_data_t &handle_data) noexcept {
-        if (no_fail) {
-            --handle_data.delete_count;
-        } else {
-            handle_data.delete_count = stickiness_ - 1;
+    void delete_pq_used(bool /* no_fail */, handle_data_t &handle_data) noexcept {
+        if (handle_data.id == 0) {
+            --count;
         }
     }
 
     std::pair<std::size_t, std::size_t> get_fallback_delete_pqs(handle_data_t &handle_data) noexcept {
-        return handle_data.delete_index = {fastrange64(handle_data.rng(), num_pqs_),
-                                           fastrange64(handle_data.rng(), num_pqs_)};
+        return {fastrange64(handle_data.rng(), num_pqs_), fastrange64(handle_data.rng(), num_pqs_)};
     }
 
     std::size_t get_push_pqs(handle_data_t &handle_data) noexcept {
-        if (handle_data.push_count == 0) {
-            handle_data.push_index = fastrange64(handle_data.rng(), num_pqs_);
-            handle_data.push_count = stickiness_;
+        std::uint64_t p;
+        if (handle_data.id == 0 && count == 0) {
+            p = update_permutation(handle_data);
+            count = stickiness;
+        } else {
+            p = perm.n.load(std::memory_order_relaxed);
         }
-
-        return handle_data.push_index;
+        return get_perm(p, 3 * handle_data.id, num_pqs_);
     }
 
     void push_pq_used(bool no_fail, handle_data_t &handle_data) noexcept {
-        if (no_fail) {
-            --handle_data.push_count;
-        } else {
-            handle_data.push_count = stickiness_ - 1;
+        if (handle_data.id == 0) {
+            --count;
         }
     }
 
     std::size_t get_fallback_push_pq(handle_data_t &handle_data) noexcept {
-        return handle_data.push_index = fastrange64(handle_data.rng(), num_pqs_);
+        return fastrange64(handle_data.rng(), num_pqs_);
     }
-
-
-
-    template <typename Generator>
-    pq_type *lock_push_pq(handle_data_t &handle_data, Generator &g) {
-        auto p = perm.n.load(std::memory_order_relaxed);
-        if (handle_data.current_perm != p) {
-            handle_data.current_perm = p;
-            handle_data.count = 0;
-        } else if (handle_data.count == stickiness) {
-            handle_data.current_perm = update_permutation(p, g);
-            handle_data.count = 0;
-        }
-        auto index = get_perm(handle_data.current_perm, handle_data.id * 3, mq.num_pqs());
-        if (!mq.pq_list_[index].try_lock()) {
-            do {
-                index = fastrange64(g(), mq.num_pqs());
-            } while (!mq.pq_list_[index].try_lock());
-        }
-        ++handle_data.count;
-        return &mq.pq_list_[index];
-    }
-
-    template <typename Generator>
-    pq_type *lock_delete_pq(handle_data_t &handle_data, Generator &g) {
-        auto p = perm.n.load(std::memory_order_relaxed);
-        if (handle_data.current_perm != p) {
-            handle_data.current_perm = p;
-            handle_data.count = 0;
-        } else if (handle_data.count == stickiness) {
-            handle_data.current_perm = update_permutation(p, g);
-            handle_data.count = 0;
-        }
-        auto first_index = get_perm(handle_data.current_perm, 3 * handle_data.id + 1, mq.num_pqs());
-        auto second_index = get_perm(handle_data.current_perm, 3 * handle_data.id + 2, mq.num_pqs());
-        auto first_key = mq.pq_list_[first_index].top_key();
-        auto second_key = mq.pq_list_[second_index].top_key();
-        do {
-            if (mq.comp_(first_key, second_key)) {
-                if (first_key == mq.get_sentinel()) {
-                    break;
-                }
-                if (mq.pq_list_[first_index].try_lock_assume_key(first_key)) {
-                    ++handle_data.count;
-                    return &mq.pq_list_[first_index];
-                }
-            } else {
-                if (second_key == mq.get_sentinel()) {
-                    break;
-                }
-                if (mq.pq_list_[second_index].try_lock_assume_key(second_key)) {
-                    ++handle_data.count;
-                    return &mq.pq_list_[second_index];
-                }
-            }
-            first_index = fastrange64(g(), mq.num_pqs());
-            second_index = fastrange64(g(), mq.num_pqs());
-            first_key = mq.pq_list_[first_index].top_key();
-            second_key = mq.pq_list_[second_index].top_key();
-        } while (true);
-        handle_data.count = stickiness;
-        return nullptr;
-    }
-};
 };
 
 }  // namespace multiqueue::selection_strategy

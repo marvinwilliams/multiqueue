@@ -25,7 +25,7 @@
 
 namespace multiqueue {
 
-template <typename PriorityQueue, std::size_t InsertionBufferSize, std::size_t DeletionBufferSize>
+template <std::size_t InsertionBufferSize, std::size_t DeletionBufferSize, typename PriorityQueue>
 class BufferedPQ {
    private:
     using pq_type = PriorityQueue;
@@ -69,7 +69,7 @@ class BufferedPQ {
     explicit BufferedPQ(value_compare const& comp = value_compare()) : pq_(comp) {
     }
 
-    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<pq_type, Alloc>>>
+    template <typename Alloc>
     explicit BufferedPQ(value_compare const& comp, Alloc const& alloc) : pq_(comp, alloc) {
     }
 
