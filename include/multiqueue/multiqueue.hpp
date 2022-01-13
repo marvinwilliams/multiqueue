@@ -64,13 +64,10 @@ class Multiqueue {
     using allocator_type = Allocator;
     using param_type = MultiqueueParameters<SelectionStrategy>;
 
-   private:
-    using Selector = typename SelectionStrategy::template Strategy<Multiqueue>;
-
    public:
     class alignas(2 * L1_CACHE_LINESIZE) Handle {
         friend Multiqueue;
-        using data_t = typename Selector::handle_data_t;
+        using data_t = typename SelectionStrategy::handle_data_t;
 
         Multiqueue &mq_;
         data_t data_;
@@ -88,9 +85,10 @@ class Multiqueue {
         bool try_extract_top(reference retval) noexcept {
             {
                 auto const [first, second] = mq_.selector_.get_delete_pqs(data_);
-                auto const [pq, key] = mq_.select_delete_pq(mq_.pq_list.get() + first, mq_.pq_list.get() + second);
+                auto const [pq, key] = mq_.select_delete_pq(mq_.pq_list_.get() + first, mq_.pq_list_.get() + second);
                 if (!pq) {
                     // Both pqs are empty
+                    mq_.selector_.delete_pq_used(true, data_);
                     return false;
                 }
                 if (pq->try_lock_if_key(key)) {
@@ -102,9 +100,10 @@ class Multiqueue {
             }
             do {
                 auto const [first, second] = mq_.selector_.get_fallback_delete_pqs(data_);
-                auto const [pq, key] = mq_.select_delete_pq(mq_.pq_list.get() + first, mq_.pq_list.get() + second);
+                auto const [pq, key] = mq_.select_delete_pq(mq_.pq_list_.get() + first, mq_.pq_list_.get() + second);
                 if (!pq) {
                     // Both pqs are empty
+                    mq_.selector_.delete_pq_used(false, data_);
                     return false;
                 }
                 if (pq->try_lock_if_key(key)) {
@@ -118,7 +117,7 @@ class Multiqueue {
 
         void push(const_reference value) noexcept {
             {
-                auto const pq = mq_.pq_list.get() + mq_.selector_.get_push_pq(data_);
+                auto const pq = mq_.pq_list_.get() + mq_.selector_.get_push_pq(data_);
                 if (pq->try_lock()) {
                     pq->push(value);
                     pq->unlock();
@@ -127,11 +126,11 @@ class Multiqueue {
                 }
             }
             do {
-                auto const pq = mq_.pq_list.get() + mq_.selector_.get_fallback_push_pq(data_);
+                auto const pq = mq_.pq_list_.get() + mq_.selector_.get_fallback_push_pq(data_);
                 if (pq->try_lock()) {
                     pq->push(value);
                     pq->unlock();
-                    mq_.selector_.push_pq_used(false);
+                    mq_.selector_.push_pq_used(false, data_);
                     return;
                 }
             } while (true);
@@ -139,20 +138,20 @@ class Multiqueue {
 
         void push(key_type &&value) noexcept {
             {
-                auto const pq = mq_.pq_list.get() + mq_.selector_.get_push_pq(data_);
+                auto const pq = mq_.pq_list_.get() + mq_.selector_.get_push_pq(data_);
                 if (pq->try_lock()) {
                     pq->push(std::move(value));
                     pq->unlock();
-                    mq_.selector_.push_pq_used(true);
+                    mq_.selector_.push_pq_used(true, data_);
                     return;
                 }
             }
             do {
-                auto const pq = mq_.pq_list.get() + mq_.selector_.get_fallback_push_pq(data_);
+                auto const pq = mq_.pq_list_.get() + mq_.selector_.get_fallback_push_pq(data_);
                 if (pq->try_lock()) {
                     pq->push(std::move(value));
                     pq->unlock();
-                    mq_.selector_.push_pq_used(false);
+                    mq_.selector_.push_pq_used(false, data_);
                     return;
                 }
             } while (true);
@@ -178,9 +177,9 @@ class Multiqueue {
     using pq_alloc_traits = typename std::allocator_traits<pq_alloc_type>;
 
     struct PQDeleter {
-        Multiqueue const &mq;
+        Multiqueue &mq;
 
-        PQDeleter(Multiqueue const &mq_ref) : mq{mq_ref} {
+        PQDeleter(Multiqueue &mq_ref) : mq{mq_ref} {
         }
 
         void operator()(guarded_pq_type *pq_list) noexcept {
@@ -202,7 +201,7 @@ class Multiqueue {
     std::atomic_uint handle_index_ = 0;
 
     // strategy data in separate cache line, as it might be written to
-    [[no_unique_address]] alignas(2 * L1_CACHE_LINESIZE) Selector selector_;
+    [[no_unique_address]] alignas(2 * L1_CACHE_LINESIZE) SelectionStrategy selector_;
 
     void abort_on_data_misalignment() {
         for (guarded_pq_type *s = pq_list_.get(); s != pq_list_.get() + num_pqs(); ++s) {
@@ -212,39 +211,39 @@ class Multiqueue {
         }
     }
 
-    std::pair<pq_type *, key_type> select_delete_pq(size_type first, size_type second) noexcept {
-        auto const first_key = (pq_list_.get() + first)->top_key();
-        auto const second_key = (pq_list_.get() + second)->top_key();
+    std::pair<guarded_pq_type *, key_type> select_delete_pq(guarded_pq_type *first, guarded_pq_type *second) noexcept {
+        auto const first_key = first->top_key();
+        auto const second_key = second->top_key();
         if (first_key == get_sentinel() && second_key == get_sentinel()) {
             return {nullptr, get_sentinel()};
         }
         if (second_key == get_sentinel() || comp_(first_key, second_key)) {
-            return {(pq_list_.get() + first), first_key};
+            return {first, first_key};
         } else {
-            return {(pq_list_.get() + second), second_key};
+            return {second, second_key};
         }
     }
 
    public:
-    explicit Multiqueue(unsigned int num_threads, param_type const &param, key_compare const &comp = key_compare(),
+    explicit Multiqueue(unsigned int num_threads, param_type const &params, key_compare const &comp = key_compare(),
                         allocator_type const &alloc = allocator_type())
-        : pq_list_(nullptr, PQDeleter(this)),
-          num_pqs_{num_threads * param.c},
+        : pq_list_(nullptr, PQDeleter(*this)),
+          num_pqs_{num_threads * params.c},
           comp_{comp},
           alloc_{alloc},
-          selector_(*this, param) {
+          selector_(num_pqs_, params) {
         assert(num_threads > 0);
-        assert(param.c > 0);
+        assert(params.c > 0);
         guarded_pq_type *pq_list = pq_alloc_traits::allocate(alloc_, num_pqs_);
         for (guarded_pq_type *s = pq_list; s != pq_list + num_pqs_; ++s) {
-            pq_alloc_traits::construct(alloc_, comp_);
+            pq_alloc_traits::construct(alloc_, s, comp_);
         }
         pq_list_.reset(pq_list);  // Empty unique_ptr does not call deleter
 #ifdef MQ_ABORT_MISALIGNMENT
         abort_on_data_misalignment();
 #endif
         handle_seeds_ = std::make_unique<std::uint64_t[]>(num_threads);
-        std::generate(handle_seeds_.get(), handle_seeds_.get() + num_threads, xoroshiro256starstar{param.seed});
+        std::generate(handle_seeds_.get(), handle_seeds_.get() + num_threads, xoroshiro256starstar{params.seed});
     }
 
     Handle get_handle() noexcept {

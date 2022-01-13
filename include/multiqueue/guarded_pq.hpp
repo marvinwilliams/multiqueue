@@ -57,19 +57,17 @@ struct Guard {
         lock.store(false, std::memory_order_release);
     }
 
-    bool try_lock_if_key(Key& key) noexcept {
+    bool try_lock_if_key(Key const& key) noexcept {
         if (!try_lock()) {
             return false;
         }
 
         Key current_key = top_key.load(std::memory_order_relaxed);
-        // Use this to allow inaccuracies but higher success chance
-        /* if (current_key != Sentinel()()) { */
+        // One could just check for the key not to be the sentinel to allow inaccuracies
         if (current_key == key) {
             return true;
         } else {
-            unlock();
-            key = current_key;
+            lock.store(false, std::memory_order_release);
             return false;
         }
     }
@@ -112,7 +110,7 @@ struct Guard<Key, /*ImplicitLock = */ true> {
             top_key.compare_exchange_strong(key, to_locked(key), std::memory_order_acquire, std::memory_order_relaxed);
     }
 
-    bool try_lock_if_key(Key& key) noexcept {
+    bool try_lock_if_key(Key key) noexcept {
         assert(key == to_unlocked(key));
         // ABA problem is no issue here
         if (top_key.compare_exchange_strong(key, to_locked(key), std::memory_order_acquire,
@@ -176,7 +174,7 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
         return guard_.try_lock();
     }
 
-    bool try_lock_if_key(key_type& key) noexcept {
+    bool try_lock_if_key(key_type const& key) noexcept {
         return guard_.try_lock_if_key(key);
     }
 
@@ -251,10 +249,11 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
 }  // namespace multiqueue
 
 namespace std {
-template <typename Key, typename T, typename Compare, template <typename, typename> typename PriorityQueue,
-          bool ImplicitLock, typename Alloc>
-struct uses_allocator<multiqueue::GuardedPQ<Key, T, Compare, PriorityQueue, ImplicitLock>, Alloc>
-    : uses_allocator<typename multiqueue::GuardedPQ<Key, T, Compare, PriorityQueue, ImplicitLock>::priority_queue_type,
+template <typename Key, typename T, typename ExtractKey, typename Compare, typename Sentinel, bool ImplicitLock,
+          typename PriorityQueue, typename Alloc>
+struct uses_allocator<multiqueue::GuardedPQ<Key, T, ExtractKey, Compare, Sentinel, ImplicitLock, PriorityQueue>, Alloc>
+    : uses_allocator<typename multiqueue::GuardedPQ<Key, T, ExtractKey, Compare, Sentinel, ImplicitLock,
+                                                    PriorityQueue>::priority_queue_type,
                      Alloc>::type {};
 
 }  // namespace std

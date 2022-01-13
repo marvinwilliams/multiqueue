@@ -190,8 +190,8 @@ class BufferedPQ {
 
 namespace std {
 
-template <typename PriorityQueue, std::size_t InsertionBufferSize, std::size_t DeletionBufferSize, typename Alloc>
-struct uses_allocator<multiqueue::BufferedPQ<PriorityQueue, InsertionBufferSize, DeletionBufferSize>, Alloc>
+template <std::size_t InsertionBufferSize, std::size_t DeletionBufferSize, typename PriorityQueue, typename Alloc>
+struct uses_allocator<multiqueue::BufferedPQ<InsertionBufferSize, DeletionBufferSize, PriorityQueue>, Alloc>
     : uses_allocator<PriorityQueue, Alloc>::type {};
 
 }  // namespace std

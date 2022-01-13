@@ -46,7 +46,7 @@ class Sticky {
 
    public:
     Sticky(std::size_t num_pqs, Parameters const &params) noexcept : num_pqs_{num_pqs}, stickiness_{params.stickiness} {
-        assert(stickiness > 0);
+        assert(stickiness_ > 0);
     }
 
     std::string description() const {
@@ -79,7 +79,7 @@ class Sticky {
                                            fastrange64(handle_data.rng(), num_pqs_)};
     }
 
-    std::size_t get_push_pqs(handle_data_t &handle_data) noexcept {
+    std::size_t get_push_pq(handle_data_t &handle_data) noexcept {
         if (handle_data.push_count == 0) {
             handle_data.push_index = fastrange64(handle_data.rng(), num_pqs_);
             handle_data.push_count = stickiness_;

@@ -109,7 +109,7 @@ class Permuting {
         return {fastrange64(handle_data.rng(), num_pqs_), fastrange64(handle_data.rng(), num_pqs_)};
     }
 
-    std::size_t get_push_pqs(handle_data_t &handle_data) noexcept {
+    std::size_t get_push_pq(handle_data_t &handle_data) noexcept {
         std::uint64_t p;
         if (handle_data.id == 0 && count == 0) {
             p = update_permutation(handle_data);
