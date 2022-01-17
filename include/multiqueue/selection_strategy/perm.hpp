@@ -25,6 +25,9 @@
 #include <utility>
 #include <vector>
 
+
+#include <iostream>
+
 namespace multiqueue::selection_strategy {
 
 class Permuting {
@@ -49,21 +52,23 @@ class Permuting {
         std::atomic_uint64_t n;
     };
 
-    std::size_t num_pqs_;
+    std::size_t log_num_pqs_;
     unsigned int stickiness;
     unsigned int count;
     Permutation perm;
-    std::vector<std::uint64_t> coprimes;
 
    public:
     Permuting(std::size_t num_pqs, Parameters const &params)
-        : num_pqs_{num_pqs}, stickiness{params.stickiness}, count{stickiness}, perm{to_perm(1, 0)} {
+        : stickiness{params.stickiness}, count{stickiness}, perm{to_perm(1, 0)} {
         assert(stickiness > 0);
-        for (std::size_t i = 1; i < num_pqs; ++i) {
-            if (std::gcd(i, num_pqs_) == 1) {
-                coprimes.push_back(static_cast<std::uint64_t>(i));
-            }
+        std::cout << "Num pqs: " << num_pqs;
+        log_num_pqs_ = 0;
+        num_pqs >>= 1;
+        while (num_pqs != 0) {
+            num_pqs >>= 1;
+            ++log_num_pqs_;
         }
+        std::cout << " Log: " << log_num_pqs_ << '\n';
     }
 
     std::string description() const {
@@ -73,8 +78,8 @@ class Permuting {
         return ss.str();
     }
 
-    static constexpr std::size_t get_perm(std::uint64_t p, std::size_t i, std::size_t num) noexcept {
-        return (i * (p >> 32) + (Permutation::mask & p)) % num;
+    static constexpr std::size_t get_perm(std::uint64_t p, std::size_t i, std::size_t log) noexcept {
+        return (i * (p >> 32) + (Permutation::mask & p)) & ((1 << log) - 1);
     }
 
     static constexpr std::uint64_t to_perm(std::uint64_t a, std::uint64_t b) noexcept {
@@ -82,8 +87,8 @@ class Permuting {
     }
 
     std::uint64_t update_permutation(handle_data_t &handle_data) {
-        std::uint64_t a = coprimes[handle_data.rng(), coprimes.size()];
-        std::uint64_t b = fastrange64(handle_data.rng(), num_pqs_);
+        std::uint64_t a = 2 * handle_data.rng() + 1;
+        std::uint64_t b = handle_data.rng();
         std::uint64_t p = to_perm(a, b);
         perm.n.store(p, std::memory_order_relaxed);
         return p;
@@ -93,10 +98,11 @@ class Permuting {
         if (handle_data.id == 0 && count == 0) {
             std::uint64_t p = update_permutation(handle_data);
             count = stickiness;
-            return {get_perm(p, 3 * handle_data.id + 1, num_pqs_), get_perm(p, 3 * handle_data.id + 2, num_pqs_)};
+            return {get_perm(p, 3 * handle_data.id + 1, log_num_pqs_),
+                    get_perm(p, 3 * handle_data.id + 2, log_num_pqs_)};
         }
         std::uint64_t p = perm.n.load(std::memory_order_relaxed);
-        return {get_perm(p, 3 * handle_data.id + 1, num_pqs_), get_perm(p, 3 * handle_data.id + 2, num_pqs_)};
+        return {get_perm(p, 3 * handle_data.id + 1, log_num_pqs_), get_perm(p, 3 * handle_data.id + 2, log_num_pqs_)};
     }
 
     void delete_pq_used(bool /* no_fail */, handle_data_t &handle_data) noexcept {
@@ -106,7 +112,7 @@ class Permuting {
     }
 
     std::pair<std::size_t, std::size_t> get_fallback_delete_pqs(handle_data_t &handle_data) noexcept {
-        return {fastrange64(handle_data.rng(), num_pqs_), fastrange64(handle_data.rng(), num_pqs_)};
+        return {fastrange64(handle_data.rng(), 1 << log_num_pqs_), fastrange64(handle_data.rng(), 1 << log_num_pqs_)};
     }
 
     std::size_t get_push_pq(handle_data_t &handle_data) noexcept {
@@ -117,7 +123,7 @@ class Permuting {
         } else {
             p = perm.n.load(std::memory_order_relaxed);
         }
-        return get_perm(p, 3 * handle_data.id, num_pqs_);
+        return get_perm(p, 3 * handle_data.id, log_num_pqs_);
     }
 
     void push_pq_used(bool no_fail, handle_data_t &handle_data) noexcept {
@@ -127,7 +133,7 @@ class Permuting {
     }
 
     std::size_t get_fallback_push_pq(handle_data_t &handle_data) noexcept {
-        return fastrange64(handle_data.rng(), num_pqs_);
+        return fastrange64(handle_data.rng(), 1 << log_num_pqs_);
     }
 };
 
