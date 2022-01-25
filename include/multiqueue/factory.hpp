@@ -12,9 +12,10 @@
 #ifndef FACTORY_HPP_INCLUDED
 #define FACTORY_HPP_INCLUDED
 
+#include "multiqueue/multiqueue.hpp"
+
 #include "multiqueue/buffered_pq.hpp"
 #include "multiqueue/default_configuration.hpp"
-#include "multiqueue/multiqueue.hpp"
 
 #include <functional>
 #include <memory>

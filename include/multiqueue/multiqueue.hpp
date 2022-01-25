@@ -34,7 +34,7 @@
 #include <string>
 #include <type_traits>
 
-#ifdef MQ_ELEMENT_DISTRIBUTION
+#ifdef MULTIQUEUE_ELEMENT_DISTRIBUTION
 #include <algorithm>
 #include <utility>
 #include <vector>
@@ -239,7 +239,7 @@ class Multiqueue {
             pq_alloc_traits::construct(alloc_, s, comp_);
         }
         pq_list_.reset(pq_list);  // Empty unique_ptr does not call deleter
-#ifdef MQ_ABORT_MISALIGNMENT
+#ifdef MULTIQUEUE_ABORT_MISALIGNMENT
         abort_on_data_misalignment();
 #endif
         handle_seeds_ = std::make_unique<std::uint64_t[]>(num_threads);
@@ -262,7 +262,7 @@ class Multiqueue {
         };
     }
 
-#ifdef MQ_ELEMENT_DISTRIBUTION
+#ifdef MULTIQUEUE_ELEMENT_DISTRIBUTION
     std::vector<std::size_t> get_distribution() const {
         std::vector<std::size_t> distribution(num_pqs());
         std::transform(pq_list_.get(), pq_list_.get() + num_pqs(), distribution.begin(),

@@ -36,7 +36,7 @@ class Swapping {
         unsigned int push_count = 0;
         unsigned int delete_count = 0;
 
-        handle_data_t(std::uint64_t seed, unsigned int id) : rng{seed}, id{id} {
+        handle_data_t(std::uint64_t seed, unsigned int index) : rng{seed}, id{index} {
         }
     };
 

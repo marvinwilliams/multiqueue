@@ -8,7 +8,7 @@
 #include <queue>
 #include <random>
 
-static constexpr int reps = 100'000;
+static constexpr int reps = 1'000'000;
 
 TEST_CASE("std::priority_queue", "[benchmark][std]") {
     auto pq = std::priority_queue<int, std::vector<int>, std::greater<int>>{};
@@ -68,7 +68,7 @@ TEST_CASE("std::priority_queue", "[benchmark][std]") {
 }
 
 TEMPLATE_TEST_CASE_SIG("Degree", "[benchmark][heap][degree]", ((unsigned int Degree), Degree), 2, 4, 8, 16, 64) {
-    using heap_t = multiqueue::Heap<int, void, std::less<int>, Degree, std::allocator<int>>;
+    using heap_t = multiqueue::Heap<int, std::less<>, Degree>;
 
     auto heap = heap_t{};
 
@@ -110,18 +110,18 @@ TEMPLATE_TEST_CASE_SIG("Degree", "[benchmark][heap][degree]", ((unsigned int Deg
 
     BENCHMARK("mixed") {
         for (int i = 1; i <= reps / 4; ++i) {
-            pq.push(i * 3);
-            pq.push(i);
-            pq.push(i * 4);
-            pq.push(i * 2);
-            pq.pop();
-            pq.pop();
-            pq.pop();
+            heap.push(i * 3);
+            heap.push(i);
+            heap.push(i * 4);
+            heap.push(i * 2);
+            heap.pop();
+            heap.pop();
+            heap.pop();
         }
         for (int i = 1; i <= reps / 4; ++i) {
-            pq.pop();
+            heap.pop();
         }
         // to guarantee computation
-        return pq.empty();
+        return heap.empty();
     };
 }

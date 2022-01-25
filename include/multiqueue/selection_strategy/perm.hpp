@@ -40,7 +40,7 @@ class Permuting {
         xoroshiro256starstar rng;
         unsigned int id;
 
-        handle_data_t(std::uint64_t seed, unsigned int id) : rng{seed}, id{id} {
+        handle_data_t(std::uint64_t seed, unsigned int index) : rng{seed}, id{index} {
         }
     };
 
@@ -79,7 +79,7 @@ class Permuting {
     }
 
     static constexpr std::size_t get_perm(std::uint64_t p, std::size_t i, std::size_t log) noexcept {
-        return (i * (p >> 32) + (Permutation::mask & p)) & ((1 << log) - 1);
+        return (i * (p >> 32) + (Permutation::mask & p)) & ((static_cast<std::size_t>(1) << log) - 1);
     }
 
     static constexpr std::uint64_t to_perm(std::uint64_t a, std::uint64_t b) noexcept {
@@ -126,7 +126,7 @@ class Permuting {
         return get_perm(p, 3 * handle_data.id, log_num_pqs_);
     }
 
-    void push_pq_used(bool no_fail, handle_data_t &handle_data) noexcept {
+    void push_pq_used(bool /* no_fail */, handle_data_t &handle_data) noexcept {
         if (handle_data.id == 0) {
             --count;
         }
