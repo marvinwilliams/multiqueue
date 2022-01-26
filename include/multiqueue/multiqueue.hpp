@@ -235,8 +235,8 @@ class Multiqueue {
         assert(num_threads > 0);
         assert(params.c > 0);
         guarded_pq_type *pq_list = pq_alloc_traits::allocate(alloc_, num_pqs_);
-        for (guarded_pq_type *s = pq_list; s != pq_list + num_pqs_; ++s) {
-            pq_alloc_traits::construct(alloc_, s, comp_);
+        for (guarded_pq_type *pq = pq_list; pq != pq_list + num_pqs_; ++pq) {
+            pq_alloc_traits::construct(alloc_, pq, comp_);
         }
         pq_list_.reset(pq_list);  // Empty unique_ptr does not call deleter
 #ifdef MULTIQUEUE_ABORT_MISALIGNMENT
@@ -257,8 +257,8 @@ class Multiqueue {
 
     void reserve(size_type cap) {
         std::size_t const cap_per_pq = (2 * cap) / num_pqs();
-        for (auto &pq : pq_list_) {
-            pq.reserve(cap_per_pq);
+        for (guarded_pq_type *pq = pq_list_.get(); pq != pq_list_.get() + num_pqs_; ++pq) {
+            pq->unsafe_reserve(cap_per_pq);
         };
     }
 
