@@ -48,11 +48,11 @@ struct MultiqueueParameters : Configs::Parameters... {
     std::size_t c = 4;
 };
 
-template <typename Key, typename T, typename ExtractKey, typename Compare, typename Sentinel,
+template <typename Key, typename Value, typename ExtractKey, typename Compare, typename Sentinel,
           typename SelectionStrategy, bool ImplicitLock, typename PriorityQueue, typename Allocator>
 class Multiqueue {
    private:
-    using guarded_pq_type = GuardedPQ<Key, T, ExtractKey, Compare, Sentinel, ImplicitLock, PriorityQueue>;
+    using guarded_pq_type = GuardedPQ<Key, Value, ExtractKey, Compare, Sentinel, ImplicitLock, PriorityQueue>;
 
    public:
     using key_type = typename guarded_pq_type::key_type;
