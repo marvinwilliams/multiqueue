@@ -283,17 +283,9 @@ class RingBuffer {
         auto it = begin() + (pos - cbegin());
         // Copy value, as it could exist in the buffer
         auto value_cpy = value;
-        // Determine which side of the ring buffer has fewer elements
-        if (end() - it <= it - begin()) {
-            ::new (static_cast<void*>(std::addressof(data_[into_range(end_)]))) value_type(std::move(back()));
-            std::move_backward(it, end() - 1, end());
-            ++end_;
-        } else {
-            ::new (static_cast<void*>(std::addressof(data_[into_range(begin_ - 1)]))) value_type(std::move(front()));
-            std::move(begin() + 1, it, begin());
-            --begin_;
-            --it;
-        }
+        ::new (static_cast<void*>(std::addressof(data_[into_range(end_)]))) value_type(std::move(back()));
+        std::move_backward(it, end() - 1, end());
+        ++end_;
         *it = std::move(value_cpy);
         return it;
     }
