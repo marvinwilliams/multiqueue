@@ -101,23 +101,23 @@ class BufferedPQ {
     };
 
     void push(const_reference value) {
-        if (empty()) {
-            deletion_buffer_.push_back(value);
-            return;
-        }
         auto it = std::find_if(deletion_buffer_.rbegin(), deletion_buffer_.rend(),
                                [&value, this](const_reference entry) { return pq_.value_comp()(entry, value); });
         if (it == deletion_buffer_.rbegin()) {
-            // Insert into insertion buffer
-            if (!insertion_buffer_.full()) {
-                insertion_buffer_.push_back(value);
-                return;
+            // Can the element still be pushed into the deletion buffer?
+            if (pq_.empty() && insertion_buffer_.empty() && !deletion_buffer_.full()) {
+                deletion_buffer_.push_back(value);
+            } else {
+                // insert into insertion buffer
+                if (!insertion_buffer_.full()) {
+                    insertion_buffer_.push_back(value);
+                } else {
+                    flush_insertion_buffer();
+                    pq_.push(value);
+                }
             }
-            // Could also do a merging refill into the deletion buffer
-            flush_insertion_buffer();
-            pq_.push(value);
         } else {
-            // Insert into deletion buffer
+            // Push into deletion buffer
             if (deletion_buffer_.full()) {
                 if (!insertion_buffer_.full()) {
                     insertion_buffer_.push_back(std::move(deletion_buffer_.back()));
@@ -132,24 +132,23 @@ class BufferedPQ {
     }
 
     void push(value_type&& value) {
-        if (empty()) {
-            deletion_buffer_.push_back(std::move(value));
-            return;
-        }
         auto it = std::find_if(deletion_buffer_.rbegin(), deletion_buffer_.rend(),
                                [&value, this](const_reference entry) { return pq_.value_comp()(entry, value); });
-
         if (it == deletion_buffer_.rbegin()) {
-            // Insert into insertion buffer
-            if (!insertion_buffer_.full()) {
-                insertion_buffer_.push_back(std::move(value));
-                return;
+            // Can the element still be pushed into the deletion buffer?
+            if (pq_.empty() && insertion_buffer_.empty() && !deletion_buffer_.full()) {
+                deletion_buffer_.push_back(std::move(value));
+            } else {
+                // insert into insertion buffer
+                if (!insertion_buffer_.full()) {
+                    insertion_buffer_.push_back(std::move(value));
+                } else {
+                    flush_insertion_buffer();
+                    pq_.push(std::move(value));
+                }
             }
-            // Could also do a merging refill into the deletion buffer
-            flush_insertion_buffer();
-            pq_.push(std::move(value));
         } else {
-            // Insert into deletion buffer
+            // Push into deletion buffer
             if (deletion_buffer_.full()) {
                 if (!insertion_buffer_.full()) {
                     insertion_buffer_.push_back(std::move(deletion_buffer_.back()));

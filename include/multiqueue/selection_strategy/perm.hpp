@@ -26,8 +26,6 @@
 #include <vector>
 
 
-#include <iostream>
-
 namespace multiqueue::selection_strategy {
 
 class Permuting {
@@ -61,14 +59,12 @@ class Permuting {
     Permuting(std::size_t num_pqs, Parameters const &params)
         : stickiness{params.stickiness}, count{stickiness}, perm{to_perm(1, 0)} {
         assert(stickiness > 0);
-        std::cout << "Num pqs: " << num_pqs;
         log_num_pqs_ = 0;
         num_pqs >>= 1;
         while (num_pqs != 0) {
             num_pqs >>= 1;
             ++log_num_pqs_;
         }
-        std::cout << " Log: " << log_num_pqs_ << '\n';
     }
 
     std::string description() const {

@@ -1,5 +1,4 @@
 #include "multiqueue/buffered_pq.hpp"
-#include "multiqueue/default_configuration.hpp"
 #include "test_types.hpp"
 
 #include "catch2/catch_template_test_macros.hpp"
@@ -21,7 +20,7 @@
 #include <vector>
 
 TEST_CASE("buffered pq supports basic operations", "[buffered_pq][basic]") {
-    using pq_t = multiqueue::BufferedPQ<multiqueue::Heap<int, std::less<>>, 8, 8>;
+    using pq_t = multiqueue::BufferedPQ<8, 8, multiqueue::Heap<int>>;
 
     auto pq = pq_t{};
 
@@ -67,7 +66,7 @@ TEST_CASE("buffered pq supports basic operations", "[buffered_pq][basic]") {
 }
 
 TEST_CASE("buffered pq can use std::greater as comparator", "[buffered_pq][comparator]") {
-    using pq_t = multiqueue::BufferedPQ<multiqueue::Heap<int, std::greater<>>, 8, 8>;
+    using pq_t = multiqueue::BufferedPQ<8, 8, multiqueue::Heap<int, std::greater<>>>;
 
     auto pq = pq_t{};
 
@@ -113,7 +112,7 @@ TEST_CASE("buffered pq can use std::greater as comparator", "[buffered_pq][compa
 }
 
 TEST_CASE("buffered pq works with randomized workloads", "[buffered_pq][workloads]") {
-    using pq_t = multiqueue::BufferedPQ<multiqueue::Heap<int, std::less<>>, 8, 8>;
+    using pq_t = multiqueue::BufferedPQ<8, 8, multiqueue::Heap<int>>;
 
     auto pq = pq_t{};
     auto ref_pq = std::priority_queue<int, std::vector<int>, std::greater<int>>{};
@@ -193,8 +192,8 @@ TEST_CASE("buffered pq works with randomized workloads", "[buffered_pq][workload
 
 TEST_CASE("pq works with non-default-constructible types", "[pq][types]") {
     using pq_t =
-        multiqueue::BufferedPQ<multiqueue::Heap<std::pair<test_types::nodefault, test_types::nodefault>, std::less<>>,
-                               8, 8>;
+        multiqueue::BufferedPQ<8, 8,
+                               multiqueue::Heap<std::pair<test_types::nodefault, test_types::nodefault>, std::less<>>>;
     pq_t pq{};
     pq.push({test_types::nodefault(0), test_types::nodefault(1)});
     test_types::nodefault t1(2);
