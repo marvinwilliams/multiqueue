@@ -76,18 +76,18 @@ struct MultiqueueDefaults {
     using Sentinel = DefaultSentinel<Key, Compare>;
     template <unsigned int Degree>
     using PriorityQueue = Heap<value_type, value_compare, Degree>;
-    using allocator = std::allocator<Key>;
+    using Allocator = std::allocator<Key>;
 };
 
 template <typename Key, typename T = void, typename Compare = std::less<>,
           typename Config = typename MultiqueueDefaults<Key, T, Compare>::Configuration,
           typename Sentinel = typename MultiqueueDefaults<Key, T, Compare>::Sentinel,
-          typename PriorityQueue = typename MultiqueueDefaults<Key, T, Compare>::template PriorityQueue<Config::Degree>,
+          typename PriorityQueue = typename MultiqueueDefaults<Key, T, Compare>::template PriorityQueue<Config::HeapDegree>,
           typename Allocator = typename MultiqueueDefaults<Key, T, Compare>::Allocator>
 struct MultiqueueFactory {
     using value_type = typename detail::Value<Key, T, Compare>::type;
     using extract_key = typename detail::Value<Key, T, Compare>::extract_key;
-    typename sequential_priority_type =
+    using sequential_priority_type =
         std::conditional_t<Config::UseBuffers,
                            BufferedPQ<Config::InsertionBufferSize, Config::DeletionBufferSize, PriorityQueue>,
                            PriorityQueue>;
