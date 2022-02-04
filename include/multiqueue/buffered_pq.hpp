@@ -12,11 +12,10 @@
 #ifndef BUFFERED_PQ_HPP_INCLUDED
 #define BUFFERED_PQ_HPP_INCLUDED
 
-#include "multiqueue/buffer.hpp"
 #include "multiqueue/heap.hpp"
-#include "multiqueue/ring_buffer.hpp"
 #include "multiqueue/value.hpp"
 
+#include <array>
 #include <cstddef>
 #include <memory>
 #include <sstream>
@@ -38,79 +37,88 @@ class BufferedPQ {
     using size_type = std::size_t;
 
    private:
-    using insertion_buffer_type = Buffer<value_type, InsertionBufferSize>;
-    using deletion_buffer_type = RingBuffer<value_type, DeletionBufferSize>;
+    using insertion_buffer_type = std::array<value_type, InsertionBufferSize>;
+    using deletion_buffer_type = std::array<value_type, DeletionBufferSize>;
 
+    std::size_t ins_buf_size_;
     insertion_buffer_type insertion_buffer_;
+    std::size_t del_buf_size_;
     deletion_buffer_type deletion_buffer_;
     pq_type pq_;
 
    private:
     void flush_insertion_buffer() {
-        std::for_each(insertion_buffer_.begin(), insertion_buffer_.end(),
+        std::for_each(insertion_buffer_.begin(), insertion_buffer_.begin() + ins_buf_size_,
                       [this](value_type& v) { pq_.push(std::move(v)); });
-        insertion_buffer_.clear();
+        ins_buf_size_ = 0;
     }
 
     void refill_deletion_buffer() {
-        assert(deletion_buffer_.empty());
+        assert(del_buf_size_ == 0);
         // We flush the insertion buffer into the heap, then refill the
         // deletion buffer from the heap. We could also merge the insertion
         // buffer and heap into the deletion buffer
         flush_insertion_buffer();
-        size_type num_refill = std::min(deletion_buffer_type::Capacity, pq_.size());
+        size_type num_refill = std::min(DeletionBufferSize, pq_.size());
+        del_buf_size_ = num_refill;
         for (; num_refill != 0; --num_refill) {
-            deletion_buffer_.push_back(pq_.top());
-            pq_.pop();
+            pq_.extract_top(deletion_buffer_[num_refill - 1]);
         }
     }
 
    public:
     explicit BufferedPQ(value_compare const& comp = value_compare()) : pq_(comp) {
+        ins_buf_size_ = 0;
+        del_buf_size_ = 0;
     }
 
     template <typename Alloc>
     explicit BufferedPQ(value_compare const& comp, Alloc const& alloc) : pq_(comp, alloc) {
+        ins_buf_size_ = 0;
+        del_buf_size_ = 0;
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept {
-        return deletion_buffer_.empty();
+        return del_buf_size_ == 0;
     }
 
     constexpr size_type size() const noexcept {
-        return insertion_buffer_.size() + deletion_buffer_.size() + pq_.size();
+        return ins_buf_size_ + del_buf_size_ + pq_.size();
     }
 
     constexpr const_reference top() const {
         assert(!empty());
-        return deletion_buffer_.front();
+        return deletion_buffer_[del_buf_size_ - 1];
     }
 
     void pop() {
         assert(!empty());
-        deletion_buffer_.pop_front();
-        if (deletion_buffer_.empty()) {
+        --del_buf_size_;
+        if (del_buf_size_ == 0) {
             refill_deletion_buffer();
         }
     }
 
     void extract_top(reference retval) {
         assert(!empty());
-        retval = std::move(deletion_buffer_.front());
+        retval = std::move(deletion_buffer_[del_buf_size_ - 1]);
         pop();
     };
 
     void push(const_reference value) {
-        auto it = std::find_if(deletion_buffer_.rbegin(), deletion_buffer_.rend(),
+        auto it = std::find_if(deletion_buffer_.begin(), deletion_buffer_.begin() + del_buf_size_,
                                [&value, this](const_reference entry) { return pq_.value_comp()(entry, value); });
-        if (it == deletion_buffer_.rbegin()) {
+        if (it == deletion_buffer_.begin()) {
             // Can the element still be pushed into the deletion buffer?
-            if (pq_.empty() && insertion_buffer_.empty() && !deletion_buffer_.full()) {
-                deletion_buffer_.push_back(value);
+            if (pq_.empty() && ins_buf_size_ == 0 && del_buf_size_ != DeletionBufferSize) {
+                std::move_backward(deletion_buffer_.begin(), deletion_buffer_.begin() + del_buf_size_,
+                                   deletion_buffer_.begin() + del_buf_size_ + 1);
+                deletion_buffer_.front() = value;
+                ++del_buf_size_;
             } else {
                 // insert into insertion buffer
-                if (!insertion_buffer_.full()) {
-                    insertion_buffer_.push_back(value);
+                if (ins_buf_size_ != InsertionBufferSize) {
+                    insertion_buffer_[ins_buf_size_++] = value;
                 } else {
                     flush_insertion_buffer();
                     pq_.push(value);
@@ -118,47 +126,21 @@ class BufferedPQ {
             }
         } else {
             // Push into deletion buffer
-            if (deletion_buffer_.full()) {
-                if (!insertion_buffer_.full()) {
-                    insertion_buffer_.push_back(std::move(deletion_buffer_.back()));
+            if (del_buf_size_ == DeletionBufferSize) {
+                if (ins_buf_size_ != InsertionBufferSize) {
+                    insertion_buffer_[ins_buf_size_++] = std::move(deletion_buffer_.front());
                 } else {
                     flush_insertion_buffer();
-                    pq_.push(std::move(deletion_buffer_.back()));
+                    pq_.push(std::move(deletion_buffer_.front()));
                 }
-                deletion_buffer_.pop_back();
-            }
-            deletion_buffer_.insert(it.base(), value);
-        }
-    }
-
-    void push(value_type&& value) {
-        auto it = std::find_if(deletion_buffer_.rbegin(), deletion_buffer_.rend(),
-                               [&value, this](const_reference entry) { return pq_.value_comp()(entry, value); });
-        if (it == deletion_buffer_.rbegin()) {
-            // Can the element still be pushed into the deletion buffer?
-            if (pq_.empty() && insertion_buffer_.empty() && !deletion_buffer_.full()) {
-                deletion_buffer_.push_back(std::move(value));
+                std::move(deletion_buffer_.begin() + 1, it, deletion_buffer_.begin());
+                *(it - 1) = value;
             } else {
-                // insert into insertion buffer
-                if (!insertion_buffer_.full()) {
-                    insertion_buffer_.push_back(std::move(value));
-                } else {
-                    flush_insertion_buffer();
-                    pq_.push(std::move(value));
-                }
+                std::move_backward(it, deletion_buffer_.begin() + del_buf_size_,
+                                   deletion_buffer_.begin() + del_buf_size_ + 1);
+                ++del_buf_size_;
+                *it = value;
             }
-        } else {
-            // Push into deletion buffer
-            if (deletion_buffer_.full()) {
-                if (!insertion_buffer_.full()) {
-                    insertion_buffer_.push_back(std::move(deletion_buffer_.back()));
-                } else {
-                    flush_insertion_buffer();
-                    pq_.push(std::move(deletion_buffer_.back()));
-                }
-                deletion_buffer_.pop_back();
-            }
-            deletion_buffer_.insert(it.base(), std::move(value));
         }
     }
 

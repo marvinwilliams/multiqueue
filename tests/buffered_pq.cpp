@@ -189,18 +189,3 @@ TEST_CASE("buffered pq works with randomized workloads", "[buffered_pq][workload
         }
     }
 }
-
-TEST_CASE("pq works with non-default-constructible types", "[pq][types]") {
-    using pq_t =
-        multiqueue::BufferedPQ<8, 8,
-                               multiqueue::Heap<std::pair<test_types::nodefault, test_types::nodefault>, std::less<>>>;
-    pq_t pq{};
-    pq.push({test_types::nodefault(0), test_types::nodefault(1)});
-    test_types::nodefault t1(2);
-    std::pair<test_types::nodefault, test_types::nodefault> tp(t1, t1);
-    pq.push(tp);
-    std::pair<test_types::nodefault, test_types::nodefault> t2{2, 3};
-    t2 = pq.top();
-    pq.pop();
-    pq.pop();
-}
