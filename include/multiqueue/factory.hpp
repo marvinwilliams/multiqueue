@@ -69,22 +69,31 @@ struct Value<Key, void, Compare> {
 }  // namespace detail
 
 template <typename Key, typename T = void, typename Compare = std::less<>>
-struct MultiqueueFactory {
+struct MultiqueueDefaults {
     using value_type = typename detail::Value<Key, T, Compare>::type;
     using value_compare = typename detail::Value<Key, T, Compare>::compare;
+    using Configuration = DefaultConfiguration;
+    using Sentinel = DefaultSentinel<Key, Compare>;
+    template <unsigned int Degree>
+    using PriorityQueue = Heap<value_type, value_compare, Degree>;
+    using Allocator = std::allocator<Key>;
+};
+
+template <typename Key, typename T = void, typename Compare = std::less<>,
+          typename Config = typename MultiqueueDefaults<Key, T, Compare>::Configuration,
+          typename Sentinel = typename MultiqueueDefaults<Key, T, Compare>::Sentinel,
+          typename PriorityQueue = typename MultiqueueDefaults<Key, T, Compare>::template PriorityQueue<Config::HeapDegree>,
+          typename Allocator = typename MultiqueueDefaults<Key, T, Compare>::Allocator>
+struct MultiqueueFactory {
+    using value_type = typename detail::Value<Key, T, Compare>::type;
     using extract_key = typename detail::Value<Key, T, Compare>::extract_key;
-
-    using default_priority_queue = Heap<value_type, value_compare>;
-
-    template <typename Config = DefaultConfiguration, typename Sentinel = DefaultSentinel<Key, Compare>,
-              typename PriorityQueue = std::conditional_t<
-                  Config::UseBuffers,
-                  BufferedPQ<Config::InsertionBufferSize, Config::DeletionBufferSize, default_priority_queue>,
-                  default_priority_queue>,
-              typename Allocator = std::allocator<Key>>
+    using sequential_priority_type =
+        std::conditional_t<Config::UseBuffers,
+                           BufferedPQ<Config::InsertionBufferSize, Config::DeletionBufferSize, PriorityQueue>,
+                           PriorityQueue>;
     using multiqueue_type =
         Multiqueue<Key, value_type, extract_key, Compare, Sentinel, typename Config::SelectionStrategy,
-                   Config::ImplicitLock, PriorityQueue, Allocator>;
+                   Config::ImplicitLock, sequential_priority_type, Allocator>;
 };
 }  // namespace multiqueue
 
