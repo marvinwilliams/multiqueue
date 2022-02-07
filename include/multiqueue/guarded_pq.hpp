@@ -158,8 +158,19 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
         : guard_(get_sentinel()), pq_(typename PriorityQueue::value_compare{comp}) {
     }
 
+    explicit GuardedPQ(size_type initial_capacity, key_compare const& comp = key_compare())
+        : guard_(get_sentinel()), pq_(typename PriorityQueue::value_compare{comp}) {
+        pq_.reserve(initial_capacity);
+    }
+
     template <typename Alloc>
     explicit GuardedPQ(value_compare const& comp, Alloc const& alloc) : guard_(get_sentinel()), pq_(comp, alloc) {
+    }
+
+    template <typename Alloc>
+    explicit GuardedPQ(size_type initial_capacity, value_compare const& comp, Alloc const& alloc)
+        : guard_(get_sentinel()), pq_(comp, alloc) {
+        pq_.reserve(initial_capacity);
     }
 
     static constexpr key_type get_sentinel() noexcept {
@@ -232,10 +243,6 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
     const_reference unsafe_top() const {
         assert(!unsafe_empty());
         return pq_.top();
-    }
-
-    void unsafe_reserve(size_type cap) {
-        pq_.reserve(cap);
     }
 
     static std::string description() {

@@ -234,11 +234,31 @@ class Multiqueue {
           selector_(num_pqs_, params) {
         assert(num_threads > 0);
         assert(params.c > 0);
-        guarded_pq_type *pq_list = pq_alloc_traits::allocate(alloc_, num_pqs_);
-        for (guarded_pq_type *pq = pq_list; pq != pq_list + num_pqs_; ++pq) {
+        pq_list_.reset(pq_alloc_traits::allocate(alloc_, num_pqs_));  // Empty unique_ptr does not call deleter
+        for (guarded_pq_type *pq = pq_list_.get(); pq != pq_list_.get() + num_pqs_; ++pq) {
             pq_alloc_traits::construct(alloc_, pq, comp_);
         }
-        pq_list_.reset(pq_list);  // Empty unique_ptr does not call deleter
+#ifdef MULTIQUEUE_ABORT_MISALIGNMENT
+        abort_on_data_misalignment();
+#endif
+        handle_seeds_ = std::make_unique<std::uint64_t[]>(num_threads);
+        std::generate(handle_seeds_.get(), handle_seeds_.get() + num_threads, xoroshiro256starstar{params.seed});
+    }
+
+    explicit Multiqueue(size_type initial_capacity, unsigned int num_threads, param_type const &params,
+                        key_compare const &comp = key_compare(), allocator_type const &alloc = allocator_type())
+        : pq_list_(nullptr, PQDeleter(*this)),
+          num_pqs_{num_threads * params.c},
+          comp_{comp},
+          alloc_{alloc},
+          selector_(num_pqs_, params) {
+        assert(num_threads > 0);
+        assert(params.c > 0);
+        std::size_t cap_per_pq = (2 * initial_capacity) / num_pqs_;
+        pq_list_.reset(pq_alloc_traits::allocate(alloc_, num_pqs_));  // Empty unique_ptr does not call deleter
+        for (guarded_pq_type *pq = pq_list_.get(); pq != pq_list_.get() + num_pqs_; ++pq) {
+            pq_alloc_traits::construct(alloc_, pq, cap_per_pq, comp_);
+        }
 #ifdef MULTIQUEUE_ABORT_MISALIGNMENT
         abort_on_data_misalignment();
 #endif
@@ -256,7 +276,6 @@ class Multiqueue {
     }
 
     void reserve(size_type cap) {
-        std::size_t const cap_per_pq = (2 * cap) / num_pqs();
         for (guarded_pq_type *pq = pq_list_.get(); pq != pq_list_.get() + num_pqs_; ++pq) {
             pq->unsafe_reserve(cap_per_pq);
         };
