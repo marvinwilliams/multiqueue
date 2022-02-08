@@ -12,8 +12,8 @@
 #ifndef SELECTION_STRATEGY_STICKY_HPP_INCLUDED
 #define SELECTION_STRATEGY_STICKY_HPP_INCLUDED
 
-#include "multiqueue/external/fastrange.h"
-#include "multiqueue/external/xoroshiro256starstar.hpp"
+#include "multififo/external/fastrange.h"
+#include "multififo/external/xoroshiro256starstar.hpp"
 
 #include <cassert>
 #include <cstdint>
@@ -21,7 +21,7 @@
 #include <string>
 #include <utility>
 
-namespace multiqueue::selection_strategy {
+namespace multififo::selection_strategy {
 
 class Sticky {
    public:
@@ -101,6 +101,6 @@ class Sticky {
     }
 };
 
-}  // namespace multiqueue::selection_strategy
+}  // namespace multififo::selection_strategy
 
 #endif  //! SELECTION_STRATEGY_STICKY_HPP_INCLUDED

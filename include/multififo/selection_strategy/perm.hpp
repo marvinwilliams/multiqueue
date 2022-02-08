@@ -12,8 +12,8 @@
 #ifndef SELECTION_STRATEGY_PERM_HPP_INCLUDED
 #define SELECTION_STRATEGY_PERM_HPP_INCLUDED
 
-#include "multiqueue/external/fastrange.h"
-#include "multiqueue/external/xoroshiro256starstar.hpp"
+#include "multififo/external/fastrange.h"
+#include "multififo/external/xoroshiro256starstar.hpp"
 
 #include <atomic>
 #include <cassert>
@@ -26,7 +26,7 @@
 #include <vector>
 
 
-namespace multiqueue::selection_strategy {
+namespace multififo::selection_strategy {
 
 class Permuting {
    public:
@@ -133,6 +133,6 @@ class Permuting {
     }
 };
 
-}  // namespace multiqueue::selection_strategy
+}  // namespace multififo::selection_strategy
 
 #endif  //! SELECTION_STRATEGY_PERM_HPP_INCLUDED

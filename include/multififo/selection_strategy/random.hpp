@@ -12,14 +12,14 @@
 #ifndef SELECTION_STRATEGY_RANDOM_HPP_INCLUDED
 #define SELECTION_STRATEGY_RANDOM_HPP_INCLUDED
 
-#include "multiqueue/external/fastrange.h"
-#include "multiqueue/external/xoroshiro256starstar.hpp"
+#include "multififo/external/fastrange.h"
+#include "multififo/external/xoroshiro256starstar.hpp"
 
 #include <cstddef>
 #include <sstream>
 #include <string>
 
-namespace multiqueue::selection_strategy {
+namespace multififo::selection_strategy {
 
 class Random {
    public:
@@ -65,6 +65,6 @@ class Random {
     }
 };
 
-}  // namespace multiqueue::selection_strategy
+}  // namespace multififo::selection_strategy
 
 #endif  //! SELECTION_STRATEGY_RANDOM_HPP_INCLUDED
