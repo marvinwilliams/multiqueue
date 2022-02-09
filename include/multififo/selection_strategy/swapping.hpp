@@ -76,7 +76,7 @@ class Swapping {
         } while (true);
     }
 
-    std::pair<std::size_t, std::size_t> get_delete_pqs(handle_data_t &handle_data) {
+    std::pair<std::size_t, std::size_t> get_delete_indices(handle_data_t &handle_data) {
         if (handle_data.delete_count == stickiness_) {
             std::size_t first_index = swap_assignment(handle_data.id * 3 + 1, handle_data);
             std::size_t second_index = swap_assignment(handle_data.id * 3 + 2, handle_data);
@@ -90,7 +90,7 @@ class Swapping {
         return {first_index, second_index};
     }
 
-    void delete_pq_used(bool no_fail, handle_data_t &handle_data) noexcept {
+    void delete_index_used(bool no_fail, handle_data_t &handle_data) noexcept {
         if (no_fail) {
             ++handle_data.delete_count;
         } else {
@@ -98,14 +98,14 @@ class Swapping {
         }
     }
 
-    std::pair<std::size_t, std::size_t> get_fallback_delete_pqs(handle_data_t &handle_data) {
+    std::pair<std::size_t, std::size_t> get_fallback_delete_indices(handle_data_t &handle_data) {
         std::size_t first_index = swap_assignment(handle_data.id * 3 + 1, handle_data);
         std::size_t second_index = swap_assignment(handle_data.id * 3 + 2, handle_data);
         assert(first_index < assignment_.size() && second_index < assignment_.size());
         return {first_index, second_index};
     }
 
-    std::size_t get_push_pq(handle_data_t &handle_data) noexcept {
+    std::size_t get_push_index(handle_data_t &handle_data) noexcept {
         if (handle_data.push_count == stickiness_) {
             std::size_t index = swap_assignment(handle_data.id * 3, handle_data);
             handle_data.delete_count = 0;
@@ -117,7 +117,7 @@ class Swapping {
         return index;
     }
 
-    void push_pq_used(bool no_fail, handle_data_t &handle_data) noexcept {
+    void push_index_used(bool no_fail, handle_data_t &handle_data) noexcept {
         if (no_fail) {
             ++handle_data.push_count;
         } else {
@@ -125,7 +125,7 @@ class Swapping {
         }
     }
 
-    std::size_t get_fallback_push_pq(handle_data_t &handle_data) noexcept {
+    std::size_t get_fallback_push_index(handle_data_t &handle_data) noexcept {
         std::size_t index = swap_assignment(handle_data.id * 3, handle_data);
         assert(index < assignment_.size());
         return index;

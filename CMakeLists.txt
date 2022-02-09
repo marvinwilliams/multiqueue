@@ -18,14 +18,11 @@ project(multififo VERSION 1.0.0 LANGUAGES CXX)
 # directories and required compiler flags.
 add_library(multififo INTERFACE)
 
-# Also include headers generated at build time. When installing the library,
-# all files will be copied to the same location such that no additional
-# directories have to be included.
+# Also include headers generated at build time. 
 target_include_directories(
   multififo
   INTERFACE
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 # We require c++17 or above

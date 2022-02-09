@@ -90,7 +90,7 @@ class Permuting {
         return p;
     }
 
-    std::pair<std::size_t, std::size_t> get_delete_pqs(handle_data_t &handle_data) {
+    std::pair<std::size_t, std::size_t> get_delete_indices(handle_data_t &handle_data) {
         if (handle_data.id == 0 && count == 0) {
             std::uint64_t p = update_permutation(handle_data);
             count = stickiness;
@@ -101,17 +101,17 @@ class Permuting {
         return {get_perm(p, 3 * handle_data.id + 1, log_num_pqs_), get_perm(p, 3 * handle_data.id + 2, log_num_pqs_)};
     }
 
-    void delete_pq_used(bool /* no_fail */, handle_data_t &handle_data) noexcept {
+    void delete_index_used(bool /* no_fail */, handle_data_t &handle_data) noexcept {
         if (handle_data.id == 0) {
             --count;
         }
     }
 
-    std::pair<std::size_t, std::size_t> get_fallback_delete_pqs(handle_data_t &handle_data) noexcept {
+    std::pair<std::size_t, std::size_t> get_fallback_delete_indices(handle_data_t &handle_data) noexcept {
         return {fastrange64(handle_data.rng(), 1 << log_num_pqs_), fastrange64(handle_data.rng(), 1 << log_num_pqs_)};
     }
 
-    std::size_t get_push_pq(handle_data_t &handle_data) noexcept {
+    std::size_t get_push_index(handle_data_t &handle_data) noexcept {
         std::uint64_t p;
         if (handle_data.id == 0 && count == 0) {
             p = update_permutation(handle_data);
@@ -122,13 +122,13 @@ class Permuting {
         return get_perm(p, 3 * handle_data.id, log_num_pqs_);
     }
 
-    void push_pq_used(bool /* no_fail */, handle_data_t &handle_data) noexcept {
+    void push_index_used(bool /* no_fail */, handle_data_t &handle_data) noexcept {
         if (handle_data.id == 0) {
             --count;
         }
     }
 
-    std::size_t get_fallback_push_pq(handle_data_t &handle_data) noexcept {
+    std::size_t get_fallback_push_index(handle_data_t &handle_data) noexcept {
         return fastrange64(handle_data.rng(), 1 << log_num_pqs_);
     }
 };

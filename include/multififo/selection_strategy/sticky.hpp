@@ -56,7 +56,7 @@ class Sticky {
         return ss.str();
     }
 
-    std::pair<std::size_t, std::size_t> get_delete_pqs(handle_data_t &handle_data) {
+    std::pair<std::size_t, std::size_t> get_delete_indices(handle_data_t &handle_data) {
         if (handle_data.delete_count == 0) {
             handle_data.delete_index = {fastrange64(handle_data.rng(), num_pqs_),
                                         fastrange64(handle_data.rng(), num_pqs_)};
@@ -66,7 +66,7 @@ class Sticky {
         return handle_data.delete_index;
     }
 
-    void delete_pq_used(bool no_fail, handle_data_t &handle_data) noexcept {
+    void delete_index_used(bool no_fail, handle_data_t &handle_data) noexcept {
         if (no_fail) {
             --handle_data.delete_count;
         } else {
@@ -74,12 +74,12 @@ class Sticky {
         }
     }
 
-    std::pair<std::size_t, std::size_t> get_fallback_delete_pqs(handle_data_t &handle_data) noexcept {
+    std::pair<std::size_t, std::size_t> get_fallback_delete_indices(handle_data_t &handle_data) noexcept {
         return handle_data.delete_index = {fastrange64(handle_data.rng(), num_pqs_),
                                            fastrange64(handle_data.rng(), num_pqs_)};
     }
 
-    std::size_t get_push_pq(handle_data_t &handle_data) noexcept {
+    std::size_t get_push_index(handle_data_t &handle_data) noexcept {
         if (handle_data.push_count == 0) {
             handle_data.push_index = fastrange64(handle_data.rng(), num_pqs_);
             handle_data.push_count = stickiness_;
@@ -88,7 +88,7 @@ class Sticky {
         return handle_data.push_index;
     }
 
-    void push_pq_used(bool no_fail, handle_data_t &handle_data) noexcept {
+    void push_index_used(bool no_fail, handle_data_t &handle_data) noexcept {
         if (no_fail) {
             --handle_data.push_count;
         } else {
@@ -96,7 +96,7 @@ class Sticky {
         }
     }
 
-    std::size_t get_fallback_push_pq(handle_data_t &handle_data) noexcept {
+    std::size_t get_fallback_push_index(handle_data_t &handle_data) noexcept {
         return handle_data.push_index = fastrange64(handle_data.rng(), num_pqs_);
     }
 };
