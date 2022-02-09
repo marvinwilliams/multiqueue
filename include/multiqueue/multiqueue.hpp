@@ -83,78 +83,74 @@ class Multiqueue {
 
        public:
         bool try_extract_top(reference retval) noexcept {
-            {
-                auto const [first, second] = mq_.selector_.get_delete_pqs(data_);
-                auto const [pq, key] = mq_.select_delete_pq(mq_.pq_list_.get() + first, mq_.pq_list_.get() + second);
-                if (!pq) {
-                    // Both pqs are empty
-                    mq_.selector_.delete_pq_used(true, data_);
-                    return false;
-                }
-                if (pq->try_lock_if_key(key)) {
-                    pq->extract_top(retval);
-                    pq->unlock();
-                    mq_.selector_.delete_pq_used(true, data_);
-                    return true;
-                }
+            auto indices = mq_.selector_.get_delete_pqs(data_);
+            auto first_key = mq_.pq_list_[indices.first].top_key();
+            auto second_key = mq_.pq_list_[indices.second].top_key();
+            if (first_key == get_sentinel() && second_key == get_sentinel()) {
+                // Both pqs are empty
+                mq_.selector_.delete_pq_used(true, data_);
+                return false;
+            }
+            if (first_key == get_sentinel() || (second_key != get_sentinel() && mq_.comp_(second_key, first_key))) {
+                std::swap(indices.first, indices.second);
+                std::swap(first_key, second_key);
+            }
+            if (mq_.pq_list_[indices.first].try_lock_if_key(first_key)) {
+                mq_.pq_list_[indices.first].extract_top(retval);
+                mq_.pq_list_[indices.first].unlock();
+                mq_.selector_.delete_pq_used(true, data_);
+                return true;
             }
             do {
-                auto const [first, second] = mq_.selector_.get_fallback_delete_pqs(data_);
-                auto const [pq, key] = mq_.select_delete_pq(mq_.pq_list_.get() + first, mq_.pq_list_.get() + second);
-                if (!pq) {
+                indices = mq_.selector_.get_fallback_delete_pqs(data_);
+                first_key = mq_.pq_list_[indices.first].top_key();
+                second_key = mq_.pq_list_[indices.second].top_key();
+                if (first_key == get_sentinel() && second_key == get_sentinel()) {
                     // Both pqs are empty
                     mq_.selector_.delete_pq_used(false, data_);
                     return false;
                 }
-                if (pq->try_lock_if_key(key)) {
-                    pq->extract_top(retval);
-                    pq->unlock();
-                    mq_.selector_.delete_pq_used(false, data_);
-                    return true;
+                if (first_key == get_sentinel() || (second_key != get_sentinel() && mq_.comp_(second_key, first_key))) {
+                    std::swap(indices.first, indices.second);
+                    std::swap(first_key, second_key);
                 }
-            } while (true);
+            } while (!mq_.pq_list_[indices.first].try_lock_if_key(first_key));
+            mq_.pq_list_[indices.first].extract_top(retval);
+            mq_.pq_list_[indices.first].unlock();
+            mq_.selector_.delete_pq_used(false, data_);
+            return true;
         }
 
         void push(const_reference value) noexcept {
-            {
-                auto const pq = mq_.pq_list_.get() + mq_.selector_.get_push_pq(data_);
-                if (pq->try_lock()) {
-                    pq->push(value);
-                    pq->unlock();
-                    mq_.selector_.push_pq_used(true, data_);
-                    return;
-                }
+            auto index = mq_.selector_.get_push_pq(data_);
+            if (mq_.pq_list_[index].try_lock()) {
+                mq_.pq_list_[index].push(value);
+                mq_.pq_list_[index].unlock();
+                mq_.selector_.push_pq_used(true, data_);
+                return;
             }
             do {
-                auto const pq = mq_.pq_list_.get() + mq_.selector_.get_fallback_push_pq(data_);
-                if (pq->try_lock()) {
-                    pq->push(value);
-                    pq->unlock();
-                    mq_.selector_.push_pq_used(false, data_);
-                    return;
-                }
-            } while (true);
+                index = mq_.selector_.get_fallback_push_pq(data_);
+            } while (!mq_.pq_list_[index].try_lock());
+            mq_.pq_list_[index].push(value);
+            mq_.pq_list_[index].unlock();
+            mq_.selector_.push_pq_used(false, data_);
         }
 
-        void push(key_type &&value) noexcept {
-            {
-                auto const pq = mq_.pq_list_.get() + mq_.selector_.get_push_pq(data_);
-                if (pq->try_lock()) {
-                    pq->push(std::move(value));
-                    pq->unlock();
-                    mq_.selector_.push_pq_used(true, data_);
-                    return;
-                }
+        void push(value_type &&value) noexcept {
+            auto index = mq_.selector_.get_push_pq(data_);
+            if (mq_.pq_list_[index].try_lock()) {
+                mq_.pq_list_[index].push(std::move(value));
+                mq_.pq_list_[index].unlock();
+                mq_.selector_.push_pq_used(true, data_);
+                return;
             }
             do {
-                auto const pq = mq_.pq_list_.get() + mq_.selector_.get_fallback_push_pq(data_);
-                if (pq->try_lock()) {
-                    pq->push(std::move(value));
-                    pq->unlock();
-                    mq_.selector_.push_pq_used(false, data_);
-                    return;
-                }
-            } while (true);
+                index = mq_.selector_.get_fallback_push_pq(data_);
+            } while (!mq_.pq_list_[index].try_lock());
+            mq_.pq_list_[index].push(std::move(value));
+            mq_.pq_list_[index].unlock();
+            mq_.selector_.push_pq_used(false, data_);
         }
 
         bool try_extract_from(size_type pos, value_type &retval) noexcept {
@@ -211,19 +207,6 @@ class Multiqueue {
         }
     }
 
-    std::pair<guarded_pq_type *, key_type> select_delete_pq(guarded_pq_type *first, guarded_pq_type *second) noexcept {
-        auto const first_key = first->top_key();
-        auto const second_key = second->top_key();
-        if (first_key == get_sentinel() && second_key == get_sentinel()) {
-            return {nullptr, get_sentinel()};
-        }
-        if (second_key == get_sentinel() || comp_(first_key, second_key)) {
-            return {first, first_key};
-        } else {
-            return {second, second_key};
-        }
-    }
-
    public:
     explicit Multiqueue(unsigned int num_threads, param_type const &params, key_compare const &comp = key_compare(),
                         allocator_type const &alloc = allocator_type())
@@ -273,12 +256,6 @@ class Multiqueue {
 
     static constexpr key_type get_sentinel() noexcept {
         return guarded_pq_type::get_sentinel();
-    }
-
-    void reserve(size_type cap) {
-        for (guarded_pq_type *pq = pq_list_.get(); pq != pq_list_.get() + num_pqs_; ++pq) {
-            pq->unsafe_reserve(cap_per_pq);
-        };
     }
 
 #ifdef MULTIQUEUE_ELEMENT_DISTRIBUTION
