@@ -65,11 +65,13 @@ class Swapping {
         assert(pq < assignment_.size());
         // Cannot be invalid, only thread itself invalidates
         std::size_t old_index = assignment_[pq].index.exchange(assignment_.size(), std::memory_order_relaxed);
+        assert(old_index < assignment_.size());
         do {
             std::size_t other_pq = fastrange64(handle_data.rng(), assignment_.size());
             std::size_t other_index = assignment_[other_pq].index.load(std::memory_order_relaxed);
             if (other_index != assignment_.size() &&
-                assignment_[other_pq].index.compare_exchange_strong(other_index, old_index, std::memory_order_relaxed)) {
+                assignment_[other_pq].index.compare_exchange_strong(other_index, old_index,
+                                                                    std::memory_order_relaxed)) {
                 assignment_[pq].index.store(other_index, std::memory_order_relaxed);
                 return other_index;
             }
@@ -77,6 +79,7 @@ class Swapping {
     }
 
     std::pair<std::size_t, std::size_t> get_delete_pqs(handle_data_t &handle_data) {
+        assert(handle_data.delete_count <= stickiness_);
         if (handle_data.delete_count == stickiness_) {
             std::size_t first_index = swap_assignment(handle_data.id * 3 + 1, handle_data);
             std::size_t second_index = swap_assignment(handle_data.id * 3 + 2, handle_data);
@@ -84,8 +87,8 @@ class Swapping {
             assert(first_index < assignment_.size() && second_index < assignment_.size());
             return {first_index, second_index};
         }
-        std::size_t first_index = assignment_[3 * handle_data.id + 1].index.load(std::memory_order_relaxed);
-        std::size_t second_index = assignment_[3 * handle_data.id + 2].index.load(std::memory_order_relaxed);
+        std::size_t first_index = assignment_[handle_data.id * 3 + 1].index.load(std::memory_order_relaxed);
+        std::size_t second_index = assignment_[handle_data.id * 3 + 2].index.load(std::memory_order_relaxed);
         assert(first_index < assignment_.size() && second_index < assignment_.size());
         return {first_index, second_index};
     }
@@ -106,13 +109,14 @@ class Swapping {
     }
 
     std::size_t get_push_pq(handle_data_t &handle_data) noexcept {
+        assert(handle_data.delete_count <= stickiness_);
         if (handle_data.push_count == stickiness_) {
             std::size_t index = swap_assignment(handle_data.id * 3, handle_data);
-            handle_data.delete_count = 0;
+            handle_data.push_count = 0;
             assert(index < assignment_.size());
             return index;
         }
-        std::size_t index = assignment_[3 * handle_data.id].index.load(std::memory_order_relaxed);
+        std::size_t index = assignment_[handle_data.id * 3].index.load(std::memory_order_relaxed);
         assert(index < assignment_.size());
         return index;
     }
