@@ -191,6 +191,7 @@ class Multiqueue {
     // they are not written concurrently
     std::unique_ptr<guarded_pq_type[], PQDeleter> pq_list_;
     size_type num_pqs_;
+    Handle handle_;
     [[no_unique_address]] key_compare comp_;
     [[no_unique_address]] pq_alloc_type alloc_;
     std::unique_ptr<std::uint64_t[]> handle_seeds_;
@@ -212,6 +213,7 @@ class Multiqueue {
                         allocator_type const &alloc = allocator_type())
         : pq_list_(nullptr, PQDeleter(*this)),
           num_pqs_{num_threads * params.c},
+          handle_{*this, 0, xoroshiro256starstar{params.seed}()},
           comp_{comp},
           alloc_{alloc},
           selector_(num_pqs_, params) {
@@ -289,6 +291,18 @@ class Multiqueue {
         return distribution;
     }
 #endif
+
+    bool try_extract_top(reference retval) noexcept {
+        return handle_.try_extract_top(retval);
+    }
+
+    void push(const_reference value) noexcept {
+        handle_.push(value);
+    }
+
+    void push(value_type &&value) noexcept {
+        handle_.push(std::move(value));
+    }
 
     constexpr size_type num_pqs() const noexcept {
         return num_pqs_;
