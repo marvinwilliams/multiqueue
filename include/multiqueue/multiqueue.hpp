@@ -234,6 +234,7 @@ class Multiqueue {
                         key_compare const &comp = key_compare(), allocator_type const &alloc = allocator_type())
         : pq_list_(nullptr, PQDeleter(*this)),
           num_pqs_{num_threads * params.c},
+          handle_{*this, 0, xoroshiro256starstar{params.seed}()},
           comp_{comp},
           alloc_{alloc},
           selector_(num_pqs_, params) {
