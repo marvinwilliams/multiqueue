@@ -153,18 +153,9 @@ class Multiqueue {
             mq_.selector_.push_pq_used(false, data_);
         }
 
-        bool try_extract_from(size_type pos, value_type &retval) noexcept {
+        bool is_empty(size_type pos) noexcept {
             assert(pos < mq_.num_pqs());
-            auto &pq = mq_.pq_list_[pos];
-            if (pq.try_lock()) {
-                if (!pq.unsafe_empty()) {
-                    pq.extract_top(retval);
-                    pq.unlock();
-                    return true;
-                }
-                pq.unlock();
-            }
-            return false;
+            return mq_.pq_list_[pos].empty();
         }
     };
 
