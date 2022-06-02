@@ -1,6 +1,6 @@
 /**
 ******************************************************************************
-* @file:   sticky.hpp
+* @file:   random.hpp
 *
 * @author: Marvin Williams
 * @date:   2021/09/27 10:15
@@ -9,8 +9,8 @@
 **/
 
 #pragma once
-#ifndef SELECTION_STRATEGY_STICKY_HPP_INCLUDED
-#define SELECTION_STRATEGY_STICKY_HPP_INCLUDED
+#ifndef STICK_POLICY_RANDOM_HPP_INCLUDED
+#define STICK_POLICY_RANDOM_HPP_INCLUDED
 
 #include "multiqueue/external/fastrange.h"
 #include "multiqueue/external/xoroshiro256starstar.hpp"
@@ -21,11 +21,11 @@
 #include <string>
 #include <utility>
 
-namespace multiqueue::selection_strategy {
+namespace multiqueue::stick_policy {
 
-class Sticky {
+class Random {
    public:
-    struct Parameters {
+    struct Config {
         unsigned int stickiness = 8;
     };
 
@@ -45,13 +45,13 @@ class Sticky {
     unsigned int stickiness_;
 
    public:
-    Sticky(std::size_t num_pqs, Parameters const &params) noexcept : num_pqs_{num_pqs}, stickiness_{params.stickiness} {
+    Random(std::size_t num_pqs, Config const &params) noexcept : num_pqs_{num_pqs}, stickiness_{params.stickiness} {
         assert(stickiness_ > 0);
     }
 
     std::string description() const {
         std::stringstream ss;
-        ss << "sticky\n";
+        ss << "random\n";
         ss << "\tStickiness: " << stickiness_;
         return ss.str();
     }
@@ -101,6 +101,6 @@ class Sticky {
     }
 };
 
-}  // namespace multiqueue::selection_strategy
+}  // namespace multiqueue::stick_policy
 
-#endif  //! SELECTION_STRATEGY_STICKY_HPP_INCLUDED
+#endif  //! STICK_POLICY_RANDOM_HPP_INCLUDED

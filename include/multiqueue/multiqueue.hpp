@@ -19,10 +19,14 @@
 #define PAGESIZE 4096
 #endif
 
-#include "multiqueue/external/xoroshiro256starstar.hpp"
 #include "multiqueue/guarded_pq.hpp"
+#include "multiqueue/heap.hpp"
+#include "multiqueue/sentinel_traits.hpp"
+#include "multiqueue/value_traits.hpp"
+#include "stick_policy/random.hpp"
 
 #include "multiqueue/external/fastrange.h"
+#include "multiqueue/external/xoroshiro256starstar.hpp"
 
 #include <cassert>
 #include <cstddef>
@@ -42,35 +46,65 @@
 
 namespace multiqueue {
 
-template <typename... Configs>
-struct MultiqueueParameters : Configs::Parameters... {
+template <typename StickPolicy>
+struct MultiqueueConfig {
     std::uint64_t seed = 1;
     std::size_t c = 4;
+    typename StickPolicy::Config stick_policy_config;
 };
 
-template <typename Key, typename Value, typename ExtractKey, typename Compare, typename Sentinel,
-          typename SelectionStrategy, bool ImplicitLock, typename PriorityQueue, typename Allocator>
-class Multiqueue {
+template <typename KeyCompare, typename ValueTraits>
+struct ValueCompare {
    private:
-    using guarded_pq_type = GuardedPQ<Key, Value, ExtractKey, Compare, Sentinel, ImplicitLock, PriorityQueue>;
+    [[no_unique_address]] KeyCompare comp_;
 
    public:
-    using key_type = typename guarded_pq_type::key_type;
-    using value_type = typename guarded_pq_type::value_type;
-    using key_compare = typename guarded_pq_type::key_compare;
-    using reference = typename guarded_pq_type::reference;
-    using const_reference = typename guarded_pq_type::const_reference;
-    using size_type = typename guarded_pq_type::size_type;
+    explicit ValueCompare(KeyCompare const &comp = KeyCompare{}) : comp_{comp} {
+    }
+
+    constexpr bool operator()(typename ValueTraits::value_type const &lhs,
+                              typename ValueTraits::value_type const &rhs) const noexcept {
+        return comp_(ValueTraits::key_of_value(lhs), ValueTraits::key_of_value(rhs));
+    }
+};
+
+template <typename Key, typename T, typename KeyCompare, typename StickPolicy = stick_policy::Random,
+          typename ValueTraits = value_traits<Key, T>, typename SentinelTraits = sentinel_traits<Key, KeyCompare>,
+          typename PriorityQueue = Heap<typename ValueTraits::value_type, ValueCompare<KeyCompare, ValueTraits>>,
+          typename Allocator = std::allocator<typename ValueTraits::value_type>>
+class MultiQueue {
+   public:
+    using key_type = typename ValueTraits::key_type;
+    using mapped_type = typename ValueTraits::mapped_type;
+    using value_type = typename ValueTraits::value_type;
+    using key_compare = KeyCompare;
+    using value_compare = ValueCompare<key_compare, ValueTraits>;
     using allocator_type = Allocator;
-    using param_type = MultiqueueParameters<SelectionStrategy>;
+    using config_type = MultiqueueConfig<StickPolicy>;
+    using size_type = std::size_t;
+
+    static_assert(std::is_same_v<value_type, typename Allocator::value_type>);
+
+   private:
+    using alloc_traits = std::allocator_traits<allocator_type>;
+    using guarded_pq_type = GuardedPQ<ValueTraits, SentinelTraits, PriorityQueue>;
+    using pq_alloc_type = typename std::allocator_traits<allocator_type>::template rebind_alloc<guarded_pq_type>;
+    using pq_alloc_traits = std::allocator_traits<pq_alloc_type>;
 
    public:
-    class alignas(2 * L1_CACHE_LINESIZE) Handle {
-        friend Multiqueue;
-        using data_t = typename SelectionStrategy::handle_data_t;
+    using pointer = typename alloc_traits::pointer;
+    using const_pointer = typename alloc_traits::const_pointer;
+    using reference = typename alloc_traits::reference;
+    using const_reference = typename alloc_traits::const_reference;
 
-        Multiqueue &mq_;
+    friend StickPolicy;
+
+    class Handle {
+        friend MultiQueue;
+        using data_t = typename StickPolicy::handle_data_t;
+
         data_t data_;
+        MultiQueue &mq_;
 
        public:
         Handle(Handle const &) = delete;
@@ -78,79 +112,72 @@ class Multiqueue {
         Handle(Handle &&) = default;
 
        private:
-        explicit Handle(Multiqueue &mq, unsigned int id, std::uint64_t seed) noexcept : mq_{mq}, data_{seed, id} {
+        explicit Handle(MultiQueue &mq, unsigned int id, std::uint64_t seed) noexcept : mq_{mq}, data_{id, seed} {
         }
 
        public:
-        bool try_extract_top(reference retval) noexcept {
-            auto indices = mq_.selector_.get_delete_pqs(data_);
-            auto first_key = mq_.pq_list_[indices.first].top_key();
-            auto second_key = mq_.pq_list_[indices.second].top_key();
-            if (first_key == get_sentinel() && second_key == get_sentinel()) {
-                // Both pqs are empty
-                mq_.selector_.delete_pq_used(true, data_);
-                return false;
-            }
-            if (first_key == get_sentinel() || (second_key != get_sentinel() && mq_.comp_(second_key, first_key))) {
-                std::swap(indices.first, indices.second);
-                std::swap(first_key, second_key);
-            }
-            if (mq_.pq_list_[indices.first].try_lock_if_key(first_key)) {
-                mq_.pq_list_[indices.first].extract_top(retval);
-                mq_.pq_list_[indices.first].unlock();
-                mq_.selector_.delete_pq_used(true, data_);
-                return true;
-            }
+        bool try_pop(reference retval) noexcept {
+            guarded_pq_type *first = StickPolicy::get_pop_pq_1(mq_, data_);
+            guarded_pq_type *second = StickPolicy::get_pop_pq_2(mq_, data_);
+            auto first_key = first->top_key();
+            auto second_key = second->top_key();
             do {
-                indices = mq_.selector_.get_fallback_delete_pqs(data_);
-                first_key = mq_.pq_list_[indices.first].top_key();
-                second_key = mq_.pq_list_[indices.second].top_key();
-                if (first_key == get_sentinel() && second_key == get_sentinel()) {
-                    // Both pqs are empty
-                    mq_.selector_.delete_pq_used(false, data_);
-                    return false;
+                if (mq_.compare_with_sentinel(first_key, second_key)) {
+                    if (first_key == SentinelTraits::sentinel()) {
+                        StickPolicy::pop_pq_1_failed_callback(data_);
+                        StickPolicy::pop_pq_2_failed_callback(data_);
+                        return false;
+                    }
+                    if (first->try_lock_if_nonempty()) {
+                        break;
+                    }
+                    StickPolicy::pop_pq_1_failed_callback(data_);
+                    first = StickPolicy::get_pop_pq_1(mq_, data_);
+                    first_key = first->top_key();
+                } else {
+                    if (second_key == SentinelTraits::sentinel()) {
+                        StickPolicy::pop_pq_1_failed_callback(data_);
+                        StickPolicy::pop_pq_2_failed_callback(data_);
+                        return false;
+                    }
+                    if (second->try_lock_if_nonempty()) {
+                        first = second;
+                        break;
+                    }
+                    StickPolicy::pop_pq_2_failed_callback(data_);
+                    second = StickPolicy::get_pop_pq_2(mq_, data_);
+                    second_key = second->top_key();
                 }
-                if (first_key == get_sentinel() || (second_key != get_sentinel() && mq_.comp_(second_key, first_key))) {
-                    std::swap(indices.first, indices.second);
-                    std::swap(first_key, second_key);
-                }
-            } while (!mq_.pq_list_[indices.first].try_lock_if_key(first_key));
-            mq_.pq_list_[indices.first].extract_top(retval);
-            mq_.pq_list_[indices.first].unlock();
-            mq_.selector_.delete_pq_used(false, data_);
+            } while (true);
+            // first is guaranteed to be nonempty
+            first->pop(retval);
+            first->unlock();
+            StickPolicy::pop_pq_used_callback(data_);
             return true;
         }
 
         void push(const_reference value) noexcept {
-            auto index = mq_.selector_.get_push_pq(data_);
-            if (mq_.pq_list_[index].try_lock()) {
-                mq_.pq_list_[index].push(value);
-                mq_.pq_list_[index].unlock();
-                mq_.selector_.push_pq_used(true, data_);
-                return;
+            guarded_pq_type *pq = StickPolicy::get_push_pq(mq_, data_);
+            while (!pq.try_lock()) {
+                StickPolicy::push_pq_failed(data_);
+                pq = StickPolicy::get_push_pq(mq_, data_);
             }
-            do {
-                index = mq_.selector_.get_fallback_push_pq(data_);
-            } while (!mq_.pq_list_[index].try_lock());
-            mq_.pq_list_[index].push(value);
-            mq_.pq_list_[index].unlock();
-            mq_.selector_.push_pq_used(false, data_);
+            pq->push(value);
+            pq->unlock();
+            StickPolicy::push_pq_used_callback(data_);
+            return;
         }
 
         void push(value_type &&value) noexcept {
-            auto index = mq_.selector_.get_push_pq(data_);
-            if (mq_.pq_list_[index].try_lock()) {
-                mq_.pq_list_[index].push(std::move(value));
-                mq_.pq_list_[index].unlock();
-                mq_.selector_.push_pq_used(true, data_);
-                return;
+            guarded_pq_type *pq = StickPolicy::get_push_pq(mq_, data_);
+            while (!pq.try_lock()) {
+                StickPolicy::push_pq_failed(data_);
+                pq = StickPolicy::get_push_pq(mq_, data_);
             }
-            do {
-                index = mq_.selector_.get_fallback_push_pq(data_);
-            } while (!mq_.pq_list_[index].try_lock());
-            mq_.pq_list_[index].push(std::move(value));
-            mq_.pq_list_[index].unlock();
-            mq_.selector_.push_pq_used(false, data_);
+            pq->push(std::move(value));
+            pq->unlock();
+            StickPolicy::push_pq_used_callback(data_);
+            return;
         }
 
         bool is_empty(size_type pos) noexcept {
@@ -163,93 +190,144 @@ class Multiqueue {
     using pq_alloc_type = typename std::allocator_traits<allocator_type>::template rebind_alloc<guarded_pq_type>;
     using pq_alloc_traits = typename std::allocator_traits<pq_alloc_type>;
 
-    struct PQDeleter {
-        Multiqueue &mq;
-
-        PQDeleter(Multiqueue &mq_ref) : mq{mq_ref} {
-        }
-
-        void operator()(guarded_pq_type *pq_list) noexcept {
-            for (guarded_pq_type *s = pq_list; s != pq_list + mq.num_pqs_; ++s) {
-                pq_alloc_traits::destroy(mq.alloc_, s);
-            }
-            pq_alloc_traits::deallocate(mq.alloc_, pq_list, mq.num_pqs_);
-        }
-    };
-
    private:
-    // False sharing is avoided by class alignment, but the members do not need to reside in individual cache lines, as
-    // they are not written concurrently
-    std::unique_ptr<guarded_pq_type[], PQDeleter> pq_list_;
+    // False sharing is avoided by class alignment, but the members do not need to reside in individual cache lines,
+    // as they are not written concurrently
+    guarded_pq_type *pq_list_;
     size_type num_pqs_;
-    Handle handle_;
+    xoroshiro256starstar rng_;
+    unsigned int num_handles_;
     [[no_unique_address]] key_compare comp_;
     [[no_unique_address]] pq_alloc_type alloc_;
-    std::unique_ptr<std::uint64_t[]> handle_seeds_;
-    std::atomic_uint handle_index_ = 0;
-
     // strategy data in separate cache line, as it might be written to
-    [[no_unique_address]] alignas(2 * L1_CACHE_LINESIZE) SelectionStrategy selector_;
+    [[no_unique_address]] alignas(2 * L1_CACHE_LINESIZE) typename StickPolicy::GlobalData stick_policy_data_;
 
+#ifdef MULTIQUEUE_ABORT_MISALIGNMENT
     void abort_on_data_misalignment() {
-        for (guarded_pq_type *s = pq_list_.get(); s != pq_list_.get() + num_pqs(); ++s) {
+        for (guarded_pq_type *s = pq_list_; s != pq_list_ + num_pqs(); ++s) {
             if (reinterpret_cast<std::uintptr_t>(s) % (2 * L1_CACHE_LINESIZE) != 0) {
                 std::abort();
             }
         }
     }
+#endif
+    bool compare_with_sentinel(key_type const &lhs, key_type const &rhs) noexcept {
+        if constexpr (SentinelTraits::is_implicit) {
+            return comp_(lhs, rhs);
+        } else {
+            if (lhs == SentinelTraits::sentinel()) {
+                return false;
+            }
+            if (rhs == SentinelTraits::sentinel()) {
+                return true;
+            }
+            return comp_(lhs, rhs);
+        }
+    }
 
    public:
-    explicit Multiqueue(unsigned int num_threads, param_type const &params, key_compare const &comp = key_compare(),
+    explicit MultiQueue(unsigned int num_threads, config_type const &params, key_compare const &comp = key_compare(),
                         allocator_type const &alloc = allocator_type())
-        : pq_list_(nullptr, PQDeleter(*this)),
-          num_pqs_{num_threads * params.c},
-          handle_{*this, 0, xoroshiro256starstar{params.seed}()},
+        : num_pqs_{num_threads * params.c},
+          rng_{params.seed},
+          num_handles_{0},
           comp_{comp},
           alloc_{alloc},
-          selector_(num_pqs_, params) {
+          stick_policy_data_(num_pqs_, params.stick_policy_config) {
         assert(num_threads > 0);
         assert(params.c > 0);
-        pq_list_.reset(pq_alloc_traits::allocate(alloc_, num_pqs_));  // Empty unique_ptr does not call deleter
-        for (guarded_pq_type *pq = pq_list_.get(); pq != pq_list_.get() + num_pqs_; ++pq) {
+        pq_list_ = pq_alloc_traits::allocate(alloc_, num_pqs_);
+        for (guarded_pq_type *pq = pq_list_; pq != pq_list_ + num_pqs_; ++pq) {
             pq_alloc_traits::construct(alloc_, pq, comp_);
         }
 #ifdef MULTIQUEUE_ABORT_MISALIGNMENT
         abort_on_data_misalignment();
 #endif
-        handle_seeds_ = std::make_unique<std::uint64_t[]>(num_threads);
-        std::generate(handle_seeds_.get(), handle_seeds_.get() + num_threads, xoroshiro256starstar{params.seed});
     }
 
-    explicit Multiqueue(size_type initial_capacity, unsigned int num_threads, param_type const &params,
+    explicit MultiQueue(size_type initial_capacity, unsigned int num_threads, config_type const &params,
                         key_compare const &comp = key_compare(), allocator_type const &alloc = allocator_type())
-        : pq_list_(nullptr, PQDeleter(*this)),
-          num_pqs_{num_threads * params.c},
-          handle_{*this, 0, xoroshiro256starstar{params.seed}()},
+        : num_pqs_{num_threads * params.c},
+          rng_{params.seed},
+          num_handles_{0},
           comp_{comp},
           alloc_{alloc},
-          selector_(num_pqs_, params) {
+          stick_policy_data_(num_pqs_, params.stick_policy_config) {
         assert(num_threads > 0);
         assert(params.c > 0);
+        pq_list_ = pq_alloc_traits::allocate(alloc_, num_pqs_);
         std::size_t cap_per_pq = (2 * initial_capacity) / num_pqs_;
-        pq_list_.reset(pq_alloc_traits::allocate(alloc_, num_pqs_));  // Empty unique_ptr does not call deleter
-        for (guarded_pq_type *pq = pq_list_.get(); pq != pq_list_.get() + num_pqs_; ++pq) {
+        for (guarded_pq_type *pq = pq_list_; pq != pq_list_ + num_pqs_; ++pq) {
             pq_alloc_traits::construct(alloc_, pq, cap_per_pq, comp_);
         }
 #ifdef MULTIQUEUE_ABORT_MISALIGNMENT
         abort_on_data_misalignment();
 #endif
-        handle_seeds_ = std::make_unique<std::uint64_t[]>(num_threads);
-        std::generate(handle_seeds_.get(), handle_seeds_.get() + num_threads, xoroshiro256starstar{params.seed});
+    }
+
+    ~MultiQueue() noexcept {
+        for (guarded_pq_type *s = pq_list_; s != pq_list_ + num_pqs_; ++s) {
+            pq_alloc_traits::destroy(alloc_, s);
+        }
+        pq_alloc_traits::deallocate(alloc_, pq_list_, num_pqs_);
     }
 
     Handle get_handle() noexcept {
-        unsigned int index = handle_index_.fetch_add(1, std::memory_order_relaxed);
-        return Handle(*this, index, handle_seeds_[index]);
+        static std::mutex m;
+        std::scoped_lock l{m};
+        return Handle{*this, num_handles_++, rng_()};
     }
 
-    static constexpr key_type get_sentinel() noexcept {
-        return guarded_pq_type::get_sentinel();
+    bool try_pop(reference retval) noexcept {
+        guarded_pq_type *first = pq_list_ + fastrange64(rng_(), num_pqs_);
+        guarded_pq_type *second = pq_list_ + fastrange64(rng_(), num_pqs_);
+        if (first->unsafe_empty() || (!second->unsafe_empty() && comp_(ValueTraits::key_of_value(first->unsafe_top()), ValueTraits::key_of_value(second->unsafe_top()))) {
+            first = second;
+            first_key = second_key;
+        }
+        if (first->unsafe_empty() && second->unsafe_empty()) {
+            return false;
+        }
+        if (first_key == SentinelTraits::sentinel()) {
+            return false;
+        }
+        // first is guaranteed to be nonempty
+        first->pop(retval);
+        first->unlock();
+        StickPolicy::pop_pq_used_callback(data_);
+        return true;
+    }
+
+    void push(const_reference value) noexcept {
+        auto index = mq_.selector_.get_push_pq(data_);
+        if (mq_.pq_list_[index].try_lock()) {
+            mq_.pq_list_[index].push(value);
+            mq_.pq_list_[index].unlock();
+            mq_.selector_.push_pq_used(true, data_);
+            return;
+        }
+        do {
+            index = mq_.selector_.get_fallback_push_pq(data_);
+        } while (!mq_.pq_list_[index].try_lock());
+        mq_.pq_list_[index].push(value);
+        mq_.pq_list_[index].unlock();
+        mq_.selector_.push_pq_used(false, data_);
+    }
+
+    void push(value_type &&value) noexcept {
+        auto index = mq_.selector_.get_push_pq(data_);
+        if (mq_.pq_list_[index].try_lock()) {
+            mq_.pq_list_[index].push(std::move(value));
+            mq_.pq_list_[index].unlock();
+            mq_.selector_.push_pq_used(true, data_);
+            return;
+        }
+        do {
+            index = mq_.selector_.get_fallback_push_pq(data_);
+        } while (!mq_.pq_list_[index].try_lock());
+        mq_.pq_list_[index].push(std::move(value));
+        mq_.pq_list_[index].unlock();
+        mq_.selector_.push_pq_used(false, data_);
     }
 
 #ifdef MULTIQUEUE_ELEMENT_DISTRIBUTION
@@ -284,7 +362,7 @@ class Multiqueue {
     }
 #endif
 
-    bool try_extract_top(reference retval) noexcept {
+    bool try_pop(reference retval) noexcept {
         return handle_.try_extract_top(retval);
     }
 
