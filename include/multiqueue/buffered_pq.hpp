@@ -15,6 +15,7 @@
 #include "multiqueue/heap.hpp"
 #include "multiqueue/value.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <memory>
@@ -34,7 +35,7 @@ class BufferedPQ {
     using value_compare = typename pq_type::value_compare;
     using reference = typename pq_type::reference;
     using const_reference = typename pq_type::const_reference;
-    using size_type = std::size_t;
+    using size_type = typename pq_type::size_type;
 
    private:
     using insertion_buffer_type = std::array<value_type, InsertionBufferSize>;
@@ -61,19 +62,14 @@ class BufferedPQ {
         flush_insertion_buffer();
         size_type num_refill = std::min(DeletionBufferSize, pq_.size());
         del_buf_size_ = num_refill;
-        for (; num_refill != 0; --num_refill) {
-            pq_.extract_top(deletion_buffer_[num_refill - 1]);
+        while (num_refill-- != 0) {
+            pq_.extract_top(deletion_buffer_[num_refill]);
         }
     }
 
    public:
-    explicit BufferedPQ(value_compare const& comp = value_compare()) : pq_(comp) {
-        ins_buf_size_ = 0;
-        del_buf_size_ = 0;
-    }
-
-    template <typename Alloc>
-    explicit BufferedPQ(value_compare const& comp, Alloc const& alloc) : pq_(comp, alloc) {
+    template <typename... Args>
+    explicit BufferedPQ(Args&&... args) : pq_(std::forward<Args>(args)...) {
         ins_buf_size_ = 0;
         del_buf_size_ = 0;
     }
@@ -99,11 +95,24 @@ class BufferedPQ {
         }
     }
 
-    void extract_top(reference retval) {
+    void pop(reference retval) {
         assert(!empty());
         retval = std::move(deletion_buffer_[del_buf_size_ - 1]);
         pop();
     };
+
+    void push(const_reference value) {
+    // TODO
+        if (del_buf_size_ == 0 || !pq_.value_comp()(deletion_buffer_[0], value)) {
+            auto it = std::lower_bound(deletion_buffer_.begin() + 1, deletion_buffer_.begin() + del_buf_size_,
+                                       [&value, this](const_reference e) { return pq_.value_comp()(e, value); });
+            if (del_buf_size_ == DeletionBufferSize) {
+                auto tmp = std::move(deletion_buffer_[0]);
+                std::move_backward(deletion_buffer_.begin(), deletion_buffer_.begin() + del_buf_size_,
+                                   deletion_buffer_.begin() + del_buf_size_ + 1);
+            }
+        }
+    }
 
     void push(const_reference value) {
         auto it = std::find_if(deletion_buffer_.begin(), deletion_buffer_.begin() + del_buf_size_,

@@ -12,11 +12,7 @@
 #define MULTIQUEUE_HPP_INCLUDED
 
 #ifndef L1_CACHE_LINESIZE
-#define L1_CACHE_LINESIZE 64
-#endif
-
-#ifndef PAGESIZE
-#define PAGESIZE 4096
+#error Need to define L1_CACHE_LINESIZE
 #endif
 
 #include "multiqueue/guarded_pq.hpp"
@@ -53,24 +49,9 @@ struct MultiqueueConfig {
     typename StickPolicy::Config stick_policy_config;
 };
 
-template <typename KeyCompare, typename ValueTraits>
-struct ValueCompare {
-   private:
-    [[no_unique_address]] KeyCompare comp_;
-
-   public:
-    explicit ValueCompare(KeyCompare const &comp = KeyCompare{}) : comp_{comp} {
-    }
-
-    constexpr bool operator()(typename ValueTraits::value_type const &lhs,
-                              typename ValueTraits::value_type const &rhs) const noexcept {
-        return comp_(ValueTraits::key_of_value(lhs), ValueTraits::key_of_value(rhs));
-    }
-};
-
 template <typename Key, typename T, typename KeyCompare, typename StickPolicy = stick_policy::Random,
           typename ValueTraits = value_traits<Key, T>, typename SentinelTraits = sentinel_traits<Key, KeyCompare>,
-          typename PriorityQueue = Heap<typename ValueTraits::value_type, ValueCompare<KeyCompare, ValueTraits>>,
+          template <typename, typename> typename PriorityQueue = Heap,
           typename Allocator = std::allocator<typename ValueTraits::value_type>>
 class MultiQueue {
    public:
@@ -78,7 +59,19 @@ class MultiQueue {
     using mapped_type = typename ValueTraits::mapped_type;
     using value_type = typename ValueTraits::value_type;
     using key_compare = KeyCompare;
-    using value_compare = ValueCompare<key_compare, ValueTraits>;
+    struct value_compare {
+       private:
+        [[no_unique_address]] KeyCompare comp_;
+
+       public:
+        explicit value_compare(KeyCompare const &comp = KeyCompare{}) : comp_{comp} {
+        }
+
+        constexpr bool operator()(typename ValueTraits::value_type const &lhs,
+                                  typename ValueTraits::value_type const &rhs) const noexcept {
+            return comp_(ValueTraits::key_of_value(lhs), ValueTraits::key_of_value(rhs));
+        }
+    };
     using allocator_type = Allocator;
     using config_type = MultiqueueConfig<StickPolicy>;
     using size_type = std::size_t;
@@ -87,7 +80,8 @@ class MultiQueue {
 
    private:
     using alloc_traits = std::allocator_traits<allocator_type>;
-    using guarded_pq_type = GuardedPQ<ValueTraits, SentinelTraits, PriorityQueue>;
+    using pq_type = PriorityQueue<typename ValueTraits::value_type, value_compare>;
+    using guarded_pq_type = GuardedPQ<ValueTraits, SentinelTraits, pq_type>;
     using pq_alloc_type = typename std::allocator_traits<allocator_type>::template rebind_alloc<guarded_pq_type>;
     using pq_alloc_traits = std::allocator_traits<pq_alloc_type>;
 
@@ -158,37 +152,31 @@ class MultiQueue {
 
         void push(const_reference value) noexcept {
             guarded_pq_type *pq = StickPolicy::get_push_pq(mq_, data_);
-            while (!pq.try_lock()) {
+            while (!pq->try_lock()) {
                 StickPolicy::push_pq_failed(data_);
                 pq = StickPolicy::get_push_pq(mq_, data_);
             }
             pq->push(value);
             pq->unlock();
             StickPolicy::push_pq_used_callback(data_);
-            return;
         }
 
         void push(value_type &&value) noexcept {
             guarded_pq_type *pq = StickPolicy::get_push_pq(mq_, data_);
-            while (!pq.try_lock()) {
+            while (!pq->try_lock()) {
                 StickPolicy::push_pq_failed(data_);
                 pq = StickPolicy::get_push_pq(mq_, data_);
             }
             pq->push(std::move(value));
             pq->unlock();
             StickPolicy::push_pq_used_callback(data_);
-            return;
         }
 
-        bool is_empty(size_type pos) noexcept {
+        [[nodiscard]] bool is_empty(size_type pos) noexcept {
             assert(pos < mq_.num_pqs());
             return mq_.pq_list_[pos].empty();
         }
     };
-
-   private:
-    using pq_alloc_type = typename std::allocator_traits<allocator_type>::template rebind_alloc<guarded_pq_type>;
-    using pq_alloc_traits = typename std::allocator_traits<pq_alloc_type>;
 
    private:
     // False sharing is avoided by class alignment, but the members do not need to reside in individual cache lines,
@@ -285,49 +273,32 @@ class MultiQueue {
             first = second;
             first_key = second_key;
         }
-        if (first->unsafe_empty() && second->unsafe_empty()) {
-            return false;
-        }
-        if (first_key == SentinelTraits::sentinel()) {
+        if (first->unsafe_empty()) {
             return false;
         }
         // first is guaranteed to be nonempty
         first->pop(retval);
-        first->unlock();
-        StickPolicy::pop_pq_used_callback(data_);
         return true;
     }
 
     void push(const_reference value) noexcept {
-        auto index = mq_.selector_.get_push_pq(data_);
-        if (mq_.pq_list_[index].try_lock()) {
-            mq_.pq_list_[index].push(value);
-            mq_.pq_list_[index].unlock();
-            mq_.selector_.push_pq_used(true, data_);
-            return;
+        guarded_pq_type *pq = pq_list_ + fastrange64(rng_(), num_pqs_);
+        while (!pq->try_lock()) {
+            pq = pq_list_ + fastrange64(rng_(), num_pqs_);
         }
-        do {
-            index = mq_.selector_.get_fallback_push_pq(data_);
-        } while (!mq_.pq_list_[index].try_lock());
-        mq_.pq_list_[index].push(value);
-        mq_.pq_list_[index].unlock();
-        mq_.selector_.push_pq_used(false, data_);
+        pq->push(value);
     }
 
     void push(value_type &&value) noexcept {
-        auto index = mq_.selector_.get_push_pq(data_);
-        if (mq_.pq_list_[index].try_lock()) {
-            mq_.pq_list_[index].push(std::move(value));
-            mq_.pq_list_[index].unlock();
-            mq_.selector_.push_pq_used(true, data_);
-            return;
+        guarded_pq_type *pq = pq_list_ + fastrange64(rng_(), num_pqs_);
+        while (!pq->try_lock()) {
+            pq = pq_list_ + fastrange64(rng_(), num_pqs_);
         }
-        do {
-            index = mq_.selector_.get_fallback_push_pq(data_);
-        } while (!mq_.pq_list_[index].try_lock());
-        mq_.pq_list_[index].push(std::move(value));
-        mq_.pq_list_[index].unlock();
-        mq_.selector_.push_pq_used(false, data_);
+        pq->push(std::move(value));
+    }
+
+    constexpr size_type num_pqs() const noexcept {
+        return num_pqs_;
     }
 
 #ifdef MULTIQUEUE_ELEMENT_DISTRIBUTION
@@ -361,22 +332,6 @@ class MultiQueue {
         return distribution;
     }
 #endif
-
-    bool try_pop(reference retval) noexcept {
-        return handle_.try_extract_top(retval);
-    }
-
-    void push(const_reference value) noexcept {
-        handle_.push(value);
-    }
-
-    void push(value_type &&value) noexcept {
-        handle_.push(std::move(value));
-    }
-
-    constexpr size_type num_pqs() const noexcept {
-        return num_pqs_;
-    }
 
     std::string description() const {
         std::stringstream ss;
