@@ -29,6 +29,7 @@
 #include <cstdlib>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -111,70 +112,70 @@ class MultiQueue {
 
        public:
         bool try_pop(reference retval) noexcept {
-            guarded_pq_type *first = StickPolicy::get_pop_pq_1(mq_, data_);
-            guarded_pq_type *second = StickPolicy::get_pop_pq_2(mq_, data_);
-            auto first_key = first->top_key();
-            auto second_key = second->top_key();
+            size_type first_index = StickPolicy::get_pop_pq<0>(mq_, data_);
+            size_type second_index = StickPolicy::get_pop_pq<1>(mq_, data_);
+            auto first_key = mq_.pq_list_[first_index].top_key();
+            auto second_key = mq_.pq_list_[second_index].top_key();
             do {
                 if (mq_.compare_with_sentinel(first_key, second_key)) {
                     if (first_key == SentinelTraits::sentinel()) {
-                        StickPolicy::pop_pq_1_failed_callback(data_);
-                        StickPolicy::pop_pq_2_failed_callback(data_);
+                        StickPolicy::pop_failed_callback<0>(data_);
+                        StickPolicy::pop_failed_callback<1>(data_);
                         return false;
                     }
-                    if (first->try_lock_if_nonempty()) {
+                    if (mq_.pq_list_[first_index].try_lock_if_nonempty()) {
                         break;
                     }
-                    StickPolicy::pop_pq_1_failed_callback(data_);
-                    first = StickPolicy::get_pop_pq_1(mq_, data_);
-                    first_key = first->top_key();
+                    StickPolicy::pop_failed_callback<0>(data_);
+                    first_index = StickPolicy::get_pop_pq<0>(mq_, data_);
+                    first_key = mq_.pq_list_[first_index].top_key();
                 } else {
                     if (second_key == SentinelTraits::sentinel()) {
-                        StickPolicy::pop_pq_1_failed_callback(data_);
-                        StickPolicy::pop_pq_2_failed_callback(data_);
+                        StickPolicy::pop_failed_callback<0>(data_);
+                        StickPolicy::pop_failed_callback<1>(data_);
                         return false;
                     }
-                    if (second->try_lock_if_nonempty()) {
-                        first = second;
+                    if (mq_.pq_list_[second_index].try_lock_if_nonempty()) {
+                        first_index = second_index;
                         break;
                     }
-                    StickPolicy::pop_pq_2_failed_callback(data_);
-                    second = StickPolicy::get_pop_pq_2(mq_, data_);
-                    second_key = second->top_key();
+                    StickPolicy::pop_failed_callback<1>(data_);
+                    second_index = StickPolicy::get_pop_pq<1>(mq_, data_);
+                    second_key = mq_.pq_list_[second_index].top_key();
                 }
             } while (true);
             // first is guaranteed to be nonempty
-            first->pop(retval);
-            first->unlock();
-            StickPolicy::pop_pq_used_callback(data_);
+            mq_.pq_list_[first_index].pop(retval);
+            mq_.pq_list_[first_index].unlock();
+            StickPolicy::pop_callback(data_);
             return true;
         }
 
         void push(const_reference value) noexcept {
-            guarded_pq_type *pq = StickPolicy::get_push_pq(mq_, data_);
-            while (!pq->try_lock()) {
-                StickPolicy::push_pq_failed(data_);
-                pq = StickPolicy::get_push_pq(mq_, data_);
+            size_type index = StickPolicy::get_push_pq(mq_, data_);
+            while (!mq_.pq_list_[index].try_lock()) {
+                StickPolicy::push_failed_callback(data_);
+                index = StickPolicy::get_push_pq(mq_, data_);
             }
-            pq->push(value);
-            pq->unlock();
-            StickPolicy::push_pq_used_callback(data_);
+            mq_.pq_list_[index].push(value);
+            mq_.pq_list_[index].unlock();
+            StickPolicy::push_callback(data_);
         }
 
         void push(value_type &&value) noexcept {
-            guarded_pq_type *pq = StickPolicy::get_push_pq(mq_, data_);
-            while (!pq->try_lock()) {
-                StickPolicy::push_pq_failed(data_);
-                pq = StickPolicy::get_push_pq(mq_, data_);
+            size_type index = StickPolicy::get_push_pq(mq_, data_);
+            while (!mq_.pq_list_[index].try_lock()) {
+                StickPolicy::push_failed_callback(data_);
+                index = StickPolicy::get_push_pq(mq_, data_);
             }
-            pq->push(std::move(value));
-            pq->unlock();
-            StickPolicy::push_pq_used_callback(data_);
+            mq_.pq_list_[index].push(std::move(value));
+            mq_.pq_list_[index].unlock();
+            StickPolicy::push_callback(data_);
         }
 
         [[nodiscard]] bool is_empty(size_type pos) noexcept {
             assert(pos < mq_.num_pqs());
-            return mq_.pq_list_[pos].empty();
+            return mq_.pq_list_[pos].concurrent_empty();
         }
     };
 
@@ -332,16 +333,6 @@ class MultiQueue {
         return distribution;
     }
 #endif
-
-    std::string description() const {
-        std::stringstream ss;
-        ss << "multiqueue\n\t";
-        ss << "PQs: " << num_pqs() << "\n\t";
-        ss << "Sentinel: " << Sentinel()() << "\n\t";
-        ss << "Selection strategy: " << selector_.description() << "\n\t";
-        ss << guarded_pq_type::description();
-        return ss.str();
-    }
 };
 
 }  // namespace multiqueue

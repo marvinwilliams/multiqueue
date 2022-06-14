@@ -27,7 +27,8 @@ class None {
 
     struct ThreadData {
         xoroshiro256starstar rng;
-        ThreadData(std::uint64_t seed, unsigned int /* id */) noexcept : rng{seed} {
+
+        ThreadData(unsigned int /* id */, std::uint64_t seed) noexcept : rng{seed} {
         }
     };
 
@@ -36,42 +37,32 @@ class None {
         }
     };
 
-    static std::string description() {
-        return "none";
-    }
-
    private:
-    static std::size_t get_random_index(xoroshiro256starstar &rng, std::size_t max) {
+    static std::size_t get_random_index(xoroshiro256starstar &rng, std::size_t max) noexcept {
         return fastrange64(rng(), max);
     }
 
    public:
-    template <typename MultiQueue>
-    static typename MultiQueue::guarded_pq_type *get_pop_pq_1(MultiQueue &mq, ThreadData &data) {
-        return &mq.pq_list_[get_random_index(data.rng, mq.num_pqs_)];
+    template <std::size_t /* I */>
+    static std::size_t get_pop_pq(std::size_t num_pqs, ThreadData &thread_data, GlobalData &) noexcept {
+        return get_random_index(thread_data.rng, num_pqs);
     }
 
-    template <typename MultiQueue>
-    static typename MultiQueue::guarded_pq_type *get_pop_pq_2(MultiQueue &mq, ThreadData &data) {
-        return &mq.pq_list_[get_random_index(data.rng, mq.num_pqs_)];
+    template <std::size_t /* I */>
+    static void pop_failed_callback(ThreadData &) noexcept {
     }
 
-    static void pop_pq_1_used_callback(ThreadData &) noexcept {
+    static void pop_callback(ThreadData &) noexcept {
     }
 
-    static void pop_pq_2_used_callback(ThreadData &) noexcept {
+    static std::size_t get_push_pq(std::size_t num_pqs, ThreadData &thread_data, GlobalData &) noexcept {
+        return get_random_index(thread_data.rng, num_pqs);
     }
 
-    static void pop_pq_1_failed_callback(ThreadData &) noexcept {
+    static void push_failed_callback(ThreadData &) noexcept {
     }
 
-    static void pop_pq_2_failed_callback(ThreadData &) noexcept {
-    }
-
-    static void push_pq_used_callback(ThreadData &) noexcept {
-    }
-
-    static void push_pq_failed_callback(ThreadData &) noexcept {
+    static void push_callback(ThreadData &) noexcept {
     }
 };
 

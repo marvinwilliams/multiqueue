@@ -9,8 +9,8 @@
 **/
 
 #pragma once
-#ifndef SELECTION_STRATEGY_SWAPPING_HPP_INCLUDED
-#define SELECTION_STRATEGY_SWAPPING_HPP_INCLUDED
+#ifndef STICK_POLICY_SWAPPING_HPP_INCLUDED
+#define STICK_POLICY_SWAPPING_HPP_INCLUDED
 
 #include "multiqueue/external/fastrange.h"
 #include "multiqueue/external/xoroshiro256starstar.hpp"
@@ -22,21 +22,25 @@
 #include <string>
 #include <vector>
 
-namespace multiqueue::selection_strategy {
+#ifndef L1_CACHE_LINESIZE
+#error Need to define L1_CACHE_LINESIZE
+#endif
+
+namespace multiqueue::stick_policy {
 
 class Swapping {
    public:
-    struct Parameters {
+    struct Config {
         unsigned int stickiness = 64;
     };
 
-    struct handle_data_t {
-        xoroshiro256starstar rng;
-        unsigned int id;
+    struct ThreadData {
+        unsigned int index;
         unsigned int push_count = 0;
-        unsigned int delete_count = 0;
+        unsigned int pop_count[2] = {0, 0};
+        xoroshiro256starstar rng;
 
-        handle_data_t(std::uint64_t seed, unsigned int index) : rng{seed}, id{index} {
+        ThreadData(unsigned int id, std::uint64_t seed) : index{id}, rng{seed} {
         }
     };
 
@@ -44,98 +48,85 @@ class Swapping {
         std::atomic_size_t index;
     };
 
-    unsigned int stickiness_;
-    std::vector<AlignedIndex> assignment_;
+    struct GlobalData {
+        using Assignment = std::vector<AlignedIndex>;
 
-    Swapping(std::size_t num_pqs, Parameters const &params) : stickiness_{params.stickiness}, assignment_(num_pqs) {
-        assert(stickiness_ > 0);
-        for (std::size_t i = 0; i < assignment_.size(); ++i) {
-            assignment_[i].index.store(i, std::memory_order_relaxed);
-        }
-    }
+        unsigned int stickiness;
+        Assignment assignment;
 
-    std::string description() const {
-        std::stringstream ss;
-        ss << "swapping\n";
-        ss << "\tStickiness: " << stickiness_;
-        return ss.str();
-    }
-
-    std::size_t swap_assignment(unsigned int pq, handle_data_t &handle_data) {
-        assert(pq < assignment_.size());
-        // Cannot be invalid, only thread itself invalidates
-        std::size_t old_index = assignment_[pq].index.exchange(assignment_.size(), std::memory_order_relaxed);
-        assert(old_index < assignment_.size());
-        do {
-            std::size_t other_pq = fastrange64(handle_data.rng(), assignment_.size());
-            std::size_t other_index = assignment_[other_pq].index.load(std::memory_order_relaxed);
-            if (other_index != assignment_.size() &&
-                assignment_[other_pq].index.compare_exchange_strong(other_index, old_index,
-                                                                    std::memory_order_relaxed)) {
-                assignment_[pq].index.store(other_index, std::memory_order_relaxed);
-                return other_index;
+        GlobalData(std::size_t num_pqs, Config const &config) : stickiness{config.stickiness}, assignment(num_pqs) {
+            assert(stickiness > 0);
+            for (std::size_t i = 0; i < assignment.size(); ++i) {
+                assignment[i].index = i;
             }
-        } while (true);
-    }
-
-    std::pair<std::size_t, std::size_t> get_delete_pqs(handle_data_t &handle_data) {
-        assert(handle_data.delete_count <= stickiness_);
-        if (handle_data.delete_count == stickiness_) {
-            std::size_t first_index = swap_assignment(handle_data.id * 3 + 1, handle_data);
-            std::size_t second_index = swap_assignment(handle_data.id * 3 + 2, handle_data);
-            handle_data.delete_count = 0;
-            assert(first_index < assignment_.size() && second_index < assignment_.size());
-            return {first_index, second_index};
         }
-        std::size_t first_index = assignment_[handle_data.id * 3 + 1].index.load(std::memory_order_relaxed);
-        std::size_t second_index = assignment_[handle_data.id * 3 + 2].index.load(std::memory_order_relaxed);
-        assert(first_index < assignment_.size() && second_index < assignment_.size());
-        return {first_index, second_index};
+    };
+
+   private:
+    static std::size_t get_random_index(xoroshiro256starstar &rng, std::size_t max) noexcept {
+        return fastrange64(rng(), max);
     }
 
-    void delete_pq_used(bool no_fail, handle_data_t &handle_data) noexcept {
-        if (no_fail) {
-            ++handle_data.delete_count;
-        } else {
-            handle_data.delete_count = 1;
+    static std::size_t swap_assignment(GlobalData::Assignment &assignment, unsigned int index,
+                                       xoroshiro256starstar &rng) {
+        assert(index < assignment.size());
+        // Cannot be invalid, only thread itself invalidates
+        std::size_t old_pq = assignment[index].index.exchange(assignment.size(), std::memory_order_relaxed);
+        assert(old_pq < assignment.size());
+        std::size_t other_index;
+        std::size_t other_pq;
+        do {
+            other_index = get_random_index(rng, assignment.size());
+            other_pq = assignment[other_index].index.load(std::memory_order_relaxed);
+        } while (other_pq == assignment.size() ||
+                 !assignment[other_index].index.compare_exchange_strong(other_pq, old_pq, std::memory_order_relaxed));
+        assignment[index].index.store(other_pq, std::memory_order_relaxed);
+        return other_pq;
+    }
+
+   public:
+    template <std::size_t I>
+    static std::size_t get_pop_pq(std::size_t /* num_pqs */, ThreadData &thread_data,
+                                  GlobalData &global_data) noexcept {
+        static_assert(I < 2, "Index has to be 0 or 1");
+        if (thread_data.pop_count[I] == 0) {
+            thread_data.pop_count[I] = global_data.stickiness;
+            return swap_assignment(global_data.assignment, thread_data.index * 3 + I, thread_data.rng);
         }
+        return global_data.assignment[thread_data.index * 3 + I].index.load(std::memory_order_relaxed);
     }
 
-    std::pair<std::size_t, std::size_t> get_fallback_delete_pqs(handle_data_t &handle_data) {
-        std::size_t first_index = swap_assignment(handle_data.id * 3 + 1, handle_data);
-        std::size_t second_index = swap_assignment(handle_data.id * 3 + 2, handle_data);
-        assert(first_index < assignment_.size() && second_index < assignment_.size());
-        return {first_index, second_index};
+    template <std::size_t I>
+    static void pop_failed_callback(ThreadData &thread_data) noexcept {
+        static_assert(I < 2, "Index has to be 0 or 1");
+        thread_data.pop_count[I] = 0;
     }
 
-    std::size_t get_push_pq(handle_data_t &handle_data) noexcept {
-        assert(handle_data.delete_count <= stickiness_);
-        if (handle_data.push_count == stickiness_) {
-            std::size_t index = swap_assignment(handle_data.id * 3, handle_data);
-            handle_data.push_count = 0;
-            assert(index < assignment_.size());
-            return index;
+    static void pop_callback(ThreadData &thread_data) noexcept {
+        assert(thread_data.pop_count[0] > 0 && thread_data.pop_count[1] > 0);
+        --thread_data.pop_count[0];
+        --thread_data.pop_count[1];
+    }
+
+    static std::size_t get_push_pq(std::size_t /* num_pqs */, ThreadData &thread_data,
+                                   GlobalData &global_data) noexcept {
+        if (thread_data.push_count == 0) {
+            thread_data.push_count = global_data.stickiness;
+            return swap_assignment(global_data.assignment, thread_data.index * 3 + 2, thread_data.rng);
         }
-        std::size_t index = assignment_[handle_data.id * 3].index.load(std::memory_order_relaxed);
-        assert(index < assignment_.size());
-        return index;
+        return global_data.assignment[thread_data.index * 3 + 2].index.load(std::memory_order_relaxed);
     }
 
-    void push_pq_used(bool no_fail, handle_data_t &handle_data) noexcept {
-        if (no_fail) {
-            ++handle_data.push_count;
-        } else {
-            handle_data.push_count = 1;
-        }
+    static void push_failed_callback(ThreadData &data) noexcept {
+        data.push_count = 0;
     }
 
-    std::size_t get_fallback_push_pq(handle_data_t &handle_data) noexcept {
-        std::size_t index = swap_assignment(handle_data.id * 3, handle_data);
-        assert(index < assignment_.size());
-        return index;
+    static void push_callback(ThreadData &data) noexcept {
+        assert(data.push_count > 0);
+        --data.push_count;
     }
 };
 
-}  // namespace multiqueue::selection_strategy
+}  // namespace multiqueue::stick_policy
 
-#endif  //! SELECTION_STRATEGY_SWAPPING_HPP_INCLUDED
+#endif  //! STICK_POLICY_SWAPPING_HPP_INCLUDED

@@ -29,75 +29,70 @@ class Random {
         unsigned int stickiness = 8;
     };
 
-    struct handle_data_t {
-        xoroshiro256starstar rng;
+    struct ThreadData {
         unsigned int push_count = 0;
-        unsigned int delete_count = 0;
+        unsigned int pop_count[2] = {0, 0};
         std::size_t push_index;
-        std::pair<std::size_t, std::size_t> delete_index;
+        std::size_t pop_index[2];
+        xoroshiro256starstar rng;
 
-        handle_data_t(std::uint64_t seed, unsigned int /* id */) noexcept : rng{seed} {
+        ThreadData(unsigned int /* id */, std::uint64_t seed) noexcept : rng{seed} {
+        }
+    };
+
+    struct GlobalData {
+        unsigned int stickiness;
+
+        GlobalData(std::size_t /* num_pqs */, Config const &config) noexcept {
+            stickiness = config.stickiness;
         }
     };
 
    private:
-    std::size_t num_pqs_;
-    unsigned int stickiness_;
+    static std::size_t get_random_index(xoroshiro256starstar &rng, std::size_t max) noexcept {
+        return fastrange64(rng(), max);
+    }
 
    public:
-    Random(std::size_t num_pqs, Config const &params) noexcept : num_pqs_{num_pqs}, stickiness_{params.stickiness} {
-        assert(stickiness_ > 0);
-    }
-
-    std::string description() const {
-        std::stringstream ss;
-        ss << "random\n";
-        ss << "\tStickiness: " << stickiness_;
-        return ss.str();
-    }
-
-    std::pair<std::size_t, std::size_t> get_delete_pqs(handle_data_t &handle_data) {
-        if (handle_data.delete_count == 0) {
-            handle_data.delete_index = {fastrange64(handle_data.rng(), num_pqs_),
-                                        fastrange64(handle_data.rng(), num_pqs_)};
-            handle_data.delete_count = stickiness_;
+    template <std::size_t I>
+    static std::size_t get_pop_pq(std::size_t num_pqs, ThreadData &thread_data, GlobalData &global_data) noexcept {
+        static_assert(I < 2, "Index has to be 0 or 1");
+        if (thread_data.pop_count[I] == 0) {
+            thread_data.pop_index[I] = get_random_index(thread_data.rng, num_pqs);
+            thread_data.pop_count[I] = global_data.stickiness;
         }
 
-        return handle_data.delete_index;
+        return thread_data.pop_index[I];
     }
 
-    void delete_pq_used(bool no_fail, handle_data_t &handle_data) noexcept {
-        if (no_fail) {
-            --handle_data.delete_count;
-        } else {
-            handle_data.delete_count = stickiness_ - 1;
+    template <std::size_t I>
+    static void pop_failed_callback(ThreadData &thread_data) noexcept {
+        static_assert(I < 2, "Index has to be 0 or 1");
+        thread_data.pop_count[I] = 0;
+    }
+
+    void pop_callback(ThreadData &thread_data) noexcept {
+        assert(thread_data.pop_count[0] > 0 && thread_data.pop_count[1] > 0);
+        --thread_data.pop_count[0];
+        --thread_data.pop_count[1];
+    }
+
+    static std::size_t get_push_pq(std::size_t num_pqs, ThreadData &thread_data, GlobalData &global_data) noexcept {
+        if (thread_data.push_count == 0) {
+            thread_data.push_index = get_random_index(thread_data.rng, num_pqs);
+            thread_data.push_count = global_data.stickiness;
         }
+
+        return thread_data.push_index;
     }
 
-    std::pair<std::size_t, std::size_t> get_fallback_delete_pqs(handle_data_t &handle_data) noexcept {
-        return handle_data.delete_index = {fastrange64(handle_data.rng(), num_pqs_),
-                                           fastrange64(handle_data.rng(), num_pqs_)};
+    static void push_failed_callback(ThreadData &thread_data) noexcept {
+        thread_data.push_count = 0;
     }
 
-    std::size_t get_push_pq(handle_data_t &handle_data) noexcept {
-        if (handle_data.push_count == 0) {
-            handle_data.push_index = fastrange64(handle_data.rng(), num_pqs_);
-            handle_data.push_count = stickiness_;
-        }
-
-        return handle_data.push_index;
-    }
-
-    void push_pq_used(bool no_fail, handle_data_t &handle_data) noexcept {
-        if (no_fail) {
-            --handle_data.push_count;
-        } else {
-            handle_data.push_count = stickiness_ - 1;
-        }
-    }
-
-    std::size_t get_fallback_push_pq(handle_data_t &handle_data) noexcept {
-        return handle_data.push_index = fastrange64(handle_data.rng(), num_pqs_);
+    static void push_callback(ThreadData &thread_data) noexcept {
+        assert(thread_data.push_count > 0);
+        --thread_data.push_count;
     }
 };
 

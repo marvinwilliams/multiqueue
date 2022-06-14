@@ -9,8 +9,8 @@
 **/
 
 #pragma once
-#ifndef SELECTION_STRATEGY_PERM_HPP_INCLUDED
-#define SELECTION_STRATEGY_PERM_HPP_INCLUDED
+#ifndef STICK_POLICY_PERM_HPP_INCLUDED
+#define STICK_POLICY_PERM_HPP_INCLUDED
 
 #include "multiqueue/external/fastrange.h"
 #include "multiqueue/external/xoroshiro256starstar.hpp"
@@ -25,114 +25,126 @@
 #include <utility>
 #include <vector>
 
+#ifndef L1_CACHE_LINESIZE
+#error Need to define L1_CACHE_LINESIZE
+#endif
 
-namespace multiqueue::selection_strategy {
+namespace multiqueue::stick_policy {
 
 class Permuting {
    public:
-    struct Parameters {
+    struct Config {
         unsigned int stickiness = 64;
     };
 
-    struct handle_data_t {
+    struct ThreadData {
+        bool last_failed;
+        unsigned int index;
+        unsigned int push_count = 0;
+        unsigned int pop_count = 0;
         xoroshiro256starstar rng;
-        unsigned int id;
 
-        handle_data_t(std::uint64_t seed, unsigned int index) : rng{seed}, id{index} {
+        ThreadData(unsigned int id, std::uint64_t seed) : last_failed{false}, index{id}, rng{seed} {
         }
     };
 
    private:
-    struct alignas(L1_CACHE_LINESIZE) Permutation {
-        // Upper half a, lower half b
-        // i*a + b mod z
-        static constexpr std::uint64_t mask = ((std::uint64_t(1) << 32) - 1);
-        std::atomic_uint64_t n;
-    };
+    static constexpr std::uint64_t Mask = ((std::uint64_t{1} << 32) - 1);
 
-    std::size_t log_num_pqs_;
-    unsigned int stickiness;
-    unsigned int count;
-    Permutation perm;
-
-   public:
-    Permuting(std::size_t num_pqs, Parameters const &params)
-        : stickiness{params.stickiness}, count{stickiness}, perm{to_perm(1, 0)} {
-        assert(stickiness > 0);
-        log_num_pqs_ = 0;
-        num_pqs >>= 1;
-        while (num_pqs != 0) {
-            num_pqs >>= 1;
-            ++log_num_pqs_;
-        }
-    }
-
-    std::string description() const {
-        std::stringstream ss;
-        ss << "permutation\n";
-        ss << "\tStickiness: " << stickiness;
-        return ss.str();
-    }
-
-    static constexpr std::size_t get_perm(std::uint64_t p, std::size_t i, std::size_t log) noexcept {
-        return (i * (p >> 32) + (Permutation::mask & p)) & ((static_cast<std::size_t>(1) << log) - 1);
+    static constexpr std::size_t get_index(std::uint64_t p, std::size_t i, std::size_t num_pqs) noexcept {
+        return (i * (p >> 32) + (p & Mask)) % num_pqs;
     }
 
     static constexpr std::uint64_t to_perm(std::uint64_t a, std::uint64_t b) noexcept {
-        return (a << 32 | (Permutation::mask & b));
+        return (a << 32) | (b & Mask);
     }
 
-    std::uint64_t update_permutation(handle_data_t &handle_data) {
-        std::uint64_t a = 2 * handle_data.rng() + 1;
-        std::uint64_t b = handle_data.rng();
-        std::uint64_t p = to_perm(a, b);
-        perm.n.store(p, std::memory_order_relaxed);
-        return p;
+    static std::size_t get_random_index(xoroshiro256starstar &rng, std::size_t max) noexcept {
+        return fastrange64(rng(), max);
     }
 
-    std::pair<std::size_t, std::size_t> get_delete_pqs(handle_data_t &handle_data) {
-        if (handle_data.id == 0 && count == 0) {
-            std::uint64_t p = update_permutation(handle_data);
-            count = stickiness;
-            return {get_perm(p, 3 * handle_data.id + 1, log_num_pqs_),
-                    get_perm(p, 3 * handle_data.id + 2, log_num_pqs_)};
+   public:
+    struct GlobalData {
+        std::uint64_t pq_mask;
+        unsigned int stickiness;
+        // Upper half a, lower half b
+        // i*a + b mod z
+        std::vector<std::uint64_t> valid_factors;
+        std::atomic_uint64_t perm;
+
+        GlobalData(std::size_t num_pqs, Config const &config)
+            : stickiness{config.stickiness}, perm{to_perm(1, 0)} {
+            assert(stickiness > 0);
+            for (std::uint64_t i = 1; i < num_pqs; ++i) {
+                if (std::gcd(i, num_pqs) == 1) {
+                    valid_factors.push_back(i);
+                }
+            }
         }
-        std::uint64_t p = perm.n.load(std::memory_order_relaxed);
-        return {get_perm(p, 3 * handle_data.id + 1, log_num_pqs_), get_perm(p, 3 * handle_data.id + 2, log_num_pqs_)};
-    }
 
-    void delete_pq_used(bool /* no_fail */, handle_data_t &handle_data) noexcept {
-        if (handle_data.id == 0) {
-            --count;
+        std::uint64_t update_permutation(xoroshiro256starstar &rng) {
+            std::uint64_t a = valid_factors[fastrange64(rng(), valid_factors.size())];
+            std::uint64_t p = to_perm(a, rng());
+            perm.store(p, std::memory_order_relaxed);
+            return p;
         }
-    }
+    };
 
-    std::pair<std::size_t, std::size_t> get_fallback_delete_pqs(handle_data_t &handle_data) noexcept {
-        return {fastrange64(handle_data.rng(), 1 << log_num_pqs_), fastrange64(handle_data.rng(), 1 << log_num_pqs_)};
-    }
-
-    std::size_t get_push_pq(handle_data_t &handle_data) noexcept {
+    template <std::size_t I>
+    static std::size_t get_pop_pq(std::size_t num_pqs, ThreadData &thread_data, GlobalData &global_data) noexcept {
+        static_assert(I < 2, "Index has to be 0 or 1");
+        if (thread_data.last_failed) {
+            thread_data.last_failed = false;
+            return get_random_index(thread_data.rng, num_pqs);
+        }
         std::uint64_t p;
-        if (handle_data.id == 0 && count == 0) {
-            p = update_permutation(handle_data);
-            count = stickiness;
+        if (thread_data.index == 0 && thread_data.pop_count == 0) {
+            p = global_data.update_permutation(thread_data.rng);
+            thread_data.pop_count = global_data.stickiness;
         } else {
-            p = perm.n.load(std::memory_order_relaxed);
+            p = global_data.perm.load(std::memory_order_relaxed);
         }
-        return get_perm(p, 3 * handle_data.id, log_num_pqs_);
+        return get_index(p, thread_data.index * 3 + I, num_pqs);
     }
 
-    void push_pq_used(bool /* no_fail */, handle_data_t &handle_data) noexcept {
-        if (handle_data.id == 0) {
-            --count;
+    template <std::size_t I>
+    static void pop_failed_callback(ThreadData &thread_data) noexcept {
+        static_assert(I < 2, "Index has to be 0 or 1");
+        thread_data.last_failed = true;
+    }
+
+    static void pop_callback(ThreadData &thread_data) noexcept {
+        if (thread_data.index == 0) {
+            --thread_data.pop_count;
         }
     }
 
-    std::size_t get_fallback_push_pq(handle_data_t &handle_data) noexcept {
-        return fastrange64(handle_data.rng(), 1 << log_num_pqs_);
+    static std::size_t get_push_pq(std::size_t num_pqs, ThreadData &thread_data, GlobalData &global_data) noexcept {
+        if (thread_data.last_failed) {
+            thread_data.last_failed = false;
+            return get_random_index(thread_data.rng, num_pqs);
+        }
+        std::uint64_t p;
+        if (thread_data.index == 0 && thread_data.push_count == 0) {
+            p = global_data.update_permutation(thread_data.rng);
+            thread_data.push_count = global_data.stickiness;
+        } else {
+            p = global_data.perm.load(std::memory_order_relaxed);
+        }
+        return get_index(p, thread_data.index * 3 + 2, num_pqs);
+    }
+
+    static void push_failed_callback(ThreadData &thread_data) noexcept {
+        thread_data.last_failed = true;
+    }
+
+    static void push_callback(ThreadData &thread_data) noexcept {
+        if (thread_data.index == 0) {
+            --thread_data.push_count;
+        }
     }
 };
 
-}  // namespace multiqueue::selection_strategy
+}  // namespace multiqueue::stick_policy
 
-#endif  //! SELECTION_STRATEGY_PERM_HPP_INCLUDED
+#endif  //! STICK_POLICY_PERM_HPP_INCLUDED

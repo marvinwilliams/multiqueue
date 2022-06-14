@@ -15,6 +15,7 @@
 #include <atomic>
 #include <cassert>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -32,6 +33,7 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
     using key_type = typename ValueTraits::key_type;
     using value_type = typename ValueTraits::value_type;
     using pq_type = PriorityQueue;
+    using value_compare = typename pq_type::value_compare;
     using reference = typename pq_type::reference;
     using const_reference = typename pq_type::const_reference;
     using size_type = typename pq_type::size_type;
@@ -42,26 +44,34 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
     pq_type pq_;
 
    public:
-    template <typename... Args>
-    explicit GuardedPQ(Args&&... args)
-        : lock{false}, top_key{SentinelTraits::sentinel()}, pq_(std::forward<Args>(args)...) {
+    explicit GuardedPQ(value_compare const& comp = value_compare())
+        : lock_{false}, top_key_{SentinelTraits::sentinel()}, pq_(comp) {
+    }
+
+    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<pq_type, Alloc>>>
+    explicit GuardedPQ(value_compare const& comp, Alloc const& alloc)
+        : lock_{false}, top_key_{SentinelTraits::sentinel()}, pq_(comp, alloc) {
+    }
+
+    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<pq_type, Alloc>>>
+    explicit GuardedPQ(Alloc const& alloc) : lock_{false}, top_key_{SentinelTraits::sentinel()}, pq_(alloc) {
     }
 
     bool is_locked() noexcept {
-        return lock.load(std::memory_order_relaxed);
+        return lock_.load(std::memory_order_relaxed);
     }
 
     bool try_lock() noexcept {
         // Maybe do not test?
-        return !is_locked() && !lock.exchange(true, std::memory_order_acquire);
+        return !is_locked() && !lock_.exchange(true, std::memory_order_acquire);
     }
 
     bool try_lock_if_nonempty() noexcept {
         if (!try_lock()) {
             return false;
         }
-        if (pq_.empty()) {
-            unlock();
+        if (empty()) {
+            lock_.store(false, std::memory_order_release);
             return false;
         }
         return true;
@@ -69,32 +79,22 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
 
     void unlock() noexcept {
         assert(is_locked());
-        lock.store(false, std::memory_order_release);
-    }
-
-    void unlock_update() noexcept {
-        assert(is_locked());
         if (!pq_.empty()) {
-            top_key.store(ValueTraits::key_of_value(pq_.top(), std::memory_order_relaxed);
+            top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
         } else {
-            top_key.store(SentinelTraits::sentinel(), std::memory_order_relaxed);
+            top_key_.store(SentinelTraits::sentinel(), std::memory_order_relaxed);
         }
-        lock.store(false, std::memory_order_release);
+        lock_.store(false, std::memory_order_release);
     }
 
-    [[nodiscard]] bool empty() const noexcept {
-        return top_key() == SentinelTraits::sentinel();
+    [[nodiscard]] bool concurrent_empty() const noexcept {
+        return top_key_.load(std::memory_order_relaxed) == SentinelTraits::sentinel();
     }
 
-    void pop() {
-        assert(!unsafe_empty());
-        pq_.pop();
+    value_type pop() {
+        assert(!empty());
+        return pq_.pop();
     }
-
-    void pop(reference retval) {
-        assert(!unsafe_empty());
-        pq_.extract_top(retval);
-    };
 
     void push(const_reference value) {
         pq_.push(value);
@@ -108,23 +108,17 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
         pq_.clear();
     }
 
-    [[nodiscard]] bool unsafe_empty() const noexcept {
+    [[nodiscard]] bool empty() const noexcept {
         return pq_.empty();
     }
 
-    size_type unsafe_size() const noexcept {
+    size_type size() const noexcept {
         return pq_.size();
     }
 
-    const_reference unsafe_top() const {
-        assert(!unsafe_empty());
+    const_reference top() const {
+        assert(!empty());
         return pq_.top();
-    }
-
-    static std::string description() {
-        std::stringstream ss;
-        ss << pq_type::description();
-        return ss.str();
     }
 };
 
