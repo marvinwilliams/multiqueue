@@ -51,21 +51,20 @@ class Heap {
 
     using size_type = typename container_type::size_type;
 
+   protected:
+    container_type c;
+    [[no_unique_address]] value_compare comp;
+
    private:
-    static constexpr size_type degree_ = Degree;
     static constexpr size_type root = size_type{0};
 
-    container_type data_;
-    [[no_unique_address]] value_compare comp_;
-
-   private:
     static constexpr size_type parent(size_type index) noexcept {
         HEAP_ASSERT(index != root);
-        return (index - size_type(1)) / degree_;
+        return (index - size_type(1)) / Degree;
     }
 
     static constexpr size_type first_child(size_type index) noexcept {
-        return index * degree_ + size_type(1);
+        return index * Degree + size_type(1);
     }
 
     // returns the index of the first node without all children
@@ -75,22 +74,18 @@ class Heap {
     }
 
     // Find the index of the smallest node smaller than provided val
-    // If no index is smaller than parent, return parent
-    size_type top_child(size_type first, size_type last, value_type const &val) const {
+    // If no index is smaller than val, return parent
+    size_type top_child(size_type first, size_type last, value_type val) const {
         HEAP_ASSERT(first <= last);
         HEAP_ASSERT(last <= size());
+        auto best = last;
         for (; first != last; ++first) {
-            if (comp_(data_[first], val)) {
-                break;
+            if (comp(c[first], val)) {
+                best = first;
+                val = c[first];
             }
         }
-        auto top = first;
-        for (; first != last; ++first) {
-            if (comp_(data_[first], data_[top])) {
-                top = first;
-            }
-        }
-        return top;
+        return best;
     }
 
     void sift_up(size_type index) {
@@ -98,105 +93,98 @@ class Heap {
         if (index == root) {
             return;
         }
-        value_type value = std::move(data_[index]);
+        value_type value = std::move(c[index]);
         size_type p = parent(index);
-        while (comp_(value, data_[p])) {
-            data_[index] = std::move(data_[p]);
+        while (comp(value, c[p])) {
+            c[index] = std::move(c[p]);
             index = p;
             if (index == root) {
                 break;
             }
             p = parent(index);
         }
-        data_[index] = std::move(value);
+        c[index] = std::move(value);
     }
 
     void sift_down(size_type index) {
         HEAP_ASSERT(index < size());
-        value_type value = std::move(data_[index]);
+        value_type value = std::move(c[index]);
         size_type const first_nonfull = current_parrent();
         while (index < first_nonfull) {
             auto const first = first_child(index);
-            auto const next = top_child(first, first + degree_, value);
-            if (next == first + degree_) {
-                data_[index] = std::move(value);
+            auto const next = top_child(first, first + Degree, value);
+            if (next == first + Degree) {
+                c[index] = std::move(value);
                 return;
             }
-            data_[index] = std::move(data_[next]);
+            c[index] = std::move(c[next]);
             index = next;
         }
         if (index == first_nonfull) {
             auto const first = first_child(index);
             auto const next = top_child(first, size(), value);
             if (next != size()) {
-                data_[index] = std::move(data_[next]);
+                c[index] = std::move(c[next]);
                 index = next;
             }
         }
-        data_[index] = std::move(value);
+        c[index] = std::move(value);
     }
 
    public:
-    explicit Heap(value_compare const &comp = value_compare()) noexcept : data_(), comp_{comp} {
+    explicit Heap(value_compare const &comp = value_compare()) noexcept : c(), comp{comp} {
     }
 
     template <typename Alloc>
-    explicit Heap(value_compare const &comp, Alloc const &alloc) noexcept : data_(alloc), comp_{comp} {
+    explicit Heap(value_compare const &comp, Alloc const &alloc) noexcept : c(alloc), comp{comp} {
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept {
-        return data_.empty();
+        return c.empty();
     }
 
     constexpr size_type size() const noexcept {
-        return data_.size();
+        return c.size();
     }
 
     constexpr const_reference top() const {
-        return data_.front();
+        return c.front();
     }
 
     void pop() {
         HEAP_ASSERT(!empty());
         if (size() > size_type(1)) {
-            data_.front() = std::move(data_.back());
-            data_.pop_back();
+            c.front() = std::move(c.back());
+            c.pop_back();
             sift_down(0);
         } else {
-            data_.pop_back();
+            c.pop_back();
         }
         HEAP_ASSERT(verify());
     }
 
-    void extract_top(reference retval) {
-        HEAP_ASSERT(!data_.empty());
-        retval = std::move(data_.front());
-        pop();
-        HEAP_ASSERT(verify());
-    }
-
     void push(const_reference value) {
-        data_.push_back(value);
+        c.push_back(value);
         sift_up(size() - 1);
         HEAP_ASSERT(verify());
     }
 
     void push(value_type &&value) {
-        data_.push_back(std::move(value));
+        c.push_back(std::move(value));
         sift_up(size() - 1);
         HEAP_ASSERT(verify());
     }
 
     void reserve(size_type cap) {
-        data_.reserve(cap);
+        c.reserve(cap);
     }
 
     constexpr void clear() noexcept {
-        data_.clear();
+        c.clear();
     }
 
     constexpr value_compare value_comp() const {
-        return comp_;
+        return comp;
     }
 
     bool verify() const noexcept {
@@ -206,18 +194,12 @@ class Heap {
                 if (first + j >= size()) {
                     return true;
                 }
-                if (comp_(data_[first + j], data_[i])) {
+                if (comp(c[first + j], c[i])) {
                     return false;
                 }
             }
         }
         return true;
-    }
-
-    static std::string description() {
-        std::stringstream ss;
-        ss << "Heap degree: " << Degree;
-        return ss.str();
     }
 };
 
