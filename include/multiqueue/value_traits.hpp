@@ -12,7 +12,6 @@
 #ifndef VALUE_TRAITS_HPP_INCLUDED
 #define VALUE_TRAITS_HPP_INCLUDED
 
-#include <type_traits>
 #include <utility>
 
 namespace multiqueue {

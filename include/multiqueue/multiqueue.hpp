@@ -11,15 +11,11 @@
 #ifndef MULTIQUEUE_HPP_INCLUDED
 #define MULTIQUEUE_HPP_INCLUDED
 
-#ifndef L1_CACHE_LINESIZE
-#error Need to define L1_CACHE_LINESIZE
-#endif
+#include "multiqueue/build_config.hpp"
 
 #include "multiqueue/guarded_pq.hpp"
-#include "multiqueue/heap.hpp"
 #include "multiqueue/sentinel_traits.hpp"
 #include "multiqueue/value_traits.hpp"
-#include "stick_policy/random.hpp"
 
 #include "multiqueue/external/fastrange.h"
 #include "multiqueue/external/xoroshiro256starstar.hpp"
@@ -41,6 +37,10 @@
 #include <vector>
 #endif
 
+#ifndef L1_CACHE_LINESIZE
+#error Need to define L1_CACHE_LINESIZE
+#endif
+
 namespace multiqueue {
 
 template <typename StickPolicy>
@@ -50,27 +50,31 @@ struct MultiqueueConfig {
     typename StickPolicy::Config stick_policy_config;
 };
 
-template <typename Key, typename T, typename KeyCompare, typename StickPolicy = stick_policy::Random,
+template <typename Key, typename T, typename KeyCompare, typename StickPolicy = BuildConfig::DefaultStickPolicy,
+          template <typename, typename> typename PriorityQueue = BuildConfig::DefaultPriorityQueue,
           typename ValueTraits = value_traits<Key, T>, typename SentinelTraits = sentinel_traits<Key, KeyCompare>,
-          template <typename, typename> typename PriorityQueue = Heap,
           typename Allocator = std::allocator<typename ValueTraits::value_type>>
 class MultiQueue {
    public:
+    static_assert(std::is_same_v<Key, typename ValueTraits::key_type> &&
+                      std::is_same_v<T, typename ValueTraits::mapped_type>,
+                  "Key and T must be the same in ValueTraits");
+    static_assert(std::is_same_v<Key, typename SentinelTraits::type>, "Key must be the same as type in SentinelTraits");
+
     using key_type = typename ValueTraits::key_type;
     using mapped_type = typename ValueTraits::mapped_type;
     using value_type = typename ValueTraits::value_type;
     using key_compare = KeyCompare;
-    struct value_compare {
-       private:
-        [[no_unique_address]] KeyCompare comp_;
+    class value_compare {
+       protected:
+        [[no_unique_address]] KeyCompare comp;
 
-       public:
-        explicit value_compare(KeyCompare const &comp = KeyCompare{}) : comp_{comp} {
+        explicit value_compare(KeyCompare const &c) : comp{c} {
         }
 
-        constexpr bool operator()(typename ValueTraits::value_type const &lhs,
-                                  typename ValueTraits::value_type const &rhs) const noexcept {
-            return comp_(ValueTraits::key_of_value(lhs), ValueTraits::key_of_value(rhs));
+       public:
+        constexpr bool operator()(value_type const &lhs, value_type const &rhs) const noexcept {
+            return comp(ValueTraits::key_of_value(lhs), ValueTraits::key_of_value(rhs));
         }
     };
     using allocator_type = Allocator;
@@ -117,7 +121,7 @@ class MultiQueue {
             auto first_key = mq_.pq_list_[first_index].top_key();
             auto second_key = mq_.pq_list_[second_index].top_key();
             do {
-                if (mq_.compare_with_sentinel(first_key, second_key)) {
+                if (mq_.compare(first_key, second_key)) {
                     if (first_key == SentinelTraits::sentinel()) {
                         StickPolicy::pop_failed_callback<0>(data_);
                         StickPolicy::pop_failed_callback<1>(data_);
@@ -200,7 +204,8 @@ class MultiQueue {
         }
     }
 #endif
-    bool compare_with_sentinel(key_type const &lhs, key_type const &rhs) noexcept {
+
+    bool compare(key_type const &lhs, key_type const &rhs) noexcept {
         if constexpr (SentinelTraits::is_implicit) {
             return comp_(lhs, rhs);
         } else {
