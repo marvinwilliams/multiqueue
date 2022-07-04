@@ -43,13 +43,12 @@ class None {
     }
 
    public:
-    template <std::size_t /* I */>
-    static std::size_t get_pop_pq(std::size_t num_pqs, ThreadData &thread_data, GlobalData &) noexcept {
+    static std::size_t get_pop_pq(std::size_t num_pqs, unsigned int /* num */, ThreadData &thread_data,
+                                  GlobalData &) noexcept {
         return get_random_index(thread_data.rng, num_pqs);
     }
 
-    template <std::size_t /* I */>
-    static void pop_failed_callback(ThreadData &) noexcept {
+    static void pop_failed_callback(unsigned int /* num */, ThreadData &) noexcept {
     }
 
     static void pop_callback(ThreadData &) noexcept {

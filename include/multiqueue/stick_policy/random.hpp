@@ -54,24 +54,23 @@ class Random {
     }
 
    public:
-    template <std::size_t I>
-    static std::size_t get_pop_pq(std::size_t num_pqs, ThreadData &thread_data, GlobalData &global_data) noexcept {
-        static_assert(I < 2, "Index has to be 0 or 1");
-        if (thread_data.pop_count[I] == 0) {
-            thread_data.pop_index[I] = get_random_index(thread_data.rng, num_pqs);
-            thread_data.pop_count[I] = global_data.stickiness;
+    static std::size_t get_pop_pq(std::size_t num_pqs, unsigned int num, ThreadData &thread_data,
+                                  GlobalData &global_data) noexcept {
+        assert(num < 2);
+        if (thread_data.pop_count[num] == 0) {
+            thread_data.pop_index[num] = get_random_index(thread_data.rng, num_pqs);
+            thread_data.pop_count[num] = global_data.stickiness;
         }
 
-        return thread_data.pop_index[I];
+        return thread_data.pop_index[num];
     }
 
-    template <std::size_t I>
-    static void pop_failed_callback(ThreadData &thread_data) noexcept {
-        static_assert(I < 2, "Index has to be 0 or 1");
-        thread_data.pop_count[I] = 0;
+    static void pop_failed_callback(unsigned int num, ThreadData &thread_data) noexcept {
+        assert(num < 2);
+        thread_data.pop_count[num] = 0;
     }
 
-    void pop_callback(ThreadData &thread_data) noexcept {
+    static void pop_callback(ThreadData &thread_data) noexcept {
         assert(thread_data.pop_count[0] > 0 && thread_data.pop_count[1] > 0);
         --thread_data.pop_count[0];
         --thread_data.pop_count[1];

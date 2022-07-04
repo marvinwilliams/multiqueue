@@ -31,6 +31,52 @@ TEMPLATE_TEST_CASE_SIG("heap supports basic operations", "[heap][basic]", ((unsi
         }
 
         for (int i = 0; i < 1000; ++i) {
+            REQUIRE(heap.top() == 999 - i);
+            heap.pop();
+        }
+        REQUIRE(heap.empty());
+    }
+
+    SECTION("push decreasing numbers and pop them") {
+        for (int n = 999; n >= 0; --n) {
+            heap.push(n);
+        }
+
+        for (int i = 0; i < 1000; ++i) {
+            REQUIRE(heap.top() == 999 - i);
+            heap.pop();
+        }
+        REQUIRE(heap.empty());
+    }
+
+    SECTION(
+        "first push increasing numbers, then push decreasing numbers and "
+        "pop them") {
+        for (int i = 0; i < 500; ++i) {
+            heap.push(i);
+        }
+        for (int i = 999; i >= 500; --i) {
+            heap.push(i);
+        }
+        for (int i = 0; i < 1000; ++i) {
+            REQUIRE(heap.top() == 999 - i);
+            heap.pop();
+        }
+        REQUIRE(heap.empty());
+    }
+}
+
+TEST_CASE("heap can use std::greater as comparator", "[heap][comparator]") {
+    using heap_t = multiqueue::Heap<int, std::greater<>>;
+
+    auto heap = heap_t{};
+
+    SECTION("push increasing numbers and pop them") {
+        for (int n = 0; n < 1000; ++n) {
+            heap.push(n);
+        }
+
+        for (int i = 0; i < 1000; ++i) {
             REQUIRE(heap.top() == i);
             heap.pop();
         }
@@ -52,59 +98,13 @@ TEMPLATE_TEST_CASE_SIG("heap supports basic operations", "[heap][basic]", ((unsi
     SECTION(
         "first push increasing numbers, then push decreasing numbers and "
         "pop them") {
-        for (int i = 1; i <= 500; ++i) {
-            heap.push(i);
-        }
-        for (int i = 1000; i > 500; --i) {
-            heap.push(i);
-        }
-        for (int i = 1; i <= 1000; ++i) {
-            REQUIRE(heap.top() == i);
-            heap.pop();
-        }
-        REQUIRE(heap.empty());
-    }
-}
-
-TEST_CASE("heap can use std::greater as comparator", "[heap][comparator]") {
-    using heap_t = multiqueue::Heap<int, std::greater<>>;
-
-    auto heap = heap_t{};
-
-    SECTION("push increasing numbers and pop them") {
-        for (int n = 0; n < 1000; ++n) {
-            heap.push(n);
-        }
-
-        for (int i = 999; i >= 0; --i) {
-            REQUIRE(heap.top() == i);
-            heap.pop();
-        }
-        REQUIRE(heap.empty());
-    }
-
-    SECTION("push decreasing numbers and pop them") {
-        for (int n = 999; n >= 0; --n) {
-            heap.push(n);
-        }
-
-        for (int i = 999; i >= 0; --i) {
-            REQUIRE(heap.top() == i);
-            heap.pop();
-        }
-        REQUIRE(heap.empty());
-    }
-
-    SECTION(
-        "first push increasing numbers, then push decreasing numbers and "
-        "pop them") {
         for (int i = 0; i < 500; ++i) {
             heap.push(i);
         }
         for (int i = 999; i >= 500; --i) {
             heap.push(i);
         }
-        for (int i = 999; i >= 0; --i) {
+        for (int i = 0; i < 1000; ++i) {
             REQUIRE(heap.top() == i);
             heap.pop();
         }
@@ -113,10 +113,10 @@ TEST_CASE("heap can use std::greater as comparator", "[heap][comparator]") {
 }
 
 TEST_CASE("heap works with randomized workloads", "[heap][workloads]") {
-    using heap_t = multiqueue::Heap<int, std::less<>>;
+    using heap_t = multiqueue::Heap<int, std::greater<>>;
 
     auto heap = heap_t{};
-    auto ref_pq = std::priority_queue<int, std::vector<int>, std::greater<int>>{};
+    auto ref_pq = std::priority_queue<int, std::vector<int>, std::greater<>>{};
     auto gen = std::mt19937{0};
 
     SECTION("push random numbers and pop them") {
@@ -135,6 +135,7 @@ TEST_CASE("heap works with randomized workloads", "[heap][workloads]") {
             ref_pq.pop();
         }
         REQUIRE(heap.empty());
+        REQUIRE(ref_pq.empty());
     }
 
     SECTION("interleave pushing and popping random numbers") {
@@ -159,10 +160,12 @@ TEST_CASE("heap works with randomized workloads", "[heap][workloads]") {
             }
         }
         while (!heap.empty()) {
+            REQUIRE(!ref_pq.empty());
             REQUIRE(heap.top() == ref_pq.top());
             heap.pop();
             ref_pq.pop();
         }
+        REQUIRE(ref_pq.empty());
     }
 
     SECTION("dijkstra") {
@@ -184,10 +187,12 @@ TEST_CASE("heap works with randomized workloads", "[heap][workloads]") {
             }
         }
         while (!heap.empty()) {
+            REQUIRE(!ref_pq.empty());
             REQUIRE(heap.top() == ref_pq.top());
             heap.pop();
             ref_pq.pop();
         }
+        REQUIRE(ref_pq.empty());
     }
 }
 

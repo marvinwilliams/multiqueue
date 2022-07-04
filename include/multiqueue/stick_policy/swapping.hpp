@@ -85,21 +85,19 @@ class Swapping {
     }
 
    public:
-    template <std::size_t I>
-    static std::size_t get_pop_pq(std::size_t /* num_pqs */, ThreadData &thread_data,
+    static std::size_t get_pop_pq(std::size_t /* num_pqs */, unsigned int num, ThreadData &thread_data,
                                   GlobalData &global_data) noexcept {
-        static_assert(I < 2, "Index has to be 0 or 1");
-        if (thread_data.pop_count[I] == 0) {
-            thread_data.pop_count[I] = global_data.stickiness;
-            return swap_assignment(global_data.assignment, thread_data.index * 3 + I, thread_data.rng);
+        assert(num < 2);
+        if (thread_data.pop_count[num] == 0) {
+            thread_data.pop_count[num] = global_data.stickiness;
+            return swap_assignment(global_data.assignment, thread_data.index * 3 + num, thread_data.rng);
         }
-        return global_data.assignment[thread_data.index * 3 + I].index.load(std::memory_order_relaxed);
+        return global_data.assignment[thread_data.index * 3 + num].index.load(std::memory_order_relaxed);
     }
 
-    template <std::size_t I>
-    static void pop_failed_callback(ThreadData &thread_data) noexcept {
-        static_assert(I < 2, "Index has to be 0 or 1");
-        thread_data.pop_count[I] = 0;
+    static void pop_failed_callback(unsigned int num, ThreadData &thread_data) noexcept {
+        assert(num < 2);
+        thread_data.pop_count[num] = 0;
     }
 
     static void pop_callback(ThreadData &thread_data) noexcept {

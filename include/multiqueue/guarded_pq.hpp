@@ -43,6 +43,16 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
     alignas(L1_CACHE_LINESIZE) std::atomic<key_type> top_key_;
     pq_type pq_;
 
+    bool try_lock() noexcept {
+        // Maybe do not test?
+        return !lock_.load(std::memory_order_relaxed) && !lock_.exchange(true, std::memory_order_acquire);
+    }
+
+    void unlock() noexcept {
+        assert(lock_.load());
+        lock_.store(false, std::memory_order_release);
+    }
+
    public:
     explicit GuardedPQ(value_compare const& comp = value_compare())
         : lock_{false}, top_key_{SentinelTraits::sentinel()}, pq_(comp) {
@@ -57,68 +67,93 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
     explicit GuardedPQ(Alloc const& alloc) : lock_{false}, top_key_{SentinelTraits::sentinel()}, pq_(alloc) {
     }
 
-    bool is_locked() noexcept {
-        return lock_.load(std::memory_order_relaxed);
-    }
-
-    bool try_lock() noexcept {
-        // Maybe do not test?
-        return !is_locked() && !lock_.exchange(true, std::memory_order_acquire);
-    }
-
-    bool try_lock_if_nonempty() noexcept {
-        if (!try_lock()) {
-            return false;
-        }
-        if (empty()) {
-            lock_.store(false, std::memory_order_release);
-            return false;
-        }
-        return true;
-    }
-
-    void unlock() noexcept {
-        assert(is_locked());
-        if (!pq_.empty()) {
-            top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
-        } else {
-            top_key_.store(SentinelTraits::sentinel(), std::memory_order_relaxed);
-        }
-        lock_.store(false, std::memory_order_release);
+    key_type concurrent_top_key() const noexcept {
+        return top_key_.load(std::memory_order_relaxed);
     }
 
     [[nodiscard]] bool concurrent_empty() const noexcept {
-        return top_key_.load(std::memory_order_relaxed) == SentinelTraits::sentinel();
+        return concurrent_top_key() == SentinelTraits::sentinel();
     }
 
-    value_type pop() {
-        assert(!empty());
-        return pq_.pop();
-    }
-
-    void push(const_reference value) {
-        pq_.push(value);
-    }
-
-    void push(value_type&& value) {
-        pq_.push(std::move(value));
-    }
-
-    void clear() noexcept {
-        pq_.clear();
-    }
-
-    [[nodiscard]] bool empty() const noexcept {
+    [[nodiscard]] bool unsafe_empty() const noexcept {
         return pq_.empty();
     }
 
-    size_type size() const noexcept {
+    size_type unsafe_size() const noexcept {
         return pq_.size();
     }
 
-    const_reference top() const {
-        assert(!empty());
+    const_reference unsafe_top() const {
+        assert(!unsafe_empty());
         return pq_.top();
+    }
+
+    bool try_pop(value_type& retval) {
+        if (!try_lock()) {
+            return false;
+        }
+        if (pq_.empty()) {
+            unlock();
+            return false;
+        }
+        retval = pq_.pop();
+        if (pq_.empty()) {
+            top_key_.store(SentinelTraits::sentinel(), std::memory_order_relaxed);
+        } else {
+            top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
+        }
+        unlock();
+        return true;
+    }
+
+    bool try_push(const_reference value) {
+        if (!try_lock()) {
+            return false;
+        }
+        pq_.push(value);
+        top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
+        unlock();
+        return true;
+    }
+
+    bool try_push(value_type&& value) {
+        if (!try_lock()) {
+            return false;
+        }
+        pq_.push(std::move(value));
+        top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
+        unlock();
+        return true;
+    }
+
+    value_type unsafe_pop() {
+        assert(!unsafe_empty());
+        auto retval = pq_.pop();
+        if (pq_.empty()) {
+            top_key_.store(SentinelTraits::sentinel(), std::memory_order_relaxed);
+        } else {
+            top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
+        }
+        return retval;
+    }
+
+    void unsafe_push(const_reference value) {
+        pq_.push(value);
+        top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
+    }
+
+    void unsafe_push(value_type&& value) {
+        pq_.push(std::move(value));
+        top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
+    }
+
+    void unsafe_clear() noexcept {
+        pq_.clear();
+        top_key_.store(SentinelTraits::sentinel(), std::memory_order_relaxed);
+    }
+
+    void unsafe_reserve(size_type cap) {
+        pq_.reserve(cap);
     }
 };
 

@@ -36,7 +36,7 @@ struct sentinel_traits<T, std::less<T>> {
 
     static constexpr T sentinel() noexcept {
         if constexpr (std::numeric_limits<T>::is_integer) {
-            return std::numeric_limits<T>::max();
+            return std::numeric_limits<T>::lowest();
         } else {
             return T{};
         }
@@ -52,7 +52,7 @@ struct sentinel_traits<T, std::less<>> {
 
     static constexpr T sentinel() noexcept {
         if constexpr (std::numeric_limits<T>::is_integer) {
-            return std::numeric_limits<T>::max();
+            return std::numeric_limits<T>::lowest();
         } else {
             return T{};
         }
@@ -68,7 +68,7 @@ struct sentinel_traits<T, std::greater<T>> {
 
     static constexpr T sentinel() noexcept {
         if constexpr (std::numeric_limits<T>::is_integer) {
-            return std::numeric_limits<T>::lowest();
+            return std::numeric_limits<T>::max();
         } else {
             return T{};
         }
@@ -84,7 +84,7 @@ struct sentinel_traits<T, std::greater<>> {
 
     static constexpr T sentinel() noexcept {
         if constexpr (std::numeric_limits<T>::is_integer) {
-            return std::numeric_limits<T>::lowest();
+            return std::numeric_limits<T>::max();
         } else {
             return T{};
         }

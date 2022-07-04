@@ -68,19 +68,19 @@ class Heap {
     }
 
     // returns the index of the first node without all children
-    constexpr size_type current_parrent() const noexcept {
+    constexpr size_type current_parent() const noexcept {
         HEAP_ASSERT(!empty());
         return parent(size());
     }
 
-    // Find the index of the smallest node smaller than provided val
-    // If no index is smaller than val, return parent
-    size_type top_child(size_type first, size_type last, value_type val) const {
+    // Find the index of the node that should become the parent of the others
+    // If no index is better than val, return last
+    size_type new_parent(size_type first, size_type last, value_type val) const {
         HEAP_ASSERT(first <= last);
         HEAP_ASSERT(last <= size());
         auto best = last;
         for (; first != last; ++first) {
-            if (comp(c[first], val)) {
+            if (comp(val, c[first])) {
                 best = first;
                 val = c[first];
             }
@@ -95,7 +95,7 @@ class Heap {
         }
         value_type value = std::move(c[index]);
         size_type p = parent(index);
-        while (comp(value, c[p])) {
+        while (comp(c[p], value)) {
             c[index] = std::move(c[p]);
             index = p;
             if (index == root) {
@@ -109,34 +109,39 @@ class Heap {
     void sift_down(size_type index) {
         HEAP_ASSERT(index < size());
         value_type value = std::move(c[index]);
-        size_type const first_nonfull = current_parrent();
-        while (index < first_nonfull) {
+        size_type const end_full = current_parent();
+        while (index < end_full) {
             auto const first = first_child(index);
-            auto const next = top_child(first, first + Degree, value);
-            if (next == first + Degree) {
+            auto const last = first + Degree;
+            auto const next = new_parent(first, last, value);
+            if (next == last) {
                 c[index] = std::move(value);
                 return;
             }
             c[index] = std::move(c[next]);
             index = next;
         }
-        if (index == first_nonfull) {
+        if (index == end_full) {
             auto const first = first_child(index);
-            auto const next = top_child(first, size(), value);
-            if (next != size()) {
+            auto const last = size();
+            auto const next = new_parent(first, last, value);
+            if (next == last) {
+                c[index] = std::move(value);
+            } else {
                 c[index] = std::move(c[next]);
-                index = next;
+                c[next] = std::move(value);
             }
+        } else {
+            c[index] = std::move(value);
         }
-        c[index] = std::move(value);
     }
 
    public:
-    explicit Heap(value_compare const &comp = value_compare()) noexcept : c(), comp{comp} {
+    explicit Heap(value_compare const &compare = value_compare()) noexcept : c(), comp{compare} {
     }
 
     template <typename Alloc>
-    explicit Heap(value_compare const &comp, Alloc const &alloc) noexcept : c(alloc), comp{comp} {
+    explicit Heap(value_compare const &compare, Alloc const &alloc) noexcept : c(alloc), comp{compare} {
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept {
@@ -188,18 +193,21 @@ class Heap {
     }
 
     bool verify() const noexcept {
-        for (size_type i = 0; i < size(); i++) {
+        auto const end_full = current_parent();
+        for (size_type i = 0; i < end_full; i++) {
             auto const first = first_child(i);
-            for (size_type j = 0; j < Degree; ++j) {
-                if (first + j >= size()) {
-                    return true;
-                }
-                if (comp(c[first + j], c[i])) {
+            for (size_type j = first; j < first + Degree; ++j) {
+                assert(j < size());
+                if (comp(c[i], c[j])) {
                     return false;
                 }
             }
         }
-        return true;
+        for (size_type j = first_child(end_full); j < size(); ++j) {
+            if (comp(c[end_full], c[j])) {
+                return false;
+            }
+        }
     }
 };
 
@@ -208,7 +216,6 @@ class Heap {
 }  // namespace multiqueue
 
 namespace std {
-
 template <typename T, typename Compare, unsigned int Degree, typename Container, typename Alloc>
 struct uses_allocator<multiqueue::Heap<T, Compare, Degree, Container>, Alloc> : uses_allocator<Container, Alloc>::type {
 };

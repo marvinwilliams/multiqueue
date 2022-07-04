@@ -72,8 +72,7 @@ class Permuting {
         std::vector<std::uint64_t> valid_factors;
         std::atomic_uint64_t perm;
 
-        GlobalData(std::size_t num_pqs, Config const &config)
-            : stickiness{config.stickiness}, perm{to_perm(1, 0)} {
+        GlobalData(std::size_t num_pqs, Config const &config) : stickiness{config.stickiness}, perm{to_perm(1, 0)} {
             assert(stickiness > 0);
             for (std::uint64_t i = 1; i < num_pqs; ++i) {
                 if (std::gcd(i, num_pqs) == 1) {
@@ -90,9 +89,9 @@ class Permuting {
         }
     };
 
-    template <std::size_t I>
-    static std::size_t get_pop_pq(std::size_t num_pqs, ThreadData &thread_data, GlobalData &global_data) noexcept {
-        static_assert(I < 2, "Index has to be 0 or 1");
+    static std::size_t get_pop_pq(std::size_t num_pqs, unsigned int num, ThreadData &thread_data,
+                                  GlobalData &global_data) noexcept {
+        assert(num < 2);
         if (thread_data.last_failed) {
             thread_data.last_failed = false;
             return get_random_index(thread_data.rng, num_pqs);
@@ -104,12 +103,10 @@ class Permuting {
         } else {
             p = global_data.perm.load(std::memory_order_relaxed);
         }
-        return get_index(p, thread_data.index * 3 + I, num_pqs);
+        return get_index(p, thread_data.index * 3 + num, num_pqs);
     }
 
-    template <std::size_t I>
-    static void pop_failed_callback(ThreadData &thread_data) noexcept {
-        static_assert(I < 2, "Index has to be 0 or 1");
+    static void pop_failed_callback(unsigned int /* num */, ThreadData &thread_data) noexcept {
         thread_data.last_failed = true;
     }
 

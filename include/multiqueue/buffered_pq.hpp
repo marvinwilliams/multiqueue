@@ -14,6 +14,7 @@
 
 #include "multiqueue/heap.hpp"
 
+#include <cassert>
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -68,18 +69,18 @@ class BufferedPQ : private PriorityQueue {
     }
 
    public:
-    explicit BufferedPQ(value_compare comp = value_compare()) : base_type(comp) {
+    explicit BufferedPQ(value_compare compare = value_compare()) : base_type(compare) {
         ins_buf_size_ = 0;
         del_buf_size_ = 0;
     }
 
-    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<pq_type, Alloc>>>
-    explicit BufferedPQ(value_compare const& comp, Alloc const& alloc) : base_type(comp, alloc) {
+    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
+    explicit BufferedPQ(value_compare const& compare, Alloc const& alloc) : base_type(compare, alloc) {
         ins_buf_size_ = 0;
         del_buf_size_ = 0;
     }
 
-    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<pq_type, Alloc>>>
+    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
     explicit BufferedPQ(Alloc const& alloc) : base_type(alloc) {
         ins_buf_size_ = 0;
         del_buf_size_ = 0;
@@ -109,18 +110,18 @@ class BufferedPQ : private PriorityQueue {
     }
 
     void push(value_type value) {
-        if (del_buf_size_ == 0) {
+        if (empty()) {
             deletion_buffer_.front() = std::move(value);
             ++del_buf_size_;
             return;
         }
-        if (base_type::comp(value, deletion_buffer_[0])) {
+        if (base_type::comp(deletion_buffer_[0], value)) {
             // value has to go into the deletion buffer
             if (del_buf_size_ != DeletionBufferSize) {
-                auto in_pos = del_buf_size_;
-                while (base_type::comp(deletion_buffer_[in_pos - 1], value)) {
+                size_type in_pos = del_buf_size_;
+                while (!base_type::comp(deletion_buffer_[in_pos - 1], value)) {
                     deletion_buffer_[in_pos] = std::move(deletion_buffer_[in_pos - 1]);
-                    // No need to check for underflow as deletion_buffer_[0] is always greater
+                    // No need to check for underflow
                     --in_pos;
                     assert(in_pos >= 1);
                 }
@@ -129,8 +130,8 @@ class BufferedPQ : private PriorityQueue {
                 return;
             } else {
                 auto tmp = std::move(deletion_buffer_[0]);
-                auto in_pos = 0;
-                while (in_pos + 1 != DeletionBufferSize && base_type::comp(value, deletion_buffer_[in_pos + 1])) {
+                size_type in_pos = 0;
+                while (in_pos + 1 != DeletionBufferSize && base_type::comp(deletion_buffer_[in_pos + 1], value)) {
                     deletion_buffer_[in_pos] = std::move(deletion_buffer_[in_pos + 1]);
                     ++in_pos;
                 }

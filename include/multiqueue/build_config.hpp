@@ -15,11 +15,11 @@
 #define L1_CACHE_LINESIZE 64
 #endif
 
-#ifndef MULTIQUEUE_DEFAULT_PQ_STD
-#include "multiqueue/heap.hpp"
 #ifndef MULTIQUEUE_DEFAULT_DISABLE_BUFFERING
 #include "multiqueue/buffered_pq.hpp"
 #endif
+#ifndef MULTIQUEUE_DEFAULT_PQ_STD
+#include "multiqueue/heap.hpp"
 #endif
 #include "multiqueue/stick_policy/none.hpp"
 #include "multiqueue/stick_policy/perm.hpp"
@@ -44,24 +44,13 @@ struct BuildConfig {
 #elif defined MULTIQUEUE_DEFAULT_STICK_POLICY_PERMUTING
         stick_policy::Permuting
 #else
-        stick_policy::Swapping
+        stick_policy::Random
 #endif
         ;
 
     template <typename T, typename Comparator>
     using DefaultPriorityQueue =
-#ifdef MULTIQUEUE_DEFAULT_PQ_STD
-        std::priority_queue<T, Comparator>
-#else
-#ifdef MULTIQUEUE_DEFAULT_DISABLE_BUFFERING
-        Heap<T, Comparator,
-#ifdef MULTIQUEUE_DEFAULT_HEAP_ARITY
-             MULTIQUEUE_DEFAULT_HEAP_ARITY
-#else
-             8
-#endif
-             >
-#else
+#ifndef MULTIQUEUE_DEFAULT_DISABLE_BUFFERING
         BufferedPQ<
 #ifdef MULTIQUEUE_DEFAULT_INSERTION_BUFFERSIZE
             MULTIQUEUE_DEFAULT_INSERTION_BUFFERSIZE
@@ -75,14 +64,20 @@ struct BuildConfig {
             64
 #endif
             ,
-            Heap<T, Comparator,
-#ifdef MULTIQUEUE_DEFAULT_HEAP_ARITY
-                 MULTIQUEUE_DEFAULT_HEAP_ARITY
+#endif
+#ifdef MULTIQUEUE_DEFAULT_PQ_STD
+            std::priority_queue<T, std::vector<T>, Comparator>
 #else
-                 8
+        Heap<T, Comparator,
+#ifdef MULTIQUEUE_DEFAULT_HEAP_ARITY
+             MULTIQUEUE_DEFAULT_HEAP_ARITY
+#else
+             8
 #endif
-                 >>
+             >
 #endif
+#ifndef MULTIQUEUE_DEFAULT_DISABLE_BUFFERING
+            >
 #endif
         ;
 };

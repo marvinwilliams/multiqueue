@@ -19,7 +19,7 @@ struct nocopy {
 
 struct nodefault {
     nodefault() = delete;
-    explicit nodefault(int i) : i{i} {
+    explicit nodefault(int n) : i{n} {
     }
     bool operator<(nodefault const& other) const {
         return i < other.i;

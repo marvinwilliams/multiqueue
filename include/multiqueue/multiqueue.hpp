@@ -44,13 +44,14 @@
 namespace multiqueue {
 
 template <typename StickPolicy>
-struct MultiqueueConfig {
+struct MultiQueueConfig {
     std::uint64_t seed = 1;
     std::size_t c = 4;
     typename StickPolicy::Config stick_policy_config;
 };
 
-template <typename Key, typename T, typename KeyCompare, typename StickPolicy = BuildConfig::DefaultStickPolicy,
+template <typename Key, typename T, typename KeyCompare = std::less<>,
+          typename StickPolicy = BuildConfig::DefaultStickPolicy,
           template <typename, typename> typename PriorityQueue = BuildConfig::DefaultPriorityQueue,
           typename ValueTraits = value_traits<Key, T>, typename SentinelTraits = sentinel_traits<Key, KeyCompare>,
           typename Allocator = std::allocator<typename ValueTraits::value_type>>
@@ -66,6 +67,8 @@ class MultiQueue {
     using value_type = typename ValueTraits::value_type;
     using key_compare = KeyCompare;
     class value_compare {
+        friend class MultiQueue<Key, T, KeyCompare, StickPolicy, PriorityQueue, ValueTraits, SentinelTraits, Allocator>;
+
        protected:
         [[no_unique_address]] KeyCompare comp;
 
@@ -77,8 +80,10 @@ class MultiQueue {
             return comp(ValueTraits::key_of_value(lhs), ValueTraits::key_of_value(rhs));
         }
     };
+    using reference = value_type &;
+    using const_reference = value_type const &;
     using allocator_type = Allocator;
-    using config_type = MultiqueueConfig<StickPolicy>;
+    using config_type = MultiQueueConfig<StickPolicy>;
     using size_type = std::size_t;
 
     static_assert(std::is_same_v<value_type, typename Allocator::value_type>);
@@ -93,14 +98,12 @@ class MultiQueue {
    public:
     using pointer = typename alloc_traits::pointer;
     using const_pointer = typename alloc_traits::const_pointer;
-    using reference = typename alloc_traits::reference;
-    using const_reference = typename alloc_traits::const_reference;
 
     friend StickPolicy;
 
     class Handle {
         friend MultiQueue;
-        using data_t = typename StickPolicy::handle_data_t;
+        using data_t = typename StickPolicy::ThreadData;
 
         data_t data_;
         MultiQueue &mq_;
@@ -111,69 +114,61 @@ class MultiQueue {
         Handle(Handle &&) = default;
 
        private:
-        explicit Handle(MultiQueue &mq, unsigned int id, std::uint64_t seed) noexcept : mq_{mq}, data_{id, seed} {
+        explicit Handle(MultiQueue &mq, unsigned int id, std::uint64_t seed) noexcept : data_{id, seed}, mq_{mq} {
         }
 
        public:
         bool try_pop(reference retval) noexcept {
-            size_type first_index = StickPolicy::get_pop_pq<0>(mq_, data_);
-            size_type second_index = StickPolicy::get_pop_pq<1>(mq_, data_);
-            auto first_key = mq_.pq_list_[first_index].top_key();
-            auto second_key = mq_.pq_list_[second_index].top_key();
+            size_type first_index = StickPolicy::get_pop_pq(mq_.num_pqs_, 0, data_, mq_.stick_policy_data_);
+            size_type second_index = StickPolicy::get_pop_pq(mq_.num_pqs_, 1, data_, mq_.stick_policy_data_);
+            auto first_key = mq_.pq_list_[first_index].concurrent_top_key();
+            auto second_key = mq_.pq_list_[second_index].concurrent_top_key();
             do {
-                if (mq_.compare(first_key, second_key)) {
+                if (!mq_.compare(first_key, second_key)) {
                     if (first_key == SentinelTraits::sentinel()) {
-                        StickPolicy::pop_failed_callback<0>(data_);
-                        StickPolicy::pop_failed_callback<1>(data_);
+                        StickPolicy::pop_failed_callback(0, data_);
+                        StickPolicy::pop_failed_callback(1, data_);
                         return false;
                     }
-                    if (mq_.pq_list_[first_index].try_lock_if_nonempty()) {
+                    if (mq_.pq_list_[first_index].try_pop(retval)) {
                         break;
                     }
-                    StickPolicy::pop_failed_callback<0>(data_);
-                    first_index = StickPolicy::get_pop_pq<0>(mq_, data_);
-                    first_key = mq_.pq_list_[first_index].top_key();
+                    StickPolicy::pop_failed_callback(0, data_);
+                    first_index = StickPolicy::get_pop_pq(mq_.num_pqs_, 0, data_, mq_.stick_policy_data_);
+                    first_key = mq_.pq_list_[first_index].concurrent_top_key();
                 } else {
                     if (second_key == SentinelTraits::sentinel()) {
-                        StickPolicy::pop_failed_callback<0>(data_);
-                        StickPolicy::pop_failed_callback<1>(data_);
+                        StickPolicy::pop_failed_callback(0, data_);
+                        StickPolicy::pop_failed_callback(1, data_);
                         return false;
                     }
-                    if (mq_.pq_list_[second_index].try_lock_if_nonempty()) {
-                        first_index = second_index;
+                    if (mq_.pq_list_[second_index].try_pop(retval)) {
                         break;
                     }
-                    StickPolicy::pop_failed_callback<1>(data_);
-                    second_index = StickPolicy::get_pop_pq<1>(mq_, data_);
-                    second_key = mq_.pq_list_[second_index].top_key();
+                    StickPolicy::pop_failed_callback(1, data_);
+                    second_index = StickPolicy::get_pop_pq(mq_.num_pqs_, 1, data_, mq_.stick_policy_data_);
+                    second_key = mq_.pq_list_[second_index].concurrent_top_key();
                 }
             } while (true);
-            // first is guaranteed to be nonempty
-            mq_.pq_list_[first_index].pop(retval);
-            mq_.pq_list_[first_index].unlock();
             StickPolicy::pop_callback(data_);
             return true;
         }
 
         void push(const_reference value) noexcept {
             size_type index = StickPolicy::get_push_pq(mq_, data_);
-            while (!mq_.pq_list_[index].try_lock()) {
+            while (!mq_.pq_list_[index].try_push(value)) {
                 StickPolicy::push_failed_callback(data_);
                 index = StickPolicy::get_push_pq(mq_, data_);
             }
-            mq_.pq_list_[index].push(value);
-            mq_.pq_list_[index].unlock();
             StickPolicy::push_callback(data_);
         }
 
         void push(value_type &&value) noexcept {
-            size_type index = StickPolicy::get_push_pq(mq_, data_);
-            while (!mq_.pq_list_[index].try_lock()) {
+            size_type index = StickPolicy::get_push_pq(mq_.num_pqs_, data_, mq_.stick_policy_data_);
+            while (!mq_.pq_list_[index].try_push(std::move((value)))) {
                 StickPolicy::push_failed_callback(data_);
-                index = StickPolicy::get_push_pq(mq_, data_);
+                index = StickPolicy::get_push_pq(mq_.num_pqs_, data_, mq_.stick_policy_data_);
             }
-            mq_.pq_list_[index].push(std::move(value));
-            mq_.pq_list_[index].unlock();
             StickPolicy::push_callback(data_);
         }
 
@@ -210,10 +205,10 @@ class MultiQueue {
             return comp_(lhs, rhs);
         } else {
             if (lhs == SentinelTraits::sentinel()) {
-                return false;
+                return true;
             }
             if (rhs == SentinelTraits::sentinel()) {
-                return true;
+                return false;
             }
             return comp_(lhs, rhs);
         }
@@ -232,7 +227,7 @@ class MultiQueue {
         assert(params.c > 0);
         pq_list_ = pq_alloc_traits::allocate(alloc_, num_pqs_);
         for (guarded_pq_type *pq = pq_list_; pq != pq_list_ + num_pqs_; ++pq) {
-            pq_alloc_traits::construct(alloc_, pq, comp_);
+            pq_alloc_traits::construct(alloc_, pq, value_compare{comp_});
         }
 #ifdef MULTIQUEUE_ABORT_MISALIGNMENT
         abort_on_data_misalignment();
@@ -252,7 +247,8 @@ class MultiQueue {
         pq_list_ = pq_alloc_traits::allocate(alloc_, num_pqs_);
         std::size_t cap_per_pq = (2 * initial_capacity) / num_pqs_;
         for (guarded_pq_type *pq = pq_list_; pq != pq_list_ + num_pqs_; ++pq) {
-            pq_alloc_traits::construct(alloc_, pq, cap_per_pq, comp_);
+            pq_alloc_traits::construct(alloc_, pq, value_compare{comp_});
+            pq->reserve(cap_per_pq);
         }
 #ifdef MULTIQUEUE_ABORT_MISALIGNMENT
         abort_on_data_misalignment();
@@ -275,15 +271,23 @@ class MultiQueue {
     bool try_pop(reference retval) noexcept {
         guarded_pq_type *first = pq_list_ + fastrange64(rng_(), num_pqs_);
         guarded_pq_type *second = pq_list_ + fastrange64(rng_(), num_pqs_);
-        if (first->unsafe_empty() || (!second->unsafe_empty() && comp_(ValueTraits::key_of_value(first->unsafe_top()), ValueTraits::key_of_value(second->unsafe_top()))) {
-            first = second;
-            first_key = second_key;
-        }
-        if (first->unsafe_empty()) {
+        if (first->unsafe_empty() && second->unsafe_empty()) {
             return false;
         }
-        // first is guaranteed to be nonempty
-        first->pop(retval);
+        if (first->unsafe_empty()) {
+            retval = second->pop();
+            second->update_top();
+        } else if (second->unsafe_empty()) {
+            retval = first->pop();
+            first->update_top();
+        } else {
+            if (comp_(ValueTraits::key_of_value(first->unsafe_top()),
+                      ValueTraits::key_of_value(second->unsafe_top()))) {
+                first = second;
+            }
+            retval = first->pop();
+            first->update_top();
+        }
         return true;
     }
 
@@ -310,8 +314,7 @@ class MultiQueue {
 #ifdef MULTIQUEUE_ELEMENT_DISTRIBUTION
     std::vector<std::size_t> get_distribution() const {
         std::vector<std::size_t> distribution(num_pqs());
-        std::transform(pq_list_.get(), pq_list_.get() + num_pqs(), distribution.begin(),
-                       [](auto const &pq) { return pq.unsafe_size(); });
+        std::transform(pq_list_, pq_list_ + num_pqs_, distribution.begin(), [](auto const &pq) { return pq.size(); });
         return distribution;
     }
 
@@ -320,20 +323,21 @@ class MultiQueue {
         removed_elements.reserve(k);
         std::vector<std::size_t> distribution(num_pqs(), 0);
         for (std::size_t i = 0; i < k; ++i) {
-            auto min = std::min_element(pq_list_.get(), pq_list_.get() + num_pqs(),
-                                        [](auto const &lhs, auto const &rhs) { return lhs.top_key() < rhs.top_key(); });
-            if (min->min_key() == Sentinel()()) {
+            auto pq = std::max_element(pq_list_, pq_list_ + num_pqs_, [&](auto const &lhs, auto const &rhs) {
+                return compare(lhs.concurrent_top_key(), rhs.concurrent_top_key());
+            });
+            if (pq->concurrent_top_key() == SentinelTraits::sentinel()) {
                 break;
             }
-            assert(!min->empty());
+            assert(!pq->unsafe_empty());
             std::pair<value_type, std::size_t> result;
-            min->extract_top(ExtractKey()(result));
-            result.second = static_cast<std::size_t>(min - std::begin(pq_list_));
+            result.first = pq->unsafe_pop();
+            result.second = static_cast<std::size_t>(std::distance(pq_list_, pq));
             removed_elements.push_back(result);
             ++distribution[result.second];
         }
         for (auto [val, index] : removed_elements) {
-            pq_list_[index].push(std::move(val));
+            pq_list_[index].unsafe_push(std::move(val));
         }
         return distribution;
     }

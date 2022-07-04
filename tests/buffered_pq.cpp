@@ -30,6 +30,52 @@ TEST_CASE("buffered pq supports basic operations", "[buffered_pq][basic]") {
         }
 
         for (int i = 0; i < 1000; ++i) {
+            REQUIRE(pq.top() == 999 - i);
+            pq.pop();
+        }
+        REQUIRE(pq.empty());
+    }
+
+    SECTION("push decreasing numbers and pop them") {
+        for (int n = 999; n >= 0; --n) {
+            pq.push(n);
+        }
+
+        for (int i = 0; i < 1000; ++i) {
+            REQUIRE(pq.top() == 999 - i);
+            pq.pop();
+        }
+        REQUIRE(pq.empty());
+    }
+
+    SECTION(
+        "first push increasing numbers, then push decreasing numbers and "
+        "pop them") {
+        for (int i = 0; i < 500; ++i) {
+            pq.push(i);
+        }
+        for (int i = 999; i >= 500; --i) {
+            pq.push(i);
+        }
+        for (int i = 0; i < 1000; ++i) {
+            REQUIRE(pq.top() == 999 - i);
+            pq.pop();
+        }
+        REQUIRE(pq.empty());
+    }
+}
+
+TEST_CASE("buffered pq can use std::greater as comparator", "[buffered_pq][comparator]") {
+    using pq_t = multiqueue::BufferedPQ<8, 8, multiqueue::Heap<int, std::greater<>>>;
+
+    auto pq = pq_t{};
+
+    SECTION("push increasing numbers and pop them") {
+        for (int n = 0; n < 1000; ++n) {
+            pq.push(n);
+        }
+
+        for (int i = 0; i < 1000; ++i) {
             REQUIRE(pq.top() == i);
             pq.pop();
         }
@@ -51,59 +97,13 @@ TEST_CASE("buffered pq supports basic operations", "[buffered_pq][basic]") {
     SECTION(
         "first push increasing numbers, then push decreasing numbers and "
         "pop them") {
-        for (int i = 1; i <= 500; ++i) {
+        for (int i = 0; i < 500; ++i) {
             pq.push(i);
         }
-        for (int i = 1000; i > 500; --i) {
+        for (int i = 999; i >= 500; --i) {
             pq.push(i);
         }
-        for (int i = 1; i <= 1000; ++i) {
-            REQUIRE(pq.top() == i);
-            pq.pop();
-        }
-        REQUIRE(pq.empty());
-    }
-}
-
-TEST_CASE("buffered pq can use std::greater as comparator", "[buffered_pq][comparator]") {
-    using pq_t = multiqueue::BufferedPQ<8, 8, multiqueue::Heap<int, std::greater<>>>;
-
-    auto pq = pq_t{};
-
-    SECTION("push increasing numbers and pop them") {
-        for (int n = 0; n < 1000; ++n) {
-            pq.push(n);
-        }
-
-        for (int i = 999; i >= 0; --i) {
-            REQUIRE(pq.top() == i);
-            pq.pop();
-        }
-        REQUIRE(pq.empty());
-    }
-
-    SECTION("push decreasing numbers and pop them") {
-        for (int n = 999; n >= 0; --n) {
-            pq.push(n);
-        }
-
-        for (int i = 999; i >= 0; --i) {
-            REQUIRE(pq.top() == i);
-            pq.pop();
-        }
-        REQUIRE(pq.empty());
-    }
-
-    SECTION(
-        "first push increasing numbers, then push decreasing numbers and "
-        "pop them") {
-        for (int i = 0; i < 2; ++i) {
-            pq.push(i);
-        }
-        for (int i = 4; i >= 2; --i) {
-            pq.push(i);
-        }
-        for (int i = 4; i >= 0; --i) {
+        for (int i = 0; i < 1000; ++i) {
             REQUIRE(pq.top() == i);
             pq.pop();
         }
@@ -112,10 +112,10 @@ TEST_CASE("buffered pq can use std::greater as comparator", "[buffered_pq][compa
 }
 
 TEST_CASE("buffered pq works with randomized workloads", "[buffered_pq][workloads]") {
-    using pq_t = multiqueue::BufferedPQ<8, 8, multiqueue::Heap<int>>;
+    using pq_t = multiqueue::BufferedPQ<8, 8, multiqueue::Heap<int, std::greater<>>>;
 
     auto pq = pq_t{};
-    auto ref_pq = std::priority_queue<int, std::vector<int>, std::greater<int>>{};
+    auto ref_pq = std::priority_queue<int, std::vector<int>, std::greater<>>{};
     auto gen = std::mt19937{0};
 
     SECTION("push random numbers and pop them") {
@@ -134,6 +134,7 @@ TEST_CASE("buffered pq works with randomized workloads", "[buffered_pq][workload
             ref_pq.pop();
         }
         REQUIRE(pq.empty());
+        REQUIRE(ref_pq.empty());
     }
 
     SECTION("interleave pushing and popping random numbers") {
@@ -158,10 +159,12 @@ TEST_CASE("buffered pq works with randomized workloads", "[buffered_pq][workload
             }
         }
         while (!pq.empty()) {
+            REQUIRE(!ref_pq.empty());
             REQUIRE(pq.top() == ref_pq.top());
             pq.pop();
             ref_pq.pop();
         }
+        REQUIRE(ref_pq.empty());
     }
 
     SECTION("dijkstra") {
@@ -183,9 +186,11 @@ TEST_CASE("buffered pq works with randomized workloads", "[buffered_pq][workload
             }
         }
         while (!pq.empty()) {
+            REQUIRE(!ref_pq.empty());
             REQUIRE(pq.top() == ref_pq.top());
             pq.pop();
             ref_pq.pop();
         }
+        REQUIRE(ref_pq.empty());
     }
 }
