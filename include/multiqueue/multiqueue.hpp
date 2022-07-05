@@ -248,7 +248,7 @@ class MultiQueue {
         std::size_t cap_per_pq = (2 * initial_capacity) / num_pqs_;
         for (guarded_pq_type *pq = pq_list_; pq != pq_list_ + num_pqs_; ++pq) {
             pq_alloc_traits::construct(alloc_, pq, value_compare{comp_});
-            pq->reserve(cap_per_pq);
+            pq->unsafe_reserve(cap_per_pq);
         }
 #ifdef MULTIQUEUE_ABORT_MISALIGNMENT
         abort_on_data_misalignment();
