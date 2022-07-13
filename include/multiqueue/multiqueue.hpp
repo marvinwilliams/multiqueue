@@ -234,27 +234,6 @@ class MultiQueue {
 #endif
     }
 
-    explicit MultiQueue(size_type initial_capacity, unsigned int num_threads, config_type const &params,
-                        key_compare const &comp = key_compare(), allocator_type const &alloc = allocator_type())
-        : num_pqs_{num_threads * params.c},
-          rng_{params.seed},
-          num_handles_{0},
-          comp_{comp},
-          alloc_{alloc},
-          stick_policy_data_(num_pqs_, params.stick_policy_config) {
-        assert(num_threads > 0);
-        assert(params.c > 0);
-        pq_list_ = pq_alloc_traits::allocate(alloc_, num_pqs_);
-        std::size_t cap_per_pq = (2 * initial_capacity) / num_pqs_;
-        for (guarded_pq_type *pq = pq_list_; pq != pq_list_ + num_pqs_; ++pq) {
-            pq_alloc_traits::construct(alloc_, pq, value_compare{comp_});
-            pq->unsafe_reserve(cap_per_pq);
-        }
-#ifdef MULTIQUEUE_ABORT_MISALIGNMENT
-        abort_on_data_misalignment();
-#endif
-    }
-
     ~MultiQueue() noexcept {
         for (guarded_pq_type *s = pq_list_; s != pq_list_ + num_pqs_; ++s) {
             pq_alloc_traits::destroy(alloc_, s);

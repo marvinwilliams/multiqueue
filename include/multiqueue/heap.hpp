@@ -21,8 +21,6 @@
 #include <utility>      // move, forward, pair
 #include <vector>
 
-namespace multiqueue {
-
 #ifdef HEAP_DEBUG
 
 #define HEAP_ASSERT(x) \
@@ -37,6 +35,8 @@ namespace multiqueue {
     } while (false)
 
 #endif
+
+namespace multiqueue {
 
 template <typename T, typename Compare = std::less<>, unsigned int Degree = 8, typename Container = std::vector<T>>
 class Heap {
@@ -180,8 +180,11 @@ class Heap {
         HEAP_ASSERT(verify());
     }
 
-    void reserve(size_type cap) {
-        c.reserve(cap);
+    template <typename... Args>
+    void emplace(Args &&...args) {
+        c.emplace_back(std::forward<Args>(args)...);
+        sift_up(size() - 1);
+        HEAP_ASSERT(verify());
     }
 
     constexpr void clear() noexcept {
@@ -211,8 +214,6 @@ class Heap {
     }
 };
 
-#undef HEAP_ASSERT
-
 }  // namespace multiqueue
 
 namespace std {
@@ -221,5 +222,7 @@ struct uses_allocator<multiqueue::Heap<T, Compare, Degree, Container>, Alloc> : 
 };
 
 }  // namespace std
+
+#undef HEAP_ASSERT
 
 #endif  //! HEAP_HPP_INCLUDED

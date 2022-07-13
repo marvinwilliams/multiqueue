@@ -14,9 +14,9 @@
 
 #include "multiqueue/heap.hpp"
 
-#include <cassert>
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <memory>
 #include <sstream>
@@ -41,9 +41,9 @@ class BufferedPQ : private PriorityQueue {
     using insertion_buffer_type = std::array<value_type, InsertionBufferSize>;
     using deletion_buffer_type = std::array<value_type, DeletionBufferSize>;
 
-    size_type ins_buf_size_;
+    size_type ins_buf_size_ = 0;
     insertion_buffer_type insertion_buffer_;
-    size_type del_buf_size_;
+    size_type del_buf_size_ = 0;
     deletion_buffer_type deletion_buffer_;
 
    private:
@@ -70,20 +70,17 @@ class BufferedPQ : private PriorityQueue {
 
    public:
     explicit BufferedPQ(value_compare compare = value_compare()) : base_type(compare) {
-        ins_buf_size_ = 0;
-        del_buf_size_ = 0;
+        base_type::c.reserve(1'000'000);
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
     explicit BufferedPQ(value_compare const& compare, Alloc const& alloc) : base_type(compare, alloc) {
-        ins_buf_size_ = 0;
-        del_buf_size_ = 0;
+        base_type::c.reserve(1'000'000);
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
     explicit BufferedPQ(Alloc const& alloc) : base_type(alloc) {
-        ins_buf_size_ = 0;
-        del_buf_size_ = 0;
+        base_type::c.reserve(1'000'000);
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept {
@@ -100,13 +97,11 @@ class BufferedPQ : private PriorityQueue {
         return deletion_buffer_[del_buf_size_ - 1];
     }
 
-    value_type pop() {
+    void pop() {
         assert(!empty());
-        auto value = std::move(deletion_buffer_[--del_buf_size_]);
-        if (del_buf_size_ == 0) {
+        if (--del_buf_size_ == 0) {
             refill_deletion_buffer();
         }
-        return value;
     }
 
     void push(value_type value) {
@@ -146,10 +141,6 @@ class BufferedPQ : private PriorityQueue {
             flush_insertion_buffer();
         }
         insertion_buffer_[ins_buf_size_++] = std::move(value);
-    }
-
-    void reserve(size_type cap) {
-        base_type::c.reserve(cap);
     }
 
     constexpr void clear() noexcept {

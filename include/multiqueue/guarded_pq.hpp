@@ -96,7 +96,8 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
             unlock();
             return false;
         }
-        retval = pq_.pop();
+        retval = pq_.top();
+        pq_.pop();
         if (pq_.empty()) {
             top_key_.store(SentinelTraits::sentinel(), std::memory_order_relaxed);
         } else {
@@ -128,7 +129,8 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
 
     value_type unsafe_pop() {
         assert(!unsafe_empty());
-        auto retval = pq_.pop();
+        auto retval = pq_.top();
+        pq_.pop();
         if (pq_.empty()) {
             top_key_.store(SentinelTraits::sentinel(), std::memory_order_relaxed);
         } else {
@@ -150,10 +152,6 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
     void unsafe_clear() noexcept {
         pq_.clear();
         top_key_.store(SentinelTraits::sentinel(), std::memory_order_relaxed);
-    }
-
-    void unsafe_reserve(size_type cap) {
-        pq_.reserve(cap);
     }
 };
 
