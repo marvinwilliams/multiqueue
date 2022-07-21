@@ -21,10 +21,7 @@
 #ifndef MULTIQUEUE_DEFAULT_PQ_STD
 #include "multiqueue/heap.hpp"
 #endif
-#include "multiqueue/stick_policy/none.hpp"
-#include "multiqueue/stick_policy/perm.hpp"
-#include "multiqueue/stick_policy/random.hpp"
-#include "multiqueue/stick_policy/swapping.hpp"
+#include "multiqueue/stick_policies.hpp"
 
 #ifdef MULTIQUEUE_DEFAULT_PQ_STD
 #include <queue>
@@ -34,17 +31,17 @@
 namespace multiqueue {
 
 struct BuildConfig {
-    using DefaultStickPolicy =
+    static constexpr StickPolicy DefaultStickPolicy =
 #ifdef MULTIQUEUE_DEFAULT_STICK_POLICY_NONE
-        stick_policy::None
+        StickPolicy::None
 #elif defined MULTIQUEUE_DEFAULT_STICK_POLICY_RANDOM
-        stick_policy::Random
+        StickPolicy::Random
 #elif defined MULTIQUEUE_DEFAULT_STICK_POLICY_SWAPPING
-        stick_policy::Swapping
+        StickPolicy::Swapping
 #elif defined MULTIQUEUE_DEFAULT_STICK_POLICY_PERMUTING
-        stick_policy::Permuting
+        StickPolicy::Permuting
 #else
-        stick_policy::Random
+        StickPolicy::None
 #endif
         ;
 

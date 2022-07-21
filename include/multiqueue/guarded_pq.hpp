@@ -25,10 +25,14 @@
 #error Need to define L1_CACHE_LINESIZE
 #endif
 
+#ifndef PAGESIZE
+#define PAGESIZE 4096
+#endif
+
 namespace multiqueue {
 
 template <typename ValueTraits, typename SentinelTraits, typename PriorityQueue>
-class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
+class alignas(PAGESIZE) GuardedPQ {
    public:
     using key_type = typename ValueTraits::key_type;
     using value_type = typename ValueTraits::value_type;
@@ -39,13 +43,13 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
     using size_type = typename pq_type::size_type;
 
    private:
-    alignas(L1_CACHE_LINESIZE) std::atomic_bool lock_;
-    alignas(L1_CACHE_LINESIZE) std::atomic<key_type> top_key_;
-    pq_type pq_;
+    std::atomic_bool lock_;
+    std::atomic<key_type> top_key_;
+    alignas(L1_CACHE_LINESIZE) pq_type pq_;
 
     bool try_lock() noexcept {
-        // Maybe do not test?
-        return !lock_.load(std::memory_order_relaxed) && !lock_.exchange(true, std::memory_order_acquire);
+        // Maybe test, but expect unlocked
+        return !lock_.exchange(true, std::memory_order_acquire);
     }
 
     void unlock() noexcept {
@@ -88,7 +92,7 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
         return pq_.top();
     }
 
-    bool try_pop(value_type& retval) {
+    bool lock_pop(value_type& retval) {
         if (!try_lock()) {
             return false;
         }
@@ -98,31 +102,20 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
         }
         retval = pq_.top();
         pq_.pop();
-        if (pq_.empty()) {
-            top_key_.store(SentinelTraits::sentinel(), std::memory_order_relaxed);
-        } else {
-            top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
-        }
+        top_key_.store(pq_.empty() ? SentinelTraits::sentinel() : ValueTraits::key_of_value(pq_.top()),
+                       std::memory_order_relaxed);
         unlock();
         return true;
     }
 
-    bool try_push(const_reference value) {
+    bool lock_push(const_reference value) {
         if (!try_lock()) {
             return false;
         }
         pq_.push(value);
-        top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
-        unlock();
-        return true;
-    }
-
-    bool try_push(value_type&& value) {
-        if (!try_lock()) {
-            return false;
+        if (ValueTraits::key_of_value(pq_.top()) == ValueTraits::key_of_value(value)) {
+            top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
         }
-        pq_.push(std::move(value));
-        top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
         unlock();
         return true;
     }
@@ -131,22 +124,16 @@ class alignas(2 * L1_CACHE_LINESIZE) GuardedPQ {
         assert(!unsafe_empty());
         auto retval = pq_.top();
         pq_.pop();
-        if (pq_.empty()) {
-            top_key_.store(SentinelTraits::sentinel(), std::memory_order_relaxed);
-        } else {
-            top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
-        }
+        top_key_.store(pq_.empty() ? SentinelTraits::sentinel() : ValueTraits::key_of_value(pq_.top()),
+                       std::memory_order_relaxed);
         return retval;
     }
 
     void unsafe_push(const_reference value) {
         pq_.push(value);
-        top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
-    }
-
-    void unsafe_push(value_type&& value) {
-        pq_.push(std::move(value));
-        top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
+        if (ValueTraits::key_of_value(pq_.top()) == ValueTraits::key_of_value(value)) {
+            top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
+        }
     }
 
     void unsafe_clear() noexcept {
