@@ -12,6 +12,8 @@
 #ifndef BUFFERED_PQ_HPP_INCLUDED
 #define BUFFERED_PQ_HPP_INCLUDED
 
+#include "multiqueue/ring_buffer.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -41,8 +43,7 @@ class BufferedPQ : private PriorityQueue {
 
     size_type ins_buf_size_ = 0;
     insertion_buffer_type insertion_buffer_;
-    size_type del_buf_size_ = 0;
-    deletion_buffer_type deletion_buffer_;
+    ring_buffer<value_type, DeletionBufferSize> deletion_buffer_;
 
    private:
     void flush_insertion_buffer() {
@@ -53,15 +54,14 @@ class BufferedPQ : private PriorityQueue {
     }
 
     void refill_deletion_buffer() {
-        assert(del_buf_size_ == 0);
+        assert(deletion_buffer_.empty());
         // We flush the insertion buffer into the heap, then refill the
         // deletion buffer from the heap. We could also merge the insertion
         // buffer and heap into the deletion buffer
         flush_insertion_buffer();
         size_type num_refill = std::min(DeletionBufferSize, base_type::size());
-        del_buf_size_ = num_refill;
         while (num_refill != 0) {
-            deletion_buffer_[--num_refill] = std::move(base_type::c.front());
+            deletion_buffer_.push_back(base_type::c.front());
             base_type::pop();
         }
     }
@@ -82,55 +82,48 @@ class BufferedPQ : private PriorityQueue {
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept {
-        assert(del_buf_size_ != 0 || (ins_buf_size_ == 0 && base_type::empty()));
-        return del_buf_size_ == 0;
+        assert(deletion_buffer_.empty() || (ins_buf_size_ == 0 && base_type::empty()));
+        return deletion_buffer_.empty();
     }
 
     constexpr size_type size() const noexcept {
-        return ins_buf_size_ + del_buf_size_ + base_type::size();
+        return ins_buf_size_ + deletion_buffer_.size() + base_type::size();
     }
 
     constexpr const_reference top() const {
         assert(!empty());
-        return deletion_buffer_[del_buf_size_ - 1];
+        return deletion_buffer_.front();
     }
 
     void pop() {
         assert(!empty());
-        if (--del_buf_size_ == 0) {
+        deletion_buffer_.pop_front();
+        if (deletion_buffer_.empty()) {
             refill_deletion_buffer();
         }
     }
 
     void push(value_type value) {
         if (empty()) {
-            deletion_buffer_.front() = std::move(value);
-            ++del_buf_size_;
+            deletion_buffer_.push_back(std::move(value));
             return;
         }
-        if (base_type::comp(deletion_buffer_[0], value)) {
+        auto it = deletion_buffer_.crbegin();
+        while (base_type::comp(*it, value)) {
+            ++it;
+            if (it == deletion_buffer_.crend()) {
+                break;
+            }
+        }
+        if (it != deletion_buffer_.crbegin()) {
             // value has to go into the deletion buffer
-            if (del_buf_size_ != DeletionBufferSize) {
-                size_type in_pos = del_buf_size_;
-                while (!base_type::comp(deletion_buffer_[in_pos - 1], value)) {
-                    deletion_buffer_[in_pos] = std::move(deletion_buffer_[in_pos - 1]);
-                    // No need to check for underflow
-                    --in_pos;
-                    assert(in_pos >= 1);
-                }
-                deletion_buffer_[in_pos] = std::move(value);
-                ++del_buf_size_;
+            if (!deletion_buffer_.full()) {
+                deletion_buffer_.insert_at(it.base(), std::move(value));
                 return;
             } else {
-                auto tmp = std::move(deletion_buffer_[0]);
-                size_type in_pos = 0;
-                while (in_pos + 1 != DeletionBufferSize && base_type::comp(deletion_buffer_[in_pos + 1], value)) {
-                    deletion_buffer_[in_pos] = std::move(deletion_buffer_[in_pos + 1]);
-                    ++in_pos;
-                }
-                assert(in_pos < DeletionBufferSize);
-                deletion_buffer_[in_pos] = std::move(value);
-                // Fallthrough, greatest element needs to be inserted into the insertion buffer
+                auto tmp = std::move(deletion_buffer_.back());
+                deletion_buffer_.pop_back();
+                deletion_buffer_.insert_at(it.base(), std::move(value));
                 value = std::move(tmp);
             }
         }
@@ -143,7 +136,7 @@ class BufferedPQ : private PriorityQueue {
 
     constexpr void clear() noexcept {
         ins_buf_size_ = 0;
-        del_buf_size_ = 0;
+        deletion_buffer_.clear();
         base_type::clear();
     }
 
