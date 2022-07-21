@@ -19,7 +19,7 @@
 #include "multiqueue/buffered_pq.hpp"
 #endif
 #ifndef MULTIQUEUE_DEFAULT_PQ_STD
-#include "multiqueue/heap.hpp"
+#include "multiqueue/sequential/heap/heap.hpp"
 #endif
 #include "multiqueue/stick_policies.hpp"
 

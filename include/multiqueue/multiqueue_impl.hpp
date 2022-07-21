@@ -73,7 +73,7 @@ struct MultiQueueImplBase {
     }
 
     bool compare(key_type const &lhs, key_type const &rhs) noexcept {
-        if (SentinelTraits::is_implicit) {
+        if constexpr (SentinelTraits::is_implicit) {
             return comp(lhs, rhs);
         } else {
             if (rhs == SentinelTraits::sentinel()) {
