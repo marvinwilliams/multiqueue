@@ -60,8 +60,8 @@ class BufferedPQ : private PriorityQueue {
         // buffer and heap into the deletion buffer
         flush_insertion_buffer();
         size_type num_refill = std::min(DeletionBufferSize, base_type::size());
-        while (num_refill != 0) {
-            deletion_buffer_.push_back(base_type::c.front());
+        for (size_type i = 0; i < num_refill; ++i) {
+            deletion_buffer_.push_back(base_type::top());
             base_type::pop();
         }
     }
@@ -82,7 +82,7 @@ class BufferedPQ : private PriorityQueue {
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept {
-        assert(deletion_buffer_.empty() || (ins_buf_size_ == 0 && base_type::empty()));
+        assert(!deletion_buffer_.empty() || (ins_buf_size_ == 0 && base_type::empty()));
         return deletion_buffer_.empty();
     }
 

@@ -35,9 +35,9 @@ class ring_buffer_iterator {
 
    protected:
     std::size_t pos_;
-    std::decay_t<T>* data_;
+    T* data_;
 
-    explicit constexpr ring_buffer_iterator(std::decay_t<T>* data, std::size_t pos) noexcept : data_{data}, pos_{pos} {
+    explicit constexpr ring_buffer_iterator(T* data, std::size_t pos) noexcept : data_{data}, pos_{pos} {
     }
 
    public:
@@ -160,7 +160,7 @@ struct ring_buffer {
     }
 
     std::size_t size() const noexcept {
-        return (end_ - begin_);
+        return (end_ - begin_) & mask;
     }
 
     void push_front(T const& t) {
@@ -186,17 +186,19 @@ struct ring_buffer {
     }
 
     void insert_at(const_iterator it, T const& t) {
-        assert(begin_ <= it.pos_ <= end_);
+        assert(begin_ < end_ ? (begin_ <= it.pos_ && it.pos_ <= end_) : (it.pos_ >= begin_ || it.pos_ <= end_));
         assert(!full());
-        if (it.pos_ - begin_ < end_ - it.pos_) {
-            for (std::size_t i = begin_; i < it.pos_; ++i) {
-                data_[(i - 1) & mask] = std::move(data_[i & mask]);
+        std::size_t left_elements = it.pos_ - begin_;
+        std::size_t right_elements = end_ - it.pos_;
+        if (left_elements < right_elements) {
+            for (std::size_t i = 0; i < left_elements; ++i) {
+                data_[(begin_ + i - 1) & mask] = std::move(data_[(begin_ + i) & mask]);
             }
             data_[(it.pos_ - 1) & mask] = t;
             --begin_;
         } else {
-            for (std::size_t i = end_; i > it.pos_; --i) {
-                data_[i & mask] = std::move(data_[(i - 1) & mask]);
+            for (std::size_t i = 0; i < right_elements; ++i) {
+                data_[(end_ - i) & mask] = std::move(data_[(end_ - i - 1) & mask]);
             }
             data_[it.pos_ & mask] = t;
             ++end_;

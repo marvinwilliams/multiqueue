@@ -1,4 +1,4 @@
-#include "multiqueue/heap.hpp"
+#include "multiqueue/sequential/heap/heap.hpp"
 #include "test_types.hpp"
 
 #include "catch2/catch_template_test_macros.hpp"

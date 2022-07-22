@@ -47,7 +47,7 @@ struct heap_base {
     }
 };
 
-template <typename T, typename Comparator, unsigned int Degree, typename SiftStrategy = sift_strategy::FullDown,
+template <typename T, typename Comparator = std::less<>, unsigned int Degree = 8, typename SiftStrategy = sift_strategy::FullDown,
           typename Allocator = std::allocator<T>>
 class Heap : protected heap_base<T, Comparator> {
     friend SiftStrategy;
