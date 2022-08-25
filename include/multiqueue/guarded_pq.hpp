@@ -47,16 +47,6 @@ class alignas(PAGESIZE) GuardedPQ {
     std::atomic<key_type> top_key_;
     alignas(L1_CACHE_LINESIZE) pq_type pq_;
 
-    bool try_lock() noexcept {
-        // Maybe test, but expect unlocked
-        return !lock_.exchange(true, std::memory_order_acquire);
-    }
-
-    void unlock() noexcept {
-        assert(lock_.load());
-        lock_.store(false, std::memory_order_release);
-    }
-
    public:
     explicit GuardedPQ(value_compare const& comp = value_compare())
         : lock_{false}, top_key_{SentinelTraits::sentinel()}, pq_(comp) {
@@ -79,6 +69,16 @@ class alignas(PAGESIZE) GuardedPQ {
         return concurrent_top_key() == SentinelTraits::sentinel();
     }
 
+    bool try_lock() noexcept {
+        // Maybe test, but expect unlocked
+        return !lock_.exchange(true, std::memory_order_acquire);
+    }
+
+    void unlock() noexcept {
+        assert(lock_.load());
+        lock_.store(false, std::memory_order_release);
+    }
+
     [[nodiscard]] bool unsafe_empty() const noexcept {
         return pq_.empty();
     }
@@ -92,41 +92,11 @@ class alignas(PAGESIZE) GuardedPQ {
         return pq_.top();
     }
 
-    bool lock_pop(value_type& retval) {
-        if (!try_lock()) {
-            return false;
-        }
-        if (pq_.empty()) {
-            unlock();
-            return false;
-        }
-        retval = pq_.top();
-        pq_.pop();
-        top_key_.store(pq_.empty() ? SentinelTraits::sentinel() : ValueTraits::key_of_value(pq_.top()),
-                       std::memory_order_relaxed);
-        unlock();
-        return true;
-    }
-
-    bool lock_push(const_reference value) {
-        if (!try_lock()) {
-            return false;
-        }
-        pq_.push(value);
-        if (ValueTraits::key_of_value(pq_.top()) == ValueTraits::key_of_value(value)) {
-            top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
-        }
-        unlock();
-        return true;
-    }
-
-    value_type unsafe_pop() {
+    void unsafe_pop() {
         assert(!unsafe_empty());
-        auto retval = pq_.top();
         pq_.pop();
         top_key_.store(pq_.empty() ? SentinelTraits::sentinel() : ValueTraits::key_of_value(pq_.top()),
                        std::memory_order_relaxed);
-        return retval;
     }
 
     void unsafe_push(const_reference value) {

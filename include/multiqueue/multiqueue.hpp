@@ -134,17 +134,21 @@ class MultiQueue {
             if (!second->unsafe_empty()) {
                 if (impl_.comp(ValueTraits::key_of_value(first->unsafe_top()),
                                ValueTraits::key_of_value(second->unsafe_top()))) {
-                    retval = second->unsafe_pop();
+                    retval = second->unsafe_top();
+                    second->unsafe_pop();
                 } else {
-                    retval = first->unsafe_pop();
+                    retval = first->unsafe_top();
+                    first->unsafe_pop();
                 }
             } else {
-                retval = first->unsafe_pop();
+                retval = first->unsafe_top();
+                first->unsafe_pop();
             }
             return true;
         }
         if (!second->unsafe_empty()) {
-            retval = second->unsafe_pop();
+            retval = second->unsafe_top();
+            second->unsafe_pop();
             return true;
         }
         return false;
@@ -181,7 +185,8 @@ class MultiQueue {
             }
             assert(!pq->unsafe_empty());
             std::pair<value_type, std::size_t> result;
-            result.first = pq->unsafe_pop();
+            result.first = pq->unsafe_top();
+            pq->unsafe_pop();
             result.second = static_cast<std::size_t>(std::distance(impl_.pq_list, pq));
             removed_elements.push_back(result);
             ++distribution[result.second];
