@@ -29,10 +29,12 @@
 #define PAGESIZE 4096
 #endif
 
+#define GUARDED_PQ_ALIGNMENT PAGESIZE
+
 namespace multiqueue {
 
 template <typename ValueTraits, typename SentinelTraits, typename PriorityQueue>
-class alignas(PAGESIZE) GuardedPQ {
+class alignas(GUARDED_PQ_ALIGNMENT) GuardedPQ {
    public:
     using key_type = typename ValueTraits::key_type;
     using value_type = typename ValueTraits::value_type;
