@@ -33,16 +33,22 @@
 
 namespace multiqueue {
 
-template <typename ValueTraits, typename SentinelTraits, typename PriorityQueue>
+template <typename Key, typename PriorityQueue, typename ValueTraits, typename SentinelTraits>
 class alignas(GUARDED_PQ_ALIGNMENT) GuardedPQ {
    public:
-    using key_type = typename ValueTraits::key_type;
-    using value_type = typename ValueTraits::value_type;
+    using key_type = Key;
+    using value_type = typename PriorityQueue::value_type;
+    static_assert(std::is_same_v<value_type, typename ValueTraits::value_type>,
+                  "GuardedPQ must have the same value_type as its ValueTraits");
+
+   private:
     using pq_type = PriorityQueue;
+
+   public:
     using value_compare = typename pq_type::value_compare;
+    using size_type = typename pq_type::size_type;
     using reference = typename pq_type::reference;
     using const_reference = typename pq_type::const_reference;
-    using size_type = typename pq_type::size_type;
 
    private:
     std::atomic_bool lock_;
@@ -118,10 +124,9 @@ class alignas(GUARDED_PQ_ALIGNMENT) GuardedPQ {
 
 namespace std {
 
-template <typename ValueTraits, typename SentinelTraits, typename PriorityQueue, typename Alloc>
-struct uses_allocator<multiqueue::GuardedPQ<ValueTraits, SentinelTraits, PriorityQueue>, Alloc>
-    : uses_allocator<typename multiqueue::GuardedPQ<ValueTraits, SentinelTraits, PriorityQueue>::pq_type, Alloc>::type {
-};
+template <typename Key, typename PriorityQueue, typename ValueTraits, typename ComparatorTraits, typename Alloc>
+struct uses_allocator<multiqueue::GuardedPQ<Key, PriorityQueue, ValueTraits, ComparatorTraits>, Alloc>
+    : uses_allocator<PriorityQueue, Alloc>::type {};
 
 }  // namespace std
 
