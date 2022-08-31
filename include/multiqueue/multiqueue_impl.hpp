@@ -109,28 +109,25 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::None, ValueTraits,
         }
 
         bool try_pop(typename base_type::reference retval) noexcept {
-            typename base_type::size_type index[2] = {random_index(), random_index()};
-            typename base_type::key_type key[2] = {impl_.pq_list[index[0]].concurrent_top_key(),
-                                                   impl_.pq_list[index[1]].concurrent_top_key()};
-            std::size_t selected_index;
             do {
+                typename base_type::size_type index[2] = {random_index(), random_index()};
+                typename base_type::key_type key[2] = {impl_.pq_list[index[0]].concurrent_top_key(),
+                                                       impl_.pq_list[index[1]].concurrent_top_key()};
                 unsigned int select_pq = impl_.compare(key[0], key[1]) ? 1 : 0;
-                selected_index = index_[selected_pq];
+                std::size_t selected_index = index_[selected_pq];
                 if (key[select_pq] == SentinelTraits::sentinel()) {
-                    return false;
+                    break;
                 }
-                if (impl_.pq_list[select_index].try_lock(retval)) {
+                if (impl_.pq_list[select_index].try_lock()) {
                     if (!impl_.pq_list[select_index].unsafe_empty()) {
-                        break;
+                        retval = impl_.pq_list[selected_index].unsafe_pop();
+                        impl_.pq_list[selected_index].unlock();
+                        return true;
                     }
-                    retval = impl_.pq_list[select_index].unlock();
+                    impl_.pq_list[select_index].unlock();
                 }
-                index[select_offset] = random_index();
-                key[select_offset] = impl_.pq_list[index[selected_offset]].concurrent_top_key();
             } while (true);
-            retval = impl_.pq_list[selected_index].unsafe_pop();
-            retval = impl_.pq_list[selected_index].unlock();
-            return true;
+            return false;
         }
 
         [[nodiscard]] bool is_empty(typename base_type::size_type pos) noexcept {
@@ -196,7 +193,7 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Random, ValueTrait
         void push(typename base_type::const_reference value) noexcept {
             if (use_count_[push_pq_] == 0 || !impl_.pq_list[index_[push_pq_]].try_lock()) {
                 do {
-                    index_[push_pq_] = random_pq();
+                    index_[push_pq_] = random_index();
                 } while (!impl_.pq_list[index_[push_pq_]].try_lock());
                 use_count_[push_pq_] = impl_.stickiness;
             }
@@ -215,35 +212,34 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Random, ValueTrait
                 index_[1] = random_index();
                 use_count_[1] = impl_.stickiness;
             }
+            assert(use_count_[0] > 0 && use_count_[1] > 0);
 
             typename base_type::key_type key[2] = {impl_.pq_list[index_[0]].concurrent_top_key(),
                                                    impl_.pq_list[index_[1]].concurrent_top_key()};
-            std::size_t select_index;
-            do {
-                unsigned int select_pq = impl_.compare(key[0], key[1]) ? 1 : 0;
-                select_index = index_[select_pq];
-                if (key[select_pq] == SentinelTraits::sentinel()) {
-                    // Both pqs are empty
-                    use_count_[0] = 0;
-                    use_count_[1] = 0;
-                    return false;
-                }
-                if (impl_.pq_list[select_index].try_lock()) {
+
+            for (auto select_pq = static_cast<unsigned int>(impl_.compare(key[0], key[1]));
+                 key[select_pq] != SentinelTraits::sentinel();
+                 select_pq = static_cast<unsigned int>(impl_.compare(key[0], key[1]))) {
+                std::size_t selected_index = index_[selected_pq];
+                if (impl_.pq_list[select_index].try_lock(retval)) {
                     if (!impl_.pq_list[select_index].unsafe_empty()) {
-                        break;
+                        retval = impl_.pq_list[select_index].unsafe_top();
+                        impl_.pq_list[select_index].unsafe_pop();
+                        impl_.pq_list[select_index].unlock();
+                        --use_count[0];
+                        --use_count[1];
+                        return true;
                     }
                     impl_.pq_list[select_index].unlock();
                 }
                 index_[select_pq] = random_index();
-                key[select_pq] = impl_.pq_list[index_[select_pq]].concurrent_top_key();
                 use_count_[select_pq] = impl_.stickiness;
-            } while (true);
-            retval = impl_.pq_list[select_index].unsafe_top();
-            impl_.pq_list[select_index].unsafe_pop();
-            impl_.pq_list[select_index].unlock();
-            --use_count[0];
-            --use_count[1];
-            return true;
+                key[select_pq] = impl_.pq_list[index_[select_pq]].concurrent_top_key();
+            }
+            // Both pqs are empty
+            use_count_[0] = 0;
+            use_count_[1] = 0;
+            return false;
         }
 
         [[nodiscard]] bool is_empty(typename base_type::size_type pos) noexcept {
@@ -286,7 +282,7 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Swapping, ValueTra
 
         xoroshiro256starstar rng_;
         MultiQueueImpl &impl_;
-        std::size_t permutation_index_[2];
+        std::size_t permutation_index_;
         std::size_t index_[2];
         unsigned int use_count_[2];
         unsigned int push_pq_ = 0;
@@ -300,20 +296,44 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Swapping, ValueTra
         explicit Handle(MultiQueueImpl &impl, unsigned int id, std::uint64_t seed) noexcept
             : rng_{seed},
               impl_{impl},
-              permutation_index_{id * 2, id * 2 + 1},
+              permutation_index_{id * 2},
               index_{load_index(0), load_index(1)},
               use_count_{impl_.stickiness, impl_.stickiness} {
         }
 
+        std::size_t random_index() noexcept {
+            return fastrange64(rng_(), impl_.num_pqs);
+        }
+
         std::size_t load_index(unsigned int pq) const noexcept {
             assert(pq <= 1);
-            return permutation[permutation_index_[pq]].i.load(std::memory_order_relaxed);
+            return permutation[permutation_index_ + pq].i.load(std::memory_order_relaxed);
+        }
+
+        bool try_swap_assignment(unsigned int pq, std::size_t index, std::size_t expected) noexcept {
+            assert(pq <= 1);
+            assert(index < impl_.num_pqs);
+            assert(expected < impl_.num_pqs);
+            if (!permutation[permutation_index_ + pq].i.compare_exchange_strong(index_[pq], impl_.num_pqs,
+                                                                                std::memory_order_relaxed)) {
+                // Permutation has changed, no need to swap
+                // Only handle itself may invalidate
+                assert(index_[pq] != impl_.num_pqs);
+                return true;
+            }
+            if (!permutation[index].i.compare_exchange_strong(expected, index_[pq], std::memory_order_relaxed)) {
+                permutation[permutation_index_ + pq].i.store(index_[pq], std::memory_order_relaxed);
+                return false;
+            }
+            permutation[permutation_index_ + pq].i.store(expected, std::memory_order_relaxed);
+            index_[pq] = expected;
+            return true;
         }
 
         void swap_assignment(unsigned int pq) noexcept {
             assert(pq <= 1);
-            if (!permutation[permutation_index_[pq]].i.compare_exchange_strong(index_[pq], impl_.num_pqs,
-                                                                               std::memory_order_relaxed)) {
+            if (!permutation[permutation_index_ + pq].i.compare_exchange_strong(index_[pq], impl_.num_pqs,
+                                                                                std::memory_order_relaxed)) {
                 // Permutation has changed, no need to swap
                 // Only handle itself may invalidate
                 assert(index_[pq] != impl_.num_pqs);
@@ -327,7 +347,7 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Swapping, ValueTra
             } while (target_assigned == impl_.num_pqs ||
                      !permutation[target_index].i.compare_exchange_strong(target_assigned, index_[pq],
                                                                           std::memory_order_relaxed));
-            permutation[permutation_index_[pq]].i.store(target_assigned, std::memory_order_relaxed);
+            permutation[permutation_index_ + pq].i.store(target_assigned, std::memory_order_relaxed);
             index_[pq] = target_assigned;
         }
 
@@ -347,14 +367,20 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Swapping, ValueTra
        public:
         void push(typename base_type::const_reference value) {
             refresh_pq(push_pq);
-            if (!impl_.pq_list[index_[push_pq]].try_lock()) {
+            std::size_t lock_pq = permutation_index_ + push_pq;
+            std::size_t lock_index = index_[push_pq];
+            assert(lock_index != impl_.num_pqs);
+            while (!impl_.pq_list[lock_index].try_lock()) {
                 do {
-                    swap_assignment(push_pq);
-                } while (!impl_.pq_list[index_[push_pq]].try_lock());
+                    lock_pq = random_index();
+                    lock_index = permutation[lock_pq].i.load(std::memory_order_relaxed);
+                } while (lock_index == impl_.num_pqs);
+            }
+            impl_.pq_list[lock_index].unsafe_push(value);
+            impl_.pq_list[lock_index].unlock();
+            if (lock_pq != permutation_index_ + push_pq && try_swap_assignment(push_pq, lock_pq, lock_index)) {
                 use_count_[push_pq] = impl_.stickiness;
             }
-            impl_.pq_list[index_[push_pq]].unsafe_push(value);
-            impl_.pq_list[index_[push_pq]].unlock();
             --use_count_[push_pq_];
             push_pq_ = 1 - push_pq_;
         }
@@ -362,32 +388,41 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Swapping, ValueTra
         bool try_pop(typename base_type::reference retval) {
             refresh_pq(0);
             refresh_pq(1);
-            typename base_type::key_type key[2] = {load_index(0), load_index(1)};
-            std::size_t select_index;
-            do {
-                unsigned int select_pq = impl_.compare(key[0], key[1]) ? 1 : 0;
-                select_index = index_[select_pq];
-                if (key[select_pq] == SentinelTraits::sentinel()) {
-                    use_count_[0] = 0;
-                    use_count_[1] = 0;
-                    return false;
-                }
-                if (impl_.pq_list[select_index].try_lock()) {
-                    if (!impl_.pq_list[select_index].empty()) {
-                        break;
+            assert(use_count_[0] > 0 && use_count_[1] > 0);
+
+            std::size_t pop_pq[2] = {permutation_index_, permutation_index_ + 1};
+            std::size_t pop_index[2] = {index_[0], index_[1]};
+            typename base_type::key_type key[2] = {impl_.pq_list[pop_index[0]].concurrent_top_key(),
+                                                   impl_.pq_list[pop_index[1]].concurrent_top_key()};
+            for (auto select_pq = static_cast<unsigned int>(impl_.compare(key[0], key[1]));
+                 key[select_pq] != SentinelTraits::sentinel();
+                 select_pq = static_cast<unsigned int>(impl_.compare(key[0], key[1]))) {
+                std::size_t selected_index = index_[selected_pq];
+                if (impl_.pq_list[select_index].try_lock(retval)) {
+                    if (!impl_.pq_list[select_index].unsafe_empty()) {
+                        retval = impl_.pq_list[select_index].unsafe_top();
+                        impl_.pq_list[select_index].unsafe_pop();
+                        impl_.pq_list[select_index].unlock();
+                        if (pop_pq[select_pq] != permutation_index_ + select_pq &&
+                            try_swap_assignment(select_pq, pop_pq[select_pq], pop_index[select_pq])) {
+                            use_count_[select_pq] = impl_.stickiness;
+                        }
+                        --use_count_[0];
+                        --use_count_[1];
+                        return true;
                     }
                     impl_.pq_list[select_index].unlock();
                 }
-                swap_assignment(select_pq);
-                use_count_[select_pq] = impl_.stickiness;
-                key[select_pq] = load_index(select_pq);
-            } while (true);
-            retval = impl_.pq_list[select_index].unsafe_top();
-            impl_.pq_list[select_index].unsafe_pop();
-            impl_.pq_list[select_index].unlock();
-            --use_count_[0];
-            --use_count_[1];
-            return true;
+                do {
+                    pop_pq[select_pq] = random_index();
+                    pop_index[select_pq] = permutation[pop_pq[select_pq]].i.load(std::memory_order_relaxed);
+                } while (pop_index[select_pq] == impl_.num_pqs);
+                key[select_pq] = impl_.pq_list[pop_index[select_pq]].concurrent_top_key();
+                select_pq = impl_.compare(key[0], key[1]) ? 1 : 0;
+            }
+            use_count_[0] = 0;
+            use_count_[1] = 0;
+            return false;
         }
 
         [[nodiscard]] bool is_empty(typename base_type::size_type pos) noexcept {
@@ -449,9 +484,8 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Permutation, Value
         xoroshiro256starstar rng_;
         MultiQueueImpl &impl_;
 
-        std::size_t permutation_index_[2];
+        std::size_t permutation_index_;
         std::uint64_t current_permutatiton_;
-        std::size_t backup_index_[2];
         unsigned int use_count_;
         unsigned int push_pq_ = 0;
 
@@ -466,25 +500,32 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Permutation, Value
               impl_{impl},
               permutation_index_{id * 2, id * 2 + 1},
               current_permutation_{impl_.permutation.load(std::memory_order_relaxed)},
-              backup_index_{get_index(0), get_index(1)},
               use_count_{impl_.stickiness} {
+        }
+
+        std::size_t random_index() noexcept {
+            return fastrange64(rng_(), impl_.num_pqs);
+        }
+
+        void update_permutation() {
+            std::uint64_t new_permutation = rng_() | 1;
+            if (impl_.permutation.compare_exchange_strong(current_permutation_, new_permutation,
+                                                          std::memory_order_relaxed)) {
+                current_permutation_ = new_permutation;
+            }
         }
 
         void refresh_permutation() noexcept {
             if (use_count_ != 0) {
                 auto permutation = impl_.perm.load(std::memory_order_relaxed);
-                if (permutation != current_permutation_) {
-                    current_permutation_ = permutation;
-                    backup_index_[0] = get_index(0);
-                    backup_index_[1] = get_index(1);
-                    use_count_ = impl_.stickiness;
+                if (permutation == current_permutation_) {
+                    return;
                 }
+                current_permutation_ = permutation;
             } else {
-                impl_.update_permutation(current_permutation_);
-                backup_index_[0] = get_index(0);
-                backup_index_[1] = get_index(1);
-                use_count_ = impl_.stickiness;
+                update_permutation();
             }
+            use_count_ = impl_.stickiness;
         }
 
         std::size_t get_index(unsigned int pq) const noexcept {
@@ -497,27 +538,23 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Permutation, Value
        public:
         void push(typename base_type::const_reference value) noexcept {
             refresh_permutation();
-            std::size_t index = get_index(push_pq);
-            if (!impl_.pq_list[index].try_lock()) {
-                if (backup_index_[push_pq] != index || !impl_.pq_list[backup_index_[push_pq]].try_lock()) {
-                    do {
-                        backup_index_[push_pq] = random_index();
-                    } while (!impl_.pq_list[backup_index_[push_pq]].try_lock());
-                    index = backup_index_[push_pq];
-                }
+            std::size_t lock_index = get_index(push_pq);
+            while (!impl_.pq_list[lock_index].try_lock()) {
+                lock_index = random_index();
             }
-            impl_.pq_list[index].unsafe_push(value);
-            impl_.pq_list[index].unlock();
+            impl_.pq_list[lock_index].unsafe_push(value);
+            impl_.pq_list[lock_index].unlock();
             --use_count_;
             push_pq_ = 1 - push_pq_;
         }
 
         bool try_pop(typename base_type::reference retval) noexcept {
             refresh_permutation();
+            std::size_t pop_pq[2] = {permutation_index_[0], permutation_index_[1]};
             typename base_type::size_type index[2] = {get_index(0), get_index(1)};
             typename base_type::key_type key[2] = {impl_.pq_list[index[0]].concurrent_top_key(),
                                                    impl_.pq_list[index[1]].concurrent_top_key()};
-            std::size_t select_index;
+            std::size_t select_pq;
             do {
                 unsigned int select_pq = impl_.compare(key[0], key[1]) ? 1 : 0;
                 select_index = index[select_pq];
@@ -571,14 +608,6 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Permutation, Value
         : base_type(next_power_of_two(num_threads * config.c), config.seed, comp),
           stickiness{config.stickiness},
           permutation{1} {
-    }
-
-    template <typename Generator>
-    void update_permutation(std::uint64_t &old, Generator &g) {
-        std::uint64_t new_permutation = g() | 1;
-        if (permutation.compare_exchange_strong(old, new_permutation, std::memory_order_relaxed)) {
-            old = new_permutation;
-        }
     }
 
     Handle get_handle() noexcept {
