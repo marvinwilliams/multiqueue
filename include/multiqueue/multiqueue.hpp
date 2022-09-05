@@ -11,15 +11,21 @@
 #ifndef MULTIQUEUE_HPP_INCLUDED
 #define MULTIQUEUE_HPP_INCLUDED
 
-#include "multiqueue/build_config.hpp"
+#ifndef L1_CACHE_LINESIZE
+#define L1_CACHE_LINESIZE 64
+#endif
+
+#ifndef PAGESIZE
+#define PAGESIZE 4096
+#endif
 
 #include "multiqueue/guarded_pq.hpp"
+#include "multiqueue/heap.hpp"
 #include "multiqueue/multiqueue_impl.hpp"
 #include "multiqueue/sentinel_traits.hpp"
 #include "multiqueue/stick_policy.hpp"
 #include "multiqueue/value_traits.hpp"
 
-#include <allocator>
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
@@ -42,8 +48,13 @@
 
 namespace multiqueue {
 
-template <typename Key, typename T, typename KeyCompare, StickPolicy P, typename PriorityQueue, typename ValueTraits,
-          typename SentinelTraits, typename Allocator = std::allocator<typename ValueTraits::value_type>>
+template <typename T, typename Compare>
+using DefaultPriorityQueue = BufferedPQ<64, 64, Heap<T, Compare, 8>>;
+
+template <typename Key, typename T, typename KeyCompare = std::less<Key>, StickPolicy P = StickPolicy::None,
+          template <typename, typename> typename PriorityQueue = DefaultPriorityQueue,
+          typename ValueTraits = value_traits<Key, T>, typename SentinelTraits = sentinel_traits<Key, KeyCompare>,
+          typename Allocator = std::allocator<Key>>
 class MultiQueue {
    public:
     using key_type = Key;
@@ -52,15 +63,31 @@ class MultiQueue {
     using mapped_type = T;
     static_assert(std::is_same_v<mapped_type, typename ValueTraits::mapped_type>,
                   "MultiQueue must have the same mapped_type as its ValueTraits");
+    using value_type = typename ValueTraits::value_type;
     using key_compare = KeyCompare;
+    class value_compare {
+        friend MultiQueue;
+        [[no_unique_address]] key_compare comp;
+
+        explicit value_compare(key_compare const &c = key_compare{}) : comp{c} {
+        }
+
+       public:
+        constexpr bool operator()(value_type const &lhs, value_type const &rhs) const noexcept {
+            return comp(ValueTraits::key_of_value(lhs), ValueTraits::key_of_value(rhs));
+        }
+    };
 
    private:
-    using pq_type = GuardedPQ<key_type, PriorityQueue, ValueTraits, SentinelTraits>;
-    using impl_type = MultiQueueImpl<pq_type, key_compare, P, ValueTraits, SentinelTraits>;
+    struct key_of_value {
+        static key_type get(value_type const &v) noexcept {
+            return ValueTraits::key_of_value(v);
+        }
+    };
+    using pq_type = GuardedPQ<key_type, key_of_value, PriorityQueue<value_type, value_compare>, SentinelTraits>;
+    using impl_type = MultiQueueImpl<pq_type, key_compare, P>;
 
    public:
-    using value_type = typename impl_type::value_type;
-    using value_compare = typename impl_type::value_compare;
     using size_type = typename impl_type::size_type;
     using reference = typename impl_type::reference;
     using const_reference = typename impl_type::const_reference;
@@ -95,7 +122,7 @@ class MultiQueue {
         }
     }
 
-    ~MultiQueueImpl() noexcept {
+    ~MultiQueue() noexcept {
         for (pq_type *pq = impl_.pq_list; pq != impl_.pq_list + impl_.num_pqs; ++pq) {
             pq_alloc_traits::destroy(alloc_, pq);
         }
@@ -145,21 +172,6 @@ class MultiQueue {
     value_compare value_comp() const {
         return value_compare{impl_.comp};
     }
-};
-
-template <typename T, typename KeyCompare, typename ValueTraits>
-struct value_compare {
-    using value_type = T;
-    using key_compare = KeyCompare;
-    [[no_unique_address]] key_compare comp;
-
-    explicit value_compare(key_compare const &c) : comp{c} {
-    }
-
-    constexpr bool operator()(value_type const &lhs, value_type const &rhs) const noexcept {
-        return comp(ValueTraits::key_of_value(lhs), ValueTraits::key_of_value(rhs));
-    }
-
 #ifdef MULTIQUEUE_ELEMENT_DISTRIBUTION
     std::vector<std::size_t> get_distribution() const {
         std::vector<std::size_t> distribution(num_pqs());
@@ -195,13 +207,6 @@ struct value_compare {
     }
 #endif
 };
-
-template <typename Key, typename T, typename KeyCompare = std::less<>, StickPolicy P = BuildConfig::DefaultStickPolicy,
-          typename Allocator = std::allocator<typename value_traits<Key, T>::value_type>>
-using BasicMultiQueue = MultiQueue<
-    Key, T, KeyCompare, P,
-    BuildConfig::DefaultPriorityQueue<typename value_traits<Key, T>::value_type, value_compare<Key, KeyCompare>>,
-    value_traits<Key, T>, sentinel_traits<Key, KeyCompare>, Allocator>;
 
 }  // namespace multiqueue
 

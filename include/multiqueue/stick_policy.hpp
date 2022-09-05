@@ -13,7 +13,7 @@
 
 namespace multiqueue {
 
-enum class StickPolicy { None, Random, Swapping, Permutation };
+enum class StickPolicy { None, RandomStrict, Random, Swapping, Permutation };
 
 }  // namespace multiqueue
 
