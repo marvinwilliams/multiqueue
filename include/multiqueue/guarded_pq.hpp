@@ -16,6 +16,7 @@
 #include <cassert>
 #include <limits>
 #include <memory>
+#include <ostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -33,12 +34,11 @@
 
 namespace multiqueue {
 
-template <typename Key, typename KeyOfValue, typename PriorityQueue, typename SentinelTraits>
+template <typename Key, typename KeyOfValue, typename PriorityQueue, typename Sentinel>
 class alignas(GUARDED_PQ_ALIGNMENT) GuardedPQ {
    public:
     using key_type = Key;
     using value_type = typename PriorityQueue::value_type;
-    using sentinel_traits = SentinelTraits;
 
    private:
     using pq_type = PriorityQueue;
@@ -56,16 +56,16 @@ class alignas(GUARDED_PQ_ALIGNMENT) GuardedPQ {
 
    public:
     explicit GuardedPQ(value_compare const& comp = value_compare())
-        : lock_{false}, top_key_{sentinel_traits::sentinel()}, pq_(comp) {
+        : lock_{false}, top_key_{Sentinel::get()}, pq_(comp) {
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<pq_type, Alloc>>>
     explicit GuardedPQ(value_compare const& comp, Alloc const& alloc)
-        : lock_{false}, top_key_{sentinel_traits::sentinel()}, pq_(comp, alloc) {
+        : lock_{false}, top_key_{Sentinel::get()}, pq_(comp, alloc) {
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<pq_type, Alloc>>>
-    explicit GuardedPQ(Alloc const& alloc) : lock_{false}, top_key_{sentinel_traits::sentinel()}, pq_(alloc) {
+    explicit GuardedPQ(Alloc const& alloc) : lock_{false}, top_key_{Sentinel::get()}, pq_(alloc) {
     }
 
     key_type concurrent_top_key() const noexcept {
@@ -73,7 +73,7 @@ class alignas(GUARDED_PQ_ALIGNMENT) GuardedPQ {
     }
 
     [[nodiscard]] bool concurrent_empty() const noexcept {
-        return concurrent_top_key() == sentinel_traits::sentinel();
+        return concurrent_top_key() == Sentinel::get();
     }
 
     bool try_lock() noexcept {
@@ -102,7 +102,7 @@ class alignas(GUARDED_PQ_ALIGNMENT) GuardedPQ {
     void unsafe_pop() {
         assert(!unsafe_empty());
         pq_.pop();
-        top_key_.store(pq_.empty() ? sentinel_traits::sentinel() : KeyOfValue::get(pq_.top()),
+        top_key_.store(pq_.empty() ? Sentinel::get() : KeyOfValue::get(pq_.top()),
                        std::memory_order_relaxed);
     }
 
@@ -115,7 +115,7 @@ class alignas(GUARDED_PQ_ALIGNMENT) GuardedPQ {
 
     void unsafe_clear() noexcept {
         pq_.clear();
-        top_key_.store(sentinel_traits::sentinel(), std::memory_order_relaxed);
+        top_key_.store(Sentinel::get(), std::memory_order_relaxed);
     }
 };
 

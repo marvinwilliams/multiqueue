@@ -17,70 +17,30 @@
 #include "multiqueue/external/fastrange.h"
 #include "multiqueue/external/xoroshiro256starstar.hpp"
 
-#include <cmath>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <ostream>
 #include <utility>
 
 namespace multiqueue {
 
-template <typename PriorityQueue, typename KeyCompare>
-struct MultiQueueImplBase {
-    using pq_type = PriorityQueue;
-    using key_type = typename pq_type::key_type;
-    using value_type = typename pq_type::value_type;
-    using key_compare = KeyCompare;
-    using value_compare = typename pq_type::value_compare;
-    using size_type = std::size_t;
-    using reference = value_type &;
-    using const_reference = value_type const &;
-    using sentinel_traits = typename pq_type::sentinel_traits;
-
-    pq_type *pq_list;
-    size_type num_pqs;
-    xoroshiro256starstar rng;
-    [[no_unique_address]] key_compare comp;
-
-    explicit MultiQueueImplBase(size_type n, std::uint64_t seed, key_compare const &c)
-        : num_pqs{n}, rng(seed), comp{c} {
-    }
-
-    std::size_t random_index() noexcept {
-        return fastrange64(rng(), num_pqs);
-    }
-
-    bool compare(key_type const &lhs, key_type const &rhs) noexcept {
-        if constexpr (!sentinel_traits::is_implicit) {
-            if (rhs == sentinel_traits::sentinel()) {
-                return false;
-            }
-            if (lhs == sentinel_traits::sentinel()) {
-                return true;
-            }
-        }
-        return comp(lhs, rhs);
-    }
-
-    value_compare value_comp() const {
-        return value_compare{comp};
-    }
-};
-
-template <typename PriorityQueue, typename KeyCompare, StickPolicy P>
+template <typename Base, StickPolicy>
 struct MultiQueueImpl;
 
-template <typename PriorityQueue, typename KeyCompare>
-struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::None>
-    : public MultiQueueImplBase<PriorityQueue, KeyCompare> {
-    using base_type = MultiQueueImplBase<PriorityQueue, KeyCompare>;
-
-    struct Config {
-        std::uint64_t seed = 1;
-        std::size_t c = 4;
-    };
+template <typename Base>
+struct MultiQueueImpl<Base, StickPolicy::None> : public Base {
+    using reference = typename Base::reference;
+    using const_reference = typename Base::const_reference;
+    using key_type = typename Base::key_type;
+    using value_type = typename Base::value_type;
+    using key_compare = typename Base::key_compare;
+    using size_type = typename Base::size_type;
+    using Sentinel = typename Base::Sentinel;
+    using Config = typename Base::Config;
 
     class Handle {
         friend MultiQueueImpl;
@@ -94,7 +54,7 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::None>
         Handle(Handle &&) = default;
 
        private:
-        explicit Handle(MultiQueueImpl &impl, std::uint64_t seed) noexcept : rng_{seed}, impl_{impl} {
+        explicit Handle(MultiQueueImpl &impl) noexcept : rng_{impl.rng()}, impl_{impl} {
         }
 
         std::size_t random_index() noexcept {
@@ -102,8 +62,8 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::None>
         }
 
        public:
-        void push(typename base_type::const_reference value) noexcept {
-            typename base_type::size_type index;
+        void push(const_reference value) noexcept {
+            size_type index;
             do {
                 index = random_index();
             } while (!impl_.pq_list[index].try_lock());
@@ -111,13 +71,13 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::None>
             impl_.pq_list[index].unlock();
         }
 
-        bool try_pop(typename base_type::reference retval) noexcept {
+        bool try_pop(reference retval) noexcept {
             do {
-                typename base_type::size_type index[2] = {random_index(), random_index()};
-                typename base_type::key_type key[2] = {impl_.pq_list[index[0]].concurrent_top_key(),
-                                                       impl_.pq_list[index[1]].concurrent_top_key()};
+                size_type index[2] = {random_index(), random_index()};
+                key_type key[2] = {impl_.pq_list[index[0]].concurrent_top_key(),
+                                   impl_.pq_list[index[1]].concurrent_top_key()};
                 unsigned int select_pq = impl_.compare(key[0], key[1]) ? 1 : 0;
-                if (key[select_pq] == base_type::sentinel_traits::sentinel()) {
+                if (key[select_pq] == Sentinel::get()) {
                     return false;
                 }
                 std::size_t select_index = index[select_pq];
@@ -133,38 +93,38 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::None>
             } while (true);
         }
 
-        [[nodiscard]] bool is_empty(typename base_type::size_type pos) noexcept {
+        [[nodiscard]] bool is_empty(size_type pos) noexcept {
             assert(pos < impl_.num_pqs);
             return impl_.pq_list[pos].concurrent_empty();
         }
     };
 
-    using config_type = Config;
     using handle_type = Handle;
 
-    MultiQueueImpl(unsigned int num_threads, config_type const &config, typename base_type::key_compare const &c)
-        : base_type(num_threads * config.c, config.seed, c) {
+    MultiQueueImpl(unsigned int num_threads, Config const &config, key_compare const &compare)
+        : Base(num_threads * config.c, config, compare) {
     }
 
     handle_type get_handle() noexcept {
-        static std::mutex m;
-        auto l = std::unique_lock(m);
-        auto seed = base_type::rng();
-        l.unlock();
-        return handle_type{*this, seed};
+        return handle_type{*this};
+    }
+
+    std::ostream &describe(std::ostream &out) const {
+        out << "Stick policy: None\n";
+        return out;
     }
 };
 
-template <typename PriorityQueue, typename KeyCompare>
-struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::RandomStrict>
-    : public MultiQueueImplBase<PriorityQueue, KeyCompare> {
-    using base_type = MultiQueueImplBase<PriorityQueue, KeyCompare>;
-
-    struct Config {
-        std::uint64_t seed = 1;
-        std::size_t c = 4;
-        unsigned int stickiness;
-    };
+template <typename Base>
+struct MultiQueueImpl<Base, StickPolicy::RandomStrict> : public Base {
+    using reference = typename Base::reference;
+    using const_reference = typename Base::const_reference;
+    using key_type = typename Base::key_type;
+    using value_type = typename Base::value_type;
+    using key_compare = typename Base::key_compare;
+    using size_type = typename Base::size_type;
+    using Sentinel = typename Base::Sentinel;
+    using Config = typename Base::Config;
 
     class Handle {
         friend MultiQueueImpl;
@@ -181,8 +141,11 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::RandomStrict>
         Handle(Handle &&) = default;
 
        private:
-        explicit Handle(MultiQueueImpl &impl, std::uint64_t seed) noexcept
-            : rng_{seed}, impl_{impl}, stick_index_{random_index(), random_index()}, use_count_{impl_.stickiness} {
+        explicit Handle(MultiQueueImpl &impl) noexcept
+            : rng_{impl.rng()},
+              impl_{impl},
+              stick_index_{random_index(), random_index()},
+              use_count_{impl_.stickiness} {
         }
 
         std::size_t random_index() noexcept {
@@ -190,7 +153,7 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::RandomStrict>
         }
 
        public:
-        void push(typename base_type::const_reference value) noexcept {
+        void push(const_reference value) noexcept {
             if (use_count_ == 0 || !impl_.pq_list[stick_index_[push_pq_]].try_lock()) {
                 do {
                     stick_index_[0] = random_index();
@@ -206,7 +169,7 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::RandomStrict>
             push_pq_ = 1 - push_pq_;
         }
 
-        bool try_pop(typename base_type::reference retval) noexcept {
+        bool try_pop(reference retval) noexcept {
             if (use_count_ == 0) {
                 stick_index_[0] = random_index();
                 stick_index_[1] = random_index();
@@ -215,10 +178,10 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::RandomStrict>
             assert(use_count_ > 0);
 
             do {
-                typename base_type::key_type key[2] = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
-                                                       impl_.pq_list[stick_index_[1]].concurrent_top_key()};
+                key_type key[2] = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
+                                   impl_.pq_list[stick_index_[1]].concurrent_top_key()};
                 unsigned int select_pq = impl_.compare(key[0], key[1]) ? 1 : 0;
-                if (key[select_pq] == base_type::sentinel_traits::sentinel()) {
+                if (key[select_pq] == Sentinel::get()) {
                     // Both pqs are empty
                     use_count_ = 0;
                     return false;
@@ -240,40 +203,41 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::RandomStrict>
             } while (true);
         }
 
-        [[nodiscard]] bool is_empty(typename base_type::size_type pos) noexcept {
+        [[nodiscard]] bool is_empty(size_type pos) noexcept {
             assert(pos < impl_.num_pqs);
             return impl_.pq_list[pos].concurrent_empty();
         }
     };
 
-    using config_type = Config;
     using handle_type = Handle;
 
     unsigned int stickiness;
 
-    MultiQueueImpl(unsigned int num_threads, config_type const &config, typename base_type::key_compare const &c)
-        : base_type(num_threads * config.c, config.seed, c), stickiness{config.stickiness} {
+    MultiQueueImpl(unsigned int num_threads, config_type const &config, key_compare const &compare)
+        : Base(num_threads * config.c, config, compare), stickiness{config.stickiness} {
     }
 
     handle_type get_handle() noexcept {
-        static std::mutex m;
-        auto l = std::unique_lock(m);
-        auto seed = base_type::rng();
-        l.unlock();
-        return handle_type{*this, seed};
+        return handle_type{*this};
+    }
+
+    std::ostream &describe(std::ostream &out) const {
+        out << "Stick policy: Random Strict\n";
+        out << "Stickiness: " << stickiness << '\n';
+        return out;
     }
 };
 
-template <typename PriorityQueue, typename KeyCompare>
-struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Random>
-    : public MultiQueueImplBase<PriorityQueue, KeyCompare> {
-    using base_type = MultiQueueImplBase<PriorityQueue, KeyCompare>;
-
-    struct Config {
-        std::uint64_t seed = 1;
-        std::size_t c = 4;
-        unsigned int stickiness;
-    };
+template <typename Base>
+struct MultiQueueImpl<Base, StickPolicy::Random> : public Base {
+    using reference = typename Base::reference;
+    using const_reference = typename Base::const_reference;
+    using key_type = typename Base::key_type;
+    using value_type = typename Base::value_type;
+    using key_compare = typename Base::key_compare;
+    using size_type = typename Base::size_type;
+    using Sentinel = typename Base::Sentinel;
+    using Config = typename Base::Config;
 
     class Handle {
         friend MultiQueueImpl;
@@ -290,8 +254,8 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Random>
         Handle(Handle &&) = default;
 
        private:
-        explicit Handle(MultiQueueImpl &impl, std::uint64_t seed) noexcept
-            : rng_{seed},
+        explicit Handle(MultiQueueImpl &impl) noexcept
+            : rng_{impl.rng()},
               impl_{impl},
               stick_index_{random_index(), random_index()},
               use_count_{impl_.stickiness, impl_.stickiness} {
@@ -302,7 +266,7 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Random>
         }
 
        public:
-        void push(typename base_type::const_reference value) noexcept {
+        void push(const_reference value) noexcept {
             if (use_count_[push_pq_] == 0 || !impl_.pq_list[stick_index_[push_pq_]].try_lock()) {
                 do {
                     stick_index_[push_pq_] = random_index();
@@ -316,7 +280,7 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Random>
             push_pq_ = 1 - push_pq_;
         }
 
-        bool try_pop(typename base_type::reference retval) noexcept {
+        bool try_pop(reference retval) noexcept {
             if (use_count_[0] == 0) {
                 stick_index_[0] = random_index();
                 use_count_[0] = impl_.stickiness;
@@ -327,10 +291,10 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Random>
             }
             assert(use_count_[0] > 0 && use_count_[1] > 0);
             std::size_t pq_index[2] = {stick_index_[0], stick_index_[1]};
-            typename base_type::key_type key[2] = {impl_.pq_list[pq_index[0]].concurrent_top_key(),
-                                                   impl_.pq_list[pq_index[1]].concurrent_top_key()};
+            key_type key[2] = {impl_.pq_list[pq_index[0]].concurrent_top_key(),
+                               impl_.pq_list[pq_index[1]].concurrent_top_key()};
             unsigned int select_pq = impl_.compare(key[0], key[1]) ? 1 : 0;
-            if (key[select_pq] == base_type::sentinel_traits::sentinel()) {
+            if (key[select_pq] == Sentinel::get()) {
                 // Both pqs are empty
                 use_count_[0] = 0;
                 use_count_[1] = 0;
@@ -356,7 +320,7 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Random>
                 key[0] = impl_.pq_list[pq_index[0]].concurrent_top_key();
                 key[1] = impl_.pq_list[pq_index[1]].concurrent_top_key();
                 select_pq = impl_.compare(key[0], key[1]) ? 1 : 0;
-                if (key[select_pq] == base_type::sentinel_traits::sentinel()) {
+                if (key[select_pq] == Sentinel::get()) {
                     // Both random pqs are empty
                     use_count_[replace_pq] = 0;
                     return false;
@@ -376,40 +340,41 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Random>
             } while (true);
         }
 
-        [[nodiscard]] bool is_empty(typename base_type::size_type pos) noexcept {
+        [[nodiscard]] bool is_empty(size_type pos) noexcept {
             assert(pos < impl_.num_pqs);
             return impl_.pq_list[pos].concurrent_empty();
         }
     };
 
-    using config_type = Config;
     using handle_type = Handle;
 
     unsigned int stickiness;
 
-    MultiQueueImpl(unsigned int num_threads, config_type const &config, typename base_type::key_compare const &c)
-        : base_type(num_threads * config.c, config.seed, c), stickiness{config.stickiness} {
+    MultiQueueImpl(unsigned int num_threads, config_type const &config, key_compare const &compare)
+        : Base(num_threads * config.c, config, compare), stickiness{config.stickiness} {
     }
 
     handle_type get_handle() noexcept {
-        static std::mutex m;
-        auto l = std::unique_lock(m);
-        auto seed = base_type::rng();
-        l.unlock();
-        return handle_type{*this, seed};
+        return handle_type{*this};
+    }
+
+    std::ostream &describe(std::ostream &out) const {
+        out << "Stick policy: Random\n";
+        out << "Stickiness: " << stickiness << '\n';
+        return out;
     }
 };
 
-template <typename PriorityQueue, typename KeyCompare>
-struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Swapping>
-    : public MultiQueueImplBase<PriorityQueue, KeyCompare> {
-    using base_type = MultiQueueImplBase<PriorityQueue, KeyCompare>;
-
-    struct Config {
-        std::uint64_t seed = 1;
-        std::size_t c = 4;
-        unsigned int stickiness;
-    };
+template <typename Base>
+struct MultiQueueImpl<Base, StickPolicy::Swapping> : public Base {
+    using reference = typename Base::reference;
+    using const_reference = typename Base::const_reference;
+    using key_type = typename Base::key_type;
+    using value_type = typename Base::value_type;
+    using key_compare = typename Base::key_compare;
+    using size_type = typename Base::size_type;
+    using Sentinel = typename Base::Sentinel;
+    using Config = typename Base::Config;
 
     class Handle {
         friend MultiQueueImpl;
@@ -427,12 +392,13 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Swapping>
         Handle(Handle &&) = default;
 
        private:
-        explicit Handle(MultiQueueImpl &impl, unsigned int id, std::uint64_t seed) noexcept
-            : rng_{seed},
+        explicit Handle(MultiQueueImpl &impl) noexcept
+            : rng_{impl.rng()},
               impl_{impl},
-              permutation_index_{id * 2},
+              permutation_index_{impl_.handle_count * 2},
               stick_index_{load_index(0), load_index(1)},
               use_count_{impl_.stickiness, impl_.stickiness} {
+            ++impl_.handle_count;
         }
 
         std::size_t random_index() noexcept {
@@ -498,7 +464,7 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Swapping>
         }
 
        public:
-        void push(typename base_type::const_reference value) {
+        void push(const_reference value) {
             refresh_pq(push_pq_);
             std::size_t index = permutation_index_ + push_pq_;
             std::size_t pq_index = stick_index_[push_pq_];
@@ -518,17 +484,17 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Swapping>
             push_pq_ = 1 - push_pq_;
         }
 
-        bool try_pop(typename base_type::reference retval) {
+        bool try_pop(reference retval) {
             refresh_pq(0);
             refresh_pq(1);
             assert(use_count_[0] > 0 && use_count_[1] > 0);
 
             std::size_t index[2] = {permutation_index_, permutation_index_ + 1};
             std::size_t pq_index[2] = {stick_index_[0], stick_index_[1]};
-            typename base_type::key_type key[2] = {impl_.pq_list[pq_index[0]].concurrent_top_key(),
-                                                   impl_.pq_list[pq_index[1]].concurrent_top_key()};
+            key_type key[2] = {impl_.pq_list[pq_index[0]].concurrent_top_key(),
+                               impl_.pq_list[pq_index[1]].concurrent_top_key()};
             unsigned int select_pq = impl_.compare(key[0], key[1]) ? 1 : 0;
-            if (key[select_pq] == base_type::sentinel_traits::sentinel()) {
+            if (key[select_pq] == Sentinel::get()) {
                 // Both pqs are empty
                 use_count_[0] = 0;
                 use_count_[1] = 0;
@@ -560,7 +526,7 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Swapping>
                 key[0] = impl_.pq_list[pq_index[0]].concurrent_top_key();
                 key[1] = impl_.pq_list[pq_index[1]].concurrent_top_key();
                 select_pq = impl_.compare(key[0], key[1]) ? 1 : 0;
-                if (key[select_pq] == base_type::sentinel_traits::sentinel()) {
+                if (key[select_pq] == Sentinel::get()) {
                     // Both pqs are empty
                     use_count_[replace_pq] = 0;
                     return false;
@@ -582,13 +548,12 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Swapping>
             } while (true);
         }
 
-        [[nodiscard]] bool is_empty(typename base_type::size_type pos) noexcept {
+        [[nodiscard]] bool is_empty(size_type pos) noexcept {
             assert(pos < impl_.num_pqs);
             return impl_.pq_list[pos].concurrent_empty();
         }
     };
 
-    using config_type = Config;
     using handle_type = Handle;
 
     struct alignas(L1_CACHE_LINESIZE) AlignedIndex {
@@ -601,22 +566,21 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Swapping>
     unsigned int stickiness;
     unsigned int handle_count = 0;
 
-    MultiQueueImpl(unsigned int num_threads, config_type const &config, typename base_type::key_compare const &c)
-        : base_type(num_threads * config.c, config.seed, c),
-          permutation(num_threads * config.c),
-          stickiness{config.stickiness} {
+    MultiQueueImpl(unsigned int num_threads, config_type const &config, key_compare const &compare)
+        : Base(num_threads * config.c, config, compare), permutation(this->num_pqs), stickiness{config.stickiness} {
         for (std::size_t i = 0; i < this->num_pqs; ++i) {
             permutation[i].i = i;
         }
     }
 
     handle_type get_handle() noexcept {
-        static std::mutex m;
-        auto l = std::unique_lock(m);
-        auto seed = base_type::rng();
-        auto id = handle_count++;
-        l.unlock();
-        return handle_type{*this, id, seed};
+        return handle_type{*this};
+    }
+
+    std::ostream &describe(std::ostream &out) const {
+        out << "Stick policy: Swapping\n";
+        out << "Stickiness: " << stickiness << '\n';
+        return out;
     }
 };
 
@@ -624,16 +588,16 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Swapping>
 // number from [0,p-1] for i in [0,p-1] For this to be a permutation, a and b needs to be coprime. Each handle
 // has a unique id, so that i in [3*id,3*id+2] identify the queues associated with this handle. The stickiness
 // counter is global and can occasionally
-template <typename PriorityQueue, typename KeyCompare>
-struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Permutation>
-    : public MultiQueueImplBase<PriorityQueue, KeyCompare> {
-    using base_type = MultiQueueImplBase<PriorityQueue, KeyCompare>;
-
-    struct Config {
-        std::uint64_t seed = 1;
-        std::size_t c = 4;
-        unsigned int stickiness;
-    };
+template <typename Base>
+struct MultiQueueImpl<Base, StickPolicy::Permutation> : public Base {
+    using reference = typename Base::reference;
+    using const_reference = typename Base::const_reference;
+    using key_type = typename Base::key_type;
+    using value_type = typename Base::value_type;
+    using key_compare = typename Base::key_compare;
+    using size_type = typename Base::size_type;
+    using Sentinel = typename Base::Sentinel;
+    using Config = typename Base::Config;
 
     class Handle {
         friend MultiQueueImpl;
@@ -652,12 +616,13 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Permutation>
         Handle(Handle &&) = default;
 
        private:
-        explicit Handle(MultiQueueImpl &impl, unsigned int id, std::uint64_t seed) noexcept
-            : rng_{seed},
+        explicit Handle(MultiQueueImpl &impl) noexcept
+            : rng_{impl.rng()},
               impl_{impl},
-              permutation_index_{id * 2},
+              permutation_index_{impl_.handle_count * 2},
               current_permutation_{impl_.permutation.load(std::memory_order_relaxed)},
               use_count_{impl_.stickiness} {
+            ++impl_.handle_count;
         }
 
         std::size_t random_index() noexcept {
@@ -693,7 +658,7 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Permutation>
         }
 
        public:
-        void push(typename base_type::const_reference value) noexcept {
+        void push(const_reference value) noexcept {
             refresh_permutation();
             std::size_t pq_index = get_index(push_pq_);
             while (!impl_.pq_list[pq_index].try_lock()) {
@@ -705,15 +670,15 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Permutation>
             push_pq_ = 1 - push_pq_;
         }
 
-        bool try_pop(typename base_type::reference retval) noexcept {
+        bool try_pop(reference retval) noexcept {
             refresh_permutation();
             assert(use_count_ > 0);
-            typename base_type::size_type pq_index[2] = {get_index(0), get_index(1)};
+            size_type pq_index[2] = {get_index(0), get_index(1)};
 
-            typename base_type::key_type key[2] = {impl_.pq_list[pq_index[0]].concurrent_top_key(),
+            key_type key[2] = {impl_.pq_list[pq_index[0]].concurrent_top_key(),
                                                    impl_.pq_list[pq_index[1]].concurrent_top_key()};
             unsigned int select_pq = impl_.compare(key[0], key[1]) ? 1 : 0;
-            if (key[select_pq] == base_type::sentinel_traits::sentinel()) {
+            if (key[select_pq] == Sentinel::get()) {
                 use_count_ = 0;
                 return false;
             }
@@ -735,7 +700,7 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Permutation>
                 key[0] = impl_.pq_list[pq_index[0]].concurrent_top_key();
                 key[1] = impl_.pq_list[pq_index[1]].concurrent_top_key();
                 select_pq = impl_.compare(key[0], key[1]) ? 1 : 0;
-                if (key[select_pq] == base_type::sentinel_traits::sentinel()) {
+                if (key[select_pq] == Sentinel::get()) {
                     return false;
                 }
                 select_index = pq_index[select_pq];
@@ -751,13 +716,12 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Permutation>
             } while (true);
         }
 
-        [[nodiscard]] bool is_empty(typename base_type::size_type pos) noexcept {
+        [[nodiscard]] bool is_empty(size_type pos) noexcept {
             assert(pos < impl_.num_pqs);
             return impl_.pq_list[pos].concurrent_empty();
         }
     };
 
-    using config_type = Config;
     using handle_type = Handle;
 
     static constexpr std::uint64_t Mask = 0xffffffff;
@@ -770,19 +734,20 @@ struct MultiQueueImpl<PriorityQueue, KeyCompare, StickPolicy::Permutation>
         return std::size_t{1} << static_cast<unsigned int>(std::ceil(std::log2(n)));
     }
 
-    MultiQueueImpl(unsigned int num_threads, config_type const &config, typename base_type::key_compare const &c)
-        : base_type(next_power_of_two(num_threads * config.c), config.seed, c),
+    MultiQueueImpl(unsigned int num_threads, config_type const &config, key_compare const &compare)
+        : Base(next_power_of_two(num_threads * config.c), config, compare),
           stickiness{config.stickiness},
           permutation{1} {
     }
 
-    Handle get_handle() noexcept {
-        static std::mutex m;
-        auto l = std::unique_lock(m);
-        auto seed = base_type::rng();
-        auto id = handle_count++;
-        l.unlock();
-        return Handle{*this, id, seed};
+    handle_type get_handle() noexcept {
+        return handle_type{*this};
+    }
+
+    std::ostream &describe(std::ostream &out) const {
+        out << "Stick policy: Permutation\n";
+        out << "Stickiness: " << stickiness << '\n';
+        return out;
     }
 };
 

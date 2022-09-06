@@ -12,8 +12,6 @@
 #ifndef BUFFERED_PQ_HPP_INCLUDED
 #define BUFFERED_PQ_HPP_INCLUDED
 
-#include "multiqueue/heap.hpp"
-
 #include <algorithm>
 #include <array>
 #include <cassert>
