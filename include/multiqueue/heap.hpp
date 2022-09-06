@@ -8,8 +8,6 @@
 *******************************************************************************
 **/
 #pragma once
-#ifndef HEAP_HPP_INCLUDED
-#define HEAP_HPP_INCLUDED
 
 #include <cassert>
 #include <cstddef>
@@ -224,5 +222,3 @@ struct uses_allocator<multiqueue::Heap<T, Compare, Degree, Container>, Alloc> : 
 }  // namespace std
 
 #undef HEAP_ASSERT
-
-#endif  //! HEAP_HPP_INCLUDED

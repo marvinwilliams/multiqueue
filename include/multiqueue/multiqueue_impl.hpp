@@ -8,9 +8,8 @@
 *******************************************************************************
 **/
 #pragma once
-#ifndef MULTIQUEUE_IMPL_HPP_INCLUDED
-#define MULTIQUEUE_IMPL_HPP_INCLUDED
 
+#include "multiqueue/config.hpp"
 #include "multiqueue/guarded_pq.hpp"
 #include "multiqueue/stick_policy.hpp"
 
@@ -40,7 +39,6 @@ struct MultiQueueImpl<Base, StickPolicy::None> : public Base {
     using key_compare = typename Base::key_compare;
     using size_type = typename Base::size_type;
     using Sentinel = typename Base::Sentinel;
-    using Config = typename Base::Config;
 
     class Handle {
         friend MultiQueueImpl;
@@ -124,7 +122,6 @@ struct MultiQueueImpl<Base, StickPolicy::RandomStrict> : public Base {
     using key_compare = typename Base::key_compare;
     using size_type = typename Base::size_type;
     using Sentinel = typename Base::Sentinel;
-    using Config = typename Base::Config;
 
     class Handle {
         friend MultiQueueImpl;
@@ -213,7 +210,7 @@ struct MultiQueueImpl<Base, StickPolicy::RandomStrict> : public Base {
 
     unsigned int stickiness;
 
-    MultiQueueImpl(unsigned int num_threads, config_type const &config, key_compare const &compare)
+    MultiQueueImpl(unsigned int num_threads, Config const &config, key_compare const &compare)
         : Base(num_threads * config.c, config, compare), stickiness{config.stickiness} {
     }
 
@@ -237,7 +234,6 @@ struct MultiQueueImpl<Base, StickPolicy::Random> : public Base {
     using key_compare = typename Base::key_compare;
     using size_type = typename Base::size_type;
     using Sentinel = typename Base::Sentinel;
-    using Config = typename Base::Config;
 
     class Handle {
         friend MultiQueueImpl;
@@ -350,7 +346,7 @@ struct MultiQueueImpl<Base, StickPolicy::Random> : public Base {
 
     unsigned int stickiness;
 
-    MultiQueueImpl(unsigned int num_threads, config_type const &config, key_compare const &compare)
+    MultiQueueImpl(unsigned int num_threads, Config const &config, key_compare const &compare)
         : Base(num_threads * config.c, config, compare), stickiness{config.stickiness} {
     }
 
@@ -374,7 +370,6 @@ struct MultiQueueImpl<Base, StickPolicy::Swapping> : public Base {
     using key_compare = typename Base::key_compare;
     using size_type = typename Base::size_type;
     using Sentinel = typename Base::Sentinel;
-    using Config = typename Base::Config;
 
     class Handle {
         friend MultiQueueImpl;
@@ -407,7 +402,7 @@ struct MultiQueueImpl<Base, StickPolicy::Swapping> : public Base {
 
         std::size_t load_index(unsigned int pq) const noexcept {
             assert(pq <= 1);
-            return permutation[permutation_index_ + pq].i.load(std::memory_order_relaxed);
+            return impl_.permutation[permutation_index_ + pq].i.load(std::memory_order_relaxed);
         }
 
         // returns true if assignment changed
@@ -416,12 +411,12 @@ struct MultiQueueImpl<Base, StickPolicy::Swapping> : public Base {
             assert(index < impl_.num_pqs);
             assert(expected < impl_.num_pqs);
             std::size_t current_assigned =
-                permutation[permutation_index_ + pq].i.exchange(impl_.num_pqs, std::memory_order_relaxed);
+                impl_.permutation[permutation_index_ + pq].i.exchange(impl_.num_pqs, std::memory_order_relaxed);
             assert(current_assigned < impl_.num_pqs);
-            if (permutation[index].i.compare_exchange_strong(expected, current_assigned, std::memory_order_relaxed)) {
+            if (impl_.permutation[index].i.compare_exchange_strong(expected, current_assigned, std::memory_order_relaxed)) {
                 current_assigned = expected;
             }
-            permutation[permutation_index_ + pq].i.store(current_assigned, std::memory_order_relaxed);
+            impl_.permutation[permutation_index_ + pq].i.store(current_assigned, std::memory_order_relaxed);
             if (current_assigned == stick_index_[pq]) {
                 return false;
             }
@@ -431,7 +426,7 @@ struct MultiQueueImpl<Base, StickPolicy::Swapping> : public Base {
 
         void swap_assignment(unsigned int pq) noexcept {
             assert(pq <= 1);
-            if (!permutation[permutation_index_ + pq].i.compare_exchange_strong(stick_index_[pq], impl_.num_pqs,
+            if (!impl_.permutation[permutation_index_ + pq].i.compare_exchange_strong(stick_index_[pq], impl_.num_pqs,
                                                                                 std::memory_order_relaxed)) {
                 // Permutation has changed, no need to swap
                 // Only handle itself may invalidate
@@ -442,11 +437,11 @@ struct MultiQueueImpl<Base, StickPolicy::Swapping> : public Base {
             std::size_t target_assigned;
             do {
                 target_index = random_index();
-                target_assigned = permutation[target_index].i.load(std::memory_order_relaxed);
+                target_assigned = impl_.permutation[target_index].i.load(std::memory_order_relaxed);
             } while (target_assigned == impl_.num_pqs ||
-                     !permutation[target_index].i.compare_exchange_strong(target_assigned, stick_index_[pq],
+                     !impl_.permutation[target_index].i.compare_exchange_strong(target_assigned, stick_index_[pq],
                                                                           std::memory_order_relaxed));
-            permutation[permutation_index_ + pq].i.store(target_assigned, std::memory_order_relaxed);
+            impl_.permutation[permutation_index_ + pq].i.store(target_assigned, std::memory_order_relaxed);
             stick_index_[pq] = target_assigned;
         }
 
@@ -472,7 +467,7 @@ struct MultiQueueImpl<Base, StickPolicy::Swapping> : public Base {
             while (!impl_.pq_list[pq_index].try_lock()) {
                 do {
                     index = random_index();
-                    pq_index = permutation[index].i.load(std::memory_order_relaxed);
+                    pq_index = impl_.permutation[index].i.load(std::memory_order_relaxed);
                 } while (pq_index == impl_.num_pqs);
             }
             impl_.pq_list[pq_index].unsafe_push(value);
@@ -517,11 +512,11 @@ struct MultiQueueImpl<Base, StickPolicy::Swapping> : public Base {
             do {
                 do {
                     index[0] = random_index();
-                    pq_index[0] = permutation[index[0]].i.load(std::memory_order_relaxed);
+                    pq_index[0] = impl_.permutation[index[0]].i.load(std::memory_order_relaxed);
                 } while (pq_index[0] == impl_.num_pqs);
                 do {
                     index[1] = random_index();
-                    pq_index[1] = permutation[index[1]].i.load(std::memory_order_relaxed);
+                    pq_index[1] = impl_.permutation[index[1]].i.load(std::memory_order_relaxed);
                 } while (pq_index[1] == impl_.num_pqs);
                 key[0] = impl_.pq_list[pq_index[0]].concurrent_top_key();
                 key[1] = impl_.pq_list[pq_index[1]].concurrent_top_key();
@@ -566,7 +561,7 @@ struct MultiQueueImpl<Base, StickPolicy::Swapping> : public Base {
     unsigned int stickiness;
     unsigned int handle_count = 0;
 
-    MultiQueueImpl(unsigned int num_threads, config_type const &config, key_compare const &compare)
+    MultiQueueImpl(unsigned int num_threads, Config const &config, key_compare const &compare)
         : Base(num_threads * config.c, config, compare), permutation(this->num_pqs), stickiness{config.stickiness} {
         for (std::size_t i = 0; i < this->num_pqs; ++i) {
             permutation[i].i = i;
@@ -597,7 +592,6 @@ struct MultiQueueImpl<Base, StickPolicy::Permutation> : public Base {
     using key_compare = typename Base::key_compare;
     using size_type = typename Base::size_type;
     using Sentinel = typename Base::Sentinel;
-    using Config = typename Base::Config;
 
     class Handle {
         friend MultiQueueImpl;
@@ -641,7 +635,7 @@ struct MultiQueueImpl<Base, StickPolicy::Permutation> : public Base {
             if (use_count_ == 0) {
                 update_permutation();
             } else {
-                auto permutation = impl_.perm.load(std::memory_order_relaxed);
+                auto permutation = impl_.permutation.load(std::memory_order_relaxed);
                 if (permutation == current_permutation_) {
                     return;
                 }
@@ -734,7 +728,7 @@ struct MultiQueueImpl<Base, StickPolicy::Permutation> : public Base {
         return std::size_t{1} << static_cast<unsigned int>(std::ceil(std::log2(n)));
     }
 
-    MultiQueueImpl(unsigned int num_threads, config_type const &config, key_compare const &compare)
+    MultiQueueImpl(unsigned int num_threads, Config const &config, key_compare const &compare)
         : Base(next_power_of_two(num_threads * config.c), config, compare),
           stickiness{config.stickiness},
           permutation{1} {
@@ -752,4 +746,3 @@ struct MultiQueueImpl<Base, StickPolicy::Permutation> : public Base {
 };
 
 }  // namespace multiqueue
-#endif

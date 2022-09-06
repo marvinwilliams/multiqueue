@@ -7,8 +7,7 @@
 * @brief:
 *******************************************************************************
 **/
-#ifndef SENTINEL_TRAITS_HPP_INCLUDED
-#define SENTINEL_TRAITS_HPP_INCLUDED
+#pragma once
 
 #include <functional>
 #include <limits>
@@ -77,5 +76,3 @@ struct sentinel_traits<T, std::greater<>> {
 };
 
 }  // namespace multiqueue
-
-#endif

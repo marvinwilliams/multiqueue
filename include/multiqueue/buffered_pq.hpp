@@ -9,8 +9,6 @@
 **/
 
 #pragma once
-#ifndef BUFFERED_PQ_HPP_INCLUDED
-#define BUFFERED_PQ_HPP_INCLUDED
 
 #include <algorithm>
 #include <array>
@@ -160,5 +158,3 @@ struct uses_allocator<multiqueue::BufferedPQ<InsertionBufferSize, DeletionBuffer
     : uses_allocator<PriorityQueue, Alloc>::type {};
 
 }  // namespace std
-
-#endif  //! BUFFERED_PQ_HPP_INCLUDED

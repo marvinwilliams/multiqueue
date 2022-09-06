@@ -9,8 +9,6 @@
 **/
 
 #pragma once
-#ifndef VALUE_TRAITS_HPP_INCLUDED
-#define VALUE_TRAITS_HPP_INCLUDED
 
 #include <utility>
 
@@ -39,5 +37,3 @@ struct value_traits<Key, void> {
 };
 
 }  // namespace multiqueue
-
-#endif  //! VALUE_TRAITS_HPP_INCLUDED

@@ -9,8 +9,6 @@
 **/
 
 #pragma once
-#ifndef GUARDED_PQ
-#define GUARDED_PQ
 
 #include <atomic>
 #include <cassert>
@@ -128,5 +126,3 @@ struct uses_allocator<multiqueue::GuardedPQ<Key, KeyOfValue, PriorityQueue, Comp
     : uses_allocator<PriorityQueue, Alloc>::type {};
 
 }  // namespace std
-
-#endif  //! GUARDED_PQ

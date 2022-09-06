@@ -20,8 +20,6 @@ a 64-bit seed, we suggest to seed a splitmix64 generator and use its
 output to fill s. */
 
 #pragma once
-#ifndef XOROSHIRO256STARSTAR_HPP_INCLUDED
-#define XOROSHIRO256STARSTAR_HPP_INCLUDED
 
 #include <cstdint>
 #include <limits>
@@ -135,5 +133,3 @@ class xoroshiro256starstar {
         return std::numeric_limits<result_type>::max();
     }
 };
-
-#endif  //! XOROSHIRO256STARSTAR_HPP_INCLUDED

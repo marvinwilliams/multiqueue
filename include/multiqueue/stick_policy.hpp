@@ -8,13 +8,9 @@
 *******************************************************************************
 **/
 #pragma once
-#ifndef STICK_POLICY_HPP_INCLUDED
-#define STICK_POLICY_HPP_INCLUDED
 
 namespace multiqueue {
 
 enum class StickPolicy { None, RandomStrict, Random, Swapping, Permutation };
 
 }  // namespace multiqueue
-
-#endif

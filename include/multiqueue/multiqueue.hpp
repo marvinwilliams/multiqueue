@@ -8,8 +8,6 @@
 *******************************************************************************
 **/
 #pragma once
-#ifndef MULTIQUEUE_HPP_INCLUDED
-#define MULTIQUEUE_HPP_INCLUDED
 
 #ifndef L1_CACHE_LINESIZE
 #define L1_CACHE_LINESIZE 64
@@ -19,6 +17,7 @@
 #define PAGESIZE 4096
 #endif
 
+#include "multiqueue/config.hpp"
 #include "multiqueue/guarded_pq.hpp"
 #include "multiqueue/heap.hpp"
 #include "multiqueue/multiqueue_impl.hpp"
@@ -46,12 +45,6 @@ namespace multiqueue {
 template <typename Key, typename T, typename KeyCompare, template <typename, typename> typename PriorityQueue,
           typename ValueTraits, typename SentinelTraits>
 struct MultiQueueImplBase {
-    struct Config {
-        std::uint64_t seed = 1;
-        unsigned int c = 4;
-        unsigned int stickiness;
-    };
-
     using key_type = Key;
     static_assert(std::is_same_v<key_type, typename ValueTraits::key_type>,
                   "MultiQueue must have the same key_type as its ValueTraits");
@@ -61,7 +54,7 @@ struct MultiQueueImplBase {
     using value_type = typename ValueTraits::value_type;
     using key_compare = KeyCompare;
     class value_compare {
-        friend MultiQueueImpl;
+        friend MultiQueueImplBase;
         [[no_unique_address]] key_compare comp;
 
         explicit value_compare(key_compare const &c = key_compare{}) : comp{c} {
@@ -130,8 +123,7 @@ template <typename Key, typename T, typename KeyCompare = std::less<Key>, StickP
           typename Allocator = std::allocator<Key>>
 class MultiQueue {
     using impl_base_type = MultiQueueImplBase<Key, T, KeyCompare, PriorityQueue, ValueTraits, SentinelTraits>;
-    using impl_type = MultiqueueImpl<impl_base_type, P>;
-    using stick_policy_impl_type = StickPolicyImpl<impl_type, P>;
+    using impl_type = MultiQueueImpl<impl_base_type, P>;
 
    public:
     using key_type = typename impl_type::key_type;
@@ -144,6 +136,7 @@ class MultiQueue {
     using const_reference = typename impl_type::const_reference;
     using handle_type = typename impl_type::handle_type;
     using inner_pq_type = typename impl_type::inner_pq_type;
+    using pq_type = typename impl_type::pq_type;
     using allocator_type = Allocator;
 
    private:
@@ -158,7 +151,7 @@ class MultiQueue {
    public:
     explicit MultiQueue(unsigned int num_threads, Config const &config, key_compare const &comp = key_compare(),
                         allocator_type const &alloc = allocator_type())
-        : impl_{num_threads, config, comp}, stick_policy_impl_{impl_.num_pqs}, alloc_{alloc} {
+        : impl_{num_threads, config, comp}, alloc_{alloc} {
         assert(impl_.num_pqs > 0);
 
         impl_.pq_list = pq_alloc_traits::allocate(alloc_, impl_.num_pqs);
@@ -180,7 +173,7 @@ class MultiQueue {
     }
 
     handle_type get_handle() noexcept {
-        return stick_policy_impl_.get_handle();
+        return impl_.get_handle();
     }
 
     bool try_pop(reference retval) noexcept {
@@ -258,14 +251,13 @@ class MultiQueue {
 #endif
 
     std::ostream &describe(std::ostream &out) const {
+        out << "MultiQueue\n";
         out << "Number of PQs: " << impl_.num_pqs << '\n';
         out << "Sentinel: " << SentinelTraits::sentinel() << " ("
             << (SentinelTraits::is_implicit ? "implicit" : "explicit") << ")\n";
-        out << impl_.describe(out);
+        impl_.describe(out);
         return out;
     }
 };
 
 }  // namespace multiqueue
-
-#endif  //! MULTIQUEUE_HPP_INCLUDED
