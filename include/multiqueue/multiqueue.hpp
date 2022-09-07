@@ -30,6 +30,7 @@
 #include <cstdlib>
 #include <memory>
 #include <ostream>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -93,11 +94,12 @@ struct MultiQueueImplBase {
         : num_pqs{n}, rng(config.seed), comp{compare} {
     }
 
-    std::size_t random_index() noexcept {
-        return fastrange64(rng(), num_pqs);
+    template <typename Generator>
+    size_type random_index(Generator &g) noexcept {
+        return std::uniform_int_distribution<size_type>{0, num_pqs - 1}(g);
     }
 
-    bool compare(key_type const &lhs, key_type const &rhs) noexcept {
+    bool compare_top_key(key_type const &lhs, key_type const &rhs) noexcept {
         if constexpr (!SentinelTraits::is_implicit) {
             if (rhs == SentinelTraits::sentinel()) {
                 return false;
@@ -177,35 +179,24 @@ class MultiQueue {
     }
 
     bool try_pop(reference retval) noexcept {
-        pq_type *first = impl_.pq_list + impl_.random_index();
-        pq_type *second = impl_.pq_list + impl_.random_index();
-        if (!first->unsafe_empty()) {
-            if (!second->unsafe_empty()) {
-                if (impl_.comp(ValueTraits::key_of_value(first->unsafe_top()),
-                               ValueTraits::key_of_value(second->unsafe_top()))) {
-                    retval = second->unsafe_top();
-                    second->unsafe_pop();
-                } else {
-                    retval = first->unsafe_top();
-                    first->unsafe_pop();
-                }
-            } else {
-                retval = first->unsafe_top();
-                first->unsafe_pop();
-            }
-            return true;
+        pq_type &first = impl_.pq_list[impl_.random_index(impl_.rng)];
+        pq_type &second = impl_.pq_list[impl_.random_index(impl_.rng)];
+        if (first.unsafe_empty() && second.unsafe_empty()) {
+            return false;
         }
-        if (!second->unsafe_empty()) {
-            retval = second->unsafe_top();
-            second->unsafe_pop();
-            return true;
+        if (first.unsafe_empty() ||
+            (!second.unsafe_empty() && impl_.value_comp()(first.unsafe_top(), second.unsafe_top()))) {
+            retval = second.unsafe_top();
+            second.unsafe_pop();
+        } else {
+            retval = first.unsafe_top();
+            first.unsafe_pop();
         }
-        return false;
+        return true;
     }
 
     void push(const_reference value) noexcept {
-        size_type index = impl_.random_index();
-        impl_.pq_list[index].unsafe_push(value);
+        impl_.pq_list[impl_.random_index()].unsafe_push(value);
     }
 
     size_type num_pqs() const noexcept {
