@@ -9,6 +9,8 @@
 **/
 #pragma once
 
+#include "multiqueue/build_config.hpp"
+
 #include <cassert>
 #include <cstddef>
 #include <functional>
@@ -36,7 +38,8 @@
 
 namespace multiqueue {
 
-template <typename T, typename Compare = std::less<>, unsigned int Degree = 8, typename Container = std::vector<T>>
+template <typename T, typename Compare = std::less<>, unsigned int Degree = BuildConfiguration::HeapArity,
+          typename Container = std::vector<T>>
 class Heap {
     static_assert(Degree >= 2, "Degree must be at least two");
 
@@ -50,7 +53,9 @@ class Heap {
     using size_type = typename container_type::size_type;
 
    protected:
+    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes): Compatibility to std::priority_queue
     container_type c;
+    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes): Compatibility to std::priority_queue
     [[no_unique_address]] value_compare comp;
 
    private:

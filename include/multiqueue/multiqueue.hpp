@@ -9,9 +9,9 @@
 **/
 #pragma once
 
+#include "multiqueue/buffered_pq.hpp"
 #include "multiqueue/config.hpp"
 #include "multiqueue/guarded_pq.hpp"
-#include "multiqueue/buffered_pq.hpp"
 #include "multiqueue/heap.hpp"
 #include "multiqueue/multiqueue_impl.hpp"
 #include "multiqueue/sentinel_traits.hpp"
@@ -82,7 +82,6 @@ struct MultiQueueImplBase {
     xoroshiro256starstar rng;
     [[no_unique_address]] key_compare comp;
 
-   public:
     explicit MultiQueueImplBase(size_type n, Config const &config, key_compare const &compare)
         : num_pqs{n}, rng(config.seed), comp{compare} {
     }
@@ -160,6 +159,11 @@ class MultiQueue {
         }
     }
 
+    MultiQueue(MultiQueue const &) = delete;
+    MultiQueue(MultiQueue &&) = delete;
+    MultiQueue &operator=(MultiQueue const &) = delete;
+    MultiQueue &operator=(MultiQueue &&) = delete;
+
     ~MultiQueue() noexcept {
         for (pq_type *pq = impl_.pq_list; pq != impl_.pq_list + impl_.num_pqs; ++pq) {
             pq_alloc_traits::destroy(alloc_, pq);
@@ -200,7 +204,7 @@ class MultiQueue {
         return impl_.value_comp();
     }
 #ifdef MULTIQUEUE_ELEMENT_DISTRIBUTION
-    std::vector<std::size_t> get_distribution() const {
+    [[nodiscard]] std::vector<std::size_t> get_distribution() const {
         std::vector<std::size_t> distribution(num_pqs());
         std::transform(impl_.pq_list, impl_.pq_list + impl_.num_pqs, distribution.begin(),
                        [](auto const &pq) { return pq.size(); });

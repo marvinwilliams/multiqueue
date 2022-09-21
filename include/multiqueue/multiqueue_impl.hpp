@@ -9,12 +9,13 @@
 **/
 #pragma once
 
+#include "multiqueue/build_config.hpp"
 #include "multiqueue/config.hpp"
-#include "multiqueue/guarded_pq.hpp"
 #include "multiqueue/stick_policy.hpp"
+#include "multiqueue/third_party/pcg_random.hpp"
 
-#include "multiqueue/external/xoroshiro256starstar.hpp"
-
+#include <array>
+#include <atomic>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
@@ -43,17 +44,20 @@ struct MultiQueueImpl<Base, StickPolicy::None> : public Base {
     class Handle {
         friend MultiQueueImpl;
 
-        xoroshiro256starstar rng_;
+        pcg32 rng_;
         MultiQueueImpl &impl_;
 
        public:
         Handle(Handle const &) = delete;
         Handle &operator=(Handle const &) = delete;
-        Handle(Handle &&) = default;
+        Handle &operator=(Handle &&) noexcept = default;
+        Handle(Handle &&) noexcept = default;
+        ~Handle() = default;
 
        private:
         explicit Handle(MultiQueueImpl &impl) noexcept : rng_{impl.rng()}, impl_{impl} {
         }
+
        public:
         void push(const_reference value) noexcept {
             size_type index;
@@ -66,13 +70,13 @@ struct MultiQueueImpl<Base, StickPolicy::None> : public Base {
 
         bool try_pop(reference retval) noexcept {
             do {
-                size_type index[2] = {impl_.random_index(rng_), impl_.random_index(rng_)};
-                while (index[1] == index[0]) {
+                std::array<size_type, 2> index = {impl_.random_index(rng_), impl_.random_index(rng_)};
+                while (index[0] == index[1]) {
                     index[1] = impl_.random_index(rng_);
                 }
-                key_type key[2] = {impl_.pq_list[index[0]].concurrent_top_key(),
-                                   impl_.pq_list[index[1]].concurrent_top_key()};
-                unsigned int select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
+                std::array<key_type, 2> key = {impl_.pq_list[index[0]].concurrent_top_key(),
+                                               impl_.pq_list[index[1]].concurrent_top_key()};
+                std::size_t select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
                 if (key[select_pq] == Sentinel::get()) {
                     return false;
                 }
@@ -124,15 +128,17 @@ struct MultiQueueImpl<Base, StickPolicy::RandomStrict> : public Base {
     class Handle {
         friend MultiQueueImpl;
 
-        xoroshiro256starstar rng_;
+        pcg32 rng_;
         MultiQueueImpl &impl_;
-        size_type stick_index_[2];
-        unsigned int use_count_;
+        std::array<size_type, 2> stick_index_;
+        int use_count_;
 
        public:
         Handle(Handle const &) = delete;
         Handle &operator=(Handle const &) = delete;
-        Handle(Handle &&) = default;
+        Handle &operator=(Handle &&) noexcept = default;
+        Handle(Handle &&) noexcept = default;
+        ~Handle() = default;
 
        private:
         explicit Handle(MultiQueueImpl &impl) noexcept
@@ -147,8 +153,8 @@ struct MultiQueueImpl<Base, StickPolicy::RandomStrict> : public Base {
 
        public:
         void push(const_reference value) noexcept {
-            bool push_pq = std::bernoulli_distribution{0.5}(rng_);
-            if (use_count_ == 0 || !impl_.pq_list[stick_index_[push_pq]].try_lock()) {
+            std::size_t const push_pq = std::bernoulli_distribution{}(rng_) ? 1 : 0;
+            if (use_count_ <= 0 || !impl_.pq_list[stick_index_[push_pq]].try_lock()) {
                 do {
                     stick_index_[push_pq] = impl_.random_index(rng_);
                 } while (!impl_.pq_list[stick_index_[push_pq]].try_lock());
@@ -164,10 +170,10 @@ struct MultiQueueImpl<Base, StickPolicy::RandomStrict> : public Base {
         }
 
         bool try_pop(reference retval) noexcept {
-            if (use_count_ > 1) {
-                key_type key[2] = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
-                                   impl_.pq_list[stick_index_[1]].concurrent_top_key()};
-                unsigned int select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
+            if (use_count_ > 0) {
+                std::array<key_type, 2> key = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
+                                               impl_.pq_list[stick_index_[1]].concurrent_top_key()};
+                std::size_t select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
                 if (key[select_pq] == Sentinel::get()) {
                     // Both pqs are empty
                     use_count_ = 0;
@@ -190,9 +196,9 @@ struct MultiQueueImpl<Base, StickPolicy::RandomStrict> : public Base {
                 do {
                     stick_index_[1] = impl_.random_index(rng_);
                 } while (stick_index_[0] == stick_index_[1]);
-                key_type key[2] = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
-                                   impl_.pq_list[stick_index_[1]].concurrent_top_key()};
-                unsigned int select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
+                std::array<key_type, 2> key = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
+                                               impl_.pq_list[stick_index_[1]].concurrent_top_key()};
+                std::size_t const select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
                 if (key[select_pq] == Sentinel::get()) {
                     // Both pqs are empty
                     use_count_ = 0;
@@ -220,7 +226,7 @@ struct MultiQueueImpl<Base, StickPolicy::RandomStrict> : public Base {
 
     using handle_type = Handle;
 
-    unsigned int stickiness;
+    int stickiness;
 
     MultiQueueImpl(unsigned int num_threads, Config const &config, key_compare const &compare)
         : Base(num_threads * config.c, config, compare), stickiness{config.stickiness} {
@@ -250,15 +256,17 @@ struct MultiQueueImpl<Base, StickPolicy::Random> : public Base {
     class Handle {
         friend MultiQueueImpl;
 
-        xoroshiro256starstar rng_;
+        pcg32 rng_;
         MultiQueueImpl &impl_;
-        size_type stick_index_[2];
-        unsigned int use_count_[2];
+        std::array<size_type, 2> stick_index_;
+        std::array<unsigned int, 2> use_count_;
 
        public:
         Handle(Handle const &) = delete;
         Handle &operator=(Handle const &) = delete;
-        Handle(Handle &&) = default;
+        Handle &operator=(Handle &&) noexcept = default;
+        Handle(Handle &&) noexcept = default;
+        ~Handle() = default;
 
        private:
         explicit Handle(MultiQueueImpl &impl) noexcept
@@ -270,17 +278,17 @@ struct MultiQueueImpl<Base, StickPolicy::Random> : public Base {
 
        public:
         void push(const_reference value) noexcept {
-            bool push_pq = std::bernoulli_distribution{0.5}(rng_);
-            if (use_count_[push_pq] == 0 || !impl_.pq_list[stick_index_[push_pq]].try_lock()) {
+            bool const push_pq = std::bernoulli_distribution{}(rng_);
+            if (use_count_[static_cast<int>(push_pq)] == 0 || !impl_.pq_list[stick_index_[push_pq]].try_lock()) {
                 do {
                     stick_index_[push_pq] = impl_.random_index(rng_);
                 } while (!impl_.pq_list[stick_index_[push_pq]].try_lock());
-                use_count_[push_pq] = impl_.stickiness;
+                use_count_[static_cast<int>(push_pq)] = impl_.stickiness;
             }
             impl_.pq_list[stick_index_[push_pq]].unsafe_push(value);
             impl_.pq_list[stick_index_[push_pq]].unlock();
             assert(use_count_[push_pq] > 0);
-            --use_count_[push_pq];
+            --use_count_[static_cast<int>(push_pq)];
         }
 
         bool try_pop(reference retval) noexcept {
@@ -293,10 +301,10 @@ struct MultiQueueImpl<Base, StickPolicy::Random> : public Base {
                 use_count_[1] = impl_.stickiness;
             }
             assert(use_count_[0] > 0 && use_count_[1] > 0);
-            key_type key[2] = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
-                               impl_.pq_list[stick_index_[1]].concurrent_top_key()};
+            std::array<key_type, 2> key = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
+                                           impl_.pq_list[stick_index_[1]].concurrent_top_key()};
             do {
-                unsigned int select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
+                unsigned int const select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
                 if (key[select_pq] == Sentinel::get()) {
                     // Both pqs are empty
                     use_count_[0] = 0;
@@ -329,7 +337,7 @@ struct MultiQueueImpl<Base, StickPolicy::Random> : public Base {
 
     using handle_type = Handle;
 
-    unsigned int stickiness;
+    int stickiness;
 
     MultiQueueImpl(unsigned int num_threads, Config const &config, key_compare const &compare)
         : Base(num_threads * config.c, config, compare), stickiness{config.stickiness} {
@@ -359,16 +367,18 @@ struct MultiQueueImpl<Base, StickPolicy::Swapping> : public Base {
     class Handle {
         friend MultiQueueImpl;
 
-        xoroshiro256starstar rng_;
+        pcg32 rng_;
         MultiQueueImpl &impl_;
         std::size_t permutation_index_;
-        size_type stick_index_[2];
-        unsigned int use_count_[2];
+        std::array<size_type, 2> stick_index_;
+        std::array<unsigned int, 2> use_count_;
 
        public:
         Handle(Handle const &) = delete;
         Handle &operator=(Handle const &) = delete;
-        Handle(Handle &&) = default;
+        Handle &operator=(Handle &&) noexcept = default;
+        Handle(Handle &&) noexcept = default;
+        ~Handle() = default;
 
        private:
         explicit Handle(MultiQueueImpl &impl) noexcept
@@ -390,7 +400,7 @@ struct MultiQueueImpl<Base, StickPolicy::Swapping> : public Base {
                 assert(stick_index_[pq] != impl_.num_pqs);
                 return;
             }
-            std::size_t target_index;
+            std::size_t target_index = 0;
             size_type target_assigned;
             do {
                 target_index = impl_.random_index(rng_);
@@ -402,7 +412,7 @@ struct MultiQueueImpl<Base, StickPolicy::Swapping> : public Base {
             stick_index_[pq] = target_assigned;
         }
 
-        void refresh_pq(unsigned int pq) noexcept {
+        void refresh_pq(int pq) noexcept {
             if (use_count_[pq] != 0) {
                 auto current_index = impl_.permutation[permutation_index_ + pq].i.load(std::memory_order_relaxed);
                 if (current_index == stick_index_[pq]) {
@@ -417,28 +427,28 @@ struct MultiQueueImpl<Base, StickPolicy::Swapping> : public Base {
 
        public:
         void push(const_reference value) {
-            bool push_pq = std::bernoulli_distribution{0.5}(rng_);
+            bool const push_pq = std::bernoulli_distribution{0.5}(rng_);
             refresh_pq(push_pq);
             if (!impl_.pq_list[stick_index_[push_pq]].try_lock()) {
                 do {
                     swap_assignment(push_pq);
                 } while (!impl_.pq_list[stick_index_[push_pq]].try_lock());
-                use_count_[push_pq] = impl_.stickiness;
+                use_count_[static_cast<int>(push_pq)] = impl_.stickiness;
             }
             impl_.pq_list[stick_index_[push_pq]].unsafe_push(value);
             impl_.pq_list[stick_index_[push_pq]].unlock();
             assert(use_count_[push_pq] > 0);
-            --use_count_[push_pq];
+            --use_count_[static_cast<int>(push_pq)];
         }
 
         bool try_pop(reference retval) {
             refresh_pq(0);
             refresh_pq(1);
             assert(use_count_[0] > 0 && use_count_[1] > 0);
-            key_type key[2] = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
-                               impl_.pq_list[stick_index_[1]].concurrent_top_key()};
+            std::array<key_type, 2> key = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
+                                           impl_.pq_list[stick_index_[1]].concurrent_top_key()};
             do {
-                unsigned int select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
+                unsigned int const select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
                 if (key[select_pq] == Sentinel::get()) {
                     // Both pqs are empty
                     use_count_[0] = 0;
@@ -471,15 +481,15 @@ struct MultiQueueImpl<Base, StickPolicy::Swapping> : public Base {
 
     using handle_type = Handle;
 
-    struct alignas(L1_CACHE_LINESIZE) AlignedIndex {
+    struct alignas(BuildConfiguration::L1CacheLinesize) AlignedIndex {
         std::atomic<size_type> i;
     };
 
     using Permutation = std::vector<AlignedIndex>;
 
     Permutation permutation;
-    unsigned int stickiness;
-    unsigned int handle_count = 0;
+    int stickiness;
+    int handle_count = 0;
 
     MultiQueueImpl(unsigned int num_threads, Config const &config, key_compare const &compare)
         : Base(num_threads * config.c, config, compare), permutation(this->num_pqs), stickiness{config.stickiness} {
@@ -512,16 +522,18 @@ struct MultiQueueImpl<Base, StickPolicy::SwappingLazy> : public Base {
     class Handle {
         friend MultiQueueImpl;
 
-        xoroshiro256starstar rng_;
+        pcg32 rng_;
         MultiQueueImpl &impl_;
         std::size_t permutation_index_;
-        size_type stick_index_[2];
-        unsigned int use_count_[2];
+        std::array<size_type, 2> stick_index_;
+        std::array<unsigned int, 2> use_count_;
 
        public:
         Handle(Handle const &) = delete;
         Handle &operator=(Handle const &) = delete;
-        Handle(Handle &&) = default;
+        Handle &operator=(Handle &&) noexcept = default;
+        Handle(Handle &&) noexcept = default;
+        ~Handle() = default;
 
        private:
         explicit Handle(MultiQueueImpl &impl) noexcept
@@ -543,7 +555,7 @@ struct MultiQueueImpl<Base, StickPolicy::SwappingLazy> : public Base {
                 assert(stick_index_[pq] != impl_.num_pqs);
                 return;
             }
-            std::size_t target_index;
+            std::size_t target_index = 0;
             size_type target_assigned;
             do {
                 target_index = impl_.random_index(rng_);
@@ -557,17 +569,17 @@ struct MultiQueueImpl<Base, StickPolicy::SwappingLazy> : public Base {
 
        public:
         void push(const_reference value) {
-            bool push_pq = std::bernoulli_distribution{0.5}(rng_);
-            if (use_count_[push_pq] == 0 || !impl_.pq_list[stick_index_[push_pq]].try_lock()) {
+            bool const push_pq = std::bernoulli_distribution{}(rng_);
+            if (use_count_[static_cast<int>(push_pq)] == 0 || !impl_.pq_list[stick_index_[push_pq]].try_lock()) {
                 do {
                     swap_assignment(push_pq);
                 } while (!impl_.pq_list[stick_index_[push_pq]].try_lock());
-                use_count_[push_pq] = impl_.stickiness;
+                use_count_[static_cast<int>(push_pq)] = impl_.stickiness;
             }
             impl_.pq_list[stick_index_[push_pq]].unsafe_push(value);
             impl_.pq_list[stick_index_[push_pq]].unlock();
             assert(use_count_[push_pq] > 0);
-            --use_count_[push_pq];
+            --use_count_[static_cast<int>(push_pq)];
         }
 
         bool try_pop(reference retval) {
@@ -580,10 +592,10 @@ struct MultiQueueImpl<Base, StickPolicy::SwappingLazy> : public Base {
                 use_count_[1] = impl_.stickiness;
             }
             assert(use_count_[0] > 0 && use_count_[1] > 0);
-            key_type key[2] = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
-                               impl_.pq_list[stick_index_[1]].concurrent_top_key()};
+            std::array<key_type, 2> key = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
+                                           impl_.pq_list[stick_index_[1]].concurrent_top_key()};
             do {
-                unsigned int select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
+                unsigned int const select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
                 if (key[select_pq] == Sentinel::get()) {
                     // Both pqs are empty
                     use_count_[0] = 0;
@@ -616,15 +628,15 @@ struct MultiQueueImpl<Base, StickPolicy::SwappingLazy> : public Base {
 
     using handle_type = Handle;
 
-    struct alignas(L1_CACHE_LINESIZE) AlignedIndex {
+    struct alignas(BuildConfiguration::L1CacheLinesize) AlignedIndex {
         std::atomic<size_type> i;
     };
 
     using Permutation = std::vector<AlignedIndex>;
 
     Permutation permutation;
-    unsigned int stickiness;
-    unsigned int handle_count = 0;
+    int stickiness;
+    int handle_count = 0;
 
     MultiQueueImpl(unsigned int num_threads, Config const &config, key_compare const &compare)
         : Base(num_threads * config.c, config, compare), permutation(this->num_pqs), stickiness{config.stickiness} {
@@ -657,16 +669,18 @@ struct MultiQueueImpl<Base, StickPolicy::SwappingBlocking> : public Base {
     class Handle {
         friend MultiQueueImpl;
 
-        xoroshiro256starstar rng_;
+        pcg32 rng_;
         MultiQueueImpl &impl_;
         std::size_t permutation_index_;
-        size_type stick_index_[2];
-        unsigned int use_count_[2];
+        std::array<size_type, 2> stick_index_;
+        std::array<unsigned int, 2> use_count_;
 
        public:
         Handle(Handle const &) = delete;
         Handle &operator=(Handle const &) = delete;
-        Handle(Handle &&) = default;
+        Handle &operator=(Handle &&) noexcept = default;
+        Handle(Handle &&) noexcept = default;
+        ~Handle() = default;
 
        private:
         explicit Handle(MultiQueueImpl &impl) noexcept
@@ -688,7 +702,7 @@ struct MultiQueueImpl<Base, StickPolicy::SwappingBlocking> : public Base {
                 assert(stick_index_[pq] != impl_.num_pqs);
                 return;
             }
-            std::size_t target_index;
+            std::size_t target_index = 0;
             size_type target_assigned;
             do {
                 target_index = impl_.random_index(rng_);
@@ -715,29 +729,30 @@ struct MultiQueueImpl<Base, StickPolicy::SwappingBlocking> : public Base {
 
        public:
         void push(const_reference value) {
-            bool push_pq = std::bernoulli_distribution{0.5}(rng_);
+            bool const push_pq = std::bernoulli_distribution{}(rng_);
             refresh_pq(push_pq);
             while (!impl_.pq_list[stick_index_[push_pq]].try_lock()) {
-                auto current_index = impl_.permutation[permutation_index_ + push_pq].i.load(std::memory_order_relaxed);
+                auto current_index = impl_.permutation[permutation_index_ + static_cast<std::size_t>(push_pq)].i.load(
+                    std::memory_order_relaxed);
                 if (current_index != stick_index_[push_pq]) {
                     stick_index_[push_pq] = current_index;
-                    use_count_[push_pq] = impl_.stickiness;
+                    use_count_[static_cast<std::size_t>(push_pq)] = impl_.stickiness;
                 }
             }
             impl_.pq_list[stick_index_[push_pq]].unsafe_push(value);
             impl_.pq_list[stick_index_[push_pq]].unlock();
             assert(use_count_[push_pq] > 0);
-            --use_count_[push_pq];
+            --use_count_[static_cast<std::size_t>(push_pq)];
         }
 
         bool try_pop(reference retval) {
             refresh_pq(0);
             refresh_pq(1);
             assert(use_count_[0] > 0 && use_count_[1] > 0);
-            key_type key[2] = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
-                               impl_.pq_list[stick_index_[1]].concurrent_top_key()};
+            std::array<key_type, 2> key = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
+                                           impl_.pq_list[stick_index_[1]].concurrent_top_key()};
             do {
-                unsigned int select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
+                unsigned int const select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
                 if (key[select_pq] == Sentinel::get()) {
                     // Both pqs are empty
                     use_count_[0] = 0;
@@ -779,15 +794,15 @@ struct MultiQueueImpl<Base, StickPolicy::SwappingBlocking> : public Base {
 
     using handle_type = Handle;
 
-    struct alignas(L1_CACHE_LINESIZE) AlignedIndex {
+    struct alignas(BuildConfiguration::L1CacheLinesize) AlignedIndex {
         std::atomic<size_type> i;
     };
 
     using Permutation = std::vector<AlignedIndex>;
 
     Permutation permutation;
-    unsigned int stickiness;
-    unsigned int handle_count = 0;
+    int stickiness;
+    int handle_count = 0;
 
     MultiQueueImpl(unsigned int num_threads, Config const &config, key_compare const &compare)
         : Base(num_threads * config.c, config, compare), permutation(this->num_pqs), stickiness{config.stickiness} {
@@ -824,25 +839,26 @@ struct MultiQueueImpl<Base, StickPolicy::Permutation> : public Base {
     class Handle {
         friend MultiQueueImpl;
 
-        xoroshiro256starstar rng_;
+        pcg32 rng_;
         MultiQueueImpl &impl_;
 
         std::size_t permutation_index_;
         std::uint64_t current_permutation_;
-        unsigned int use_count_;
+        unsigned int use_count_{};
 
        public:
         Handle(Handle const &) = delete;
         Handle &operator=(Handle const &) = delete;
-        Handle(Handle &&) = default;
+        Handle &operator=(Handle &&) noexcept = default;
+        Handle(Handle &&) noexcept = default;
+        ~Handle() = default;
 
        private:
         explicit Handle(MultiQueueImpl &impl) noexcept
             : rng_{impl.rng()},
               impl_{impl},
               permutation_index_{impl_.handle_count * 2},
-              current_permutation_{impl_.permutation.load(std::memory_order_relaxed)},
-              use_count_{0} {
+              current_permutation_{impl_.permutation.load(std::memory_order_relaxed)} {
             ++impl_.handle_count;
         }
 
@@ -855,8 +871,9 @@ struct MultiQueueImpl<Base, StickPolicy::Permutation> : public Base {
         }
 
         size_type get_index(unsigned int pq) const noexcept {
+            static constexpr int shift_width = 32;
             size_type a = current_permutation_ & Mask;
-            size_type b = current_permutation_ >> 32;
+            size_type b = current_permutation_ >> shift_width;
             assert((a & 1) == 1);
             return ((permutation_index_ + pq) * a + b) & (impl_.num_pqs - 1);
         }
@@ -877,7 +894,7 @@ struct MultiQueueImpl<Base, StickPolicy::Permutation> : public Base {
        public:
         void push(const_reference value) noexcept {
             refresh_permutation();
-            bool push_pq = std::bernoulli_distribution{0.5}(rng_);
+            bool push_pq = std::bernoulli_distribution{}(rng_);
             size_type pq_index = get_index(push_pq);
             while (!impl_.pq_list[pq_index].try_lock()) {
                 auto p = impl_.permutation.load(std::memory_order_relaxed);
@@ -894,9 +911,9 @@ struct MultiQueueImpl<Base, StickPolicy::Permutation> : public Base {
         bool try_pop(reference retval) noexcept {
             refresh_permutation();
             assert(use_count_ <= 2 * impl_.stickiness);
-            size_type pq_index[2] = {get_index(0), get_index(1)};
-            key_type key[2] = {impl_.pq_list[pq_index[0]].concurrent_top_key(),
-                               impl_.pq_list[pq_index[1]].concurrent_top_key()};
+            std::array<size_type, 2> pq_index = {get_index(0), get_index(1)};
+            std::array<key_type, 2> key = {impl_.pq_list[pq_index[0]].concurrent_top_key(),
+                                           impl_.pq_list[pq_index[1]].concurrent_top_key()};
             do {
                 unsigned int select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
                 if (key[select_pq] == Sentinel::get()) {
@@ -940,16 +957,16 @@ struct MultiQueueImpl<Base, StickPolicy::Permutation> : public Base {
 
     static constexpr std::uint64_t Mask = 0xffffffff;
 
-    unsigned int stickiness;
-    alignas(L1_CACHE_LINESIZE) std::atomic_uint64_t permutation;
-    unsigned int handle_count = 0;
+    alignas(BuildConfiguration::L1CacheLinesize) std::atomic_uint64_t permutation;
+    int stickiness;
+    int handle_count = 0;
 
-    static std::size_t next_power_of_two(std::size_t n) {
+    static constexpr std::size_t next_power_of_two(std::size_t n) {
         return std::size_t{1} << static_cast<unsigned int>(std::ceil(std::log2(n)));
     }
 
     MultiQueueImpl(unsigned int num_threads, Config const &config, key_compare const &compare)
-        : Base(next_power_of_two(num_threads * config.c), config, compare),
+        : Base(next_power_of_two(static_cast<std::size_t>(num_threads) * config.c), config, compare),
           stickiness{config.stickiness},
           permutation{1} {
     }

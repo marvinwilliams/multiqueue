@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include "multiqueue/build_config.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -42,7 +44,6 @@ class BufferedPQ : private PriorityQueue {
     size_type del_buf_size_ = 0;
     deletion_buffer_type deletion_buffer_;
 
-   private:
     void flush_insertion_buffer() {
         for (size_type i = 0; i != ins_buf_size_; ++i) {
             base_type::push(std::move(insertion_buffer_[i]));
@@ -66,17 +67,17 @@ class BufferedPQ : private PriorityQueue {
 
    public:
     explicit BufferedPQ(value_compare compare = value_compare()) : base_type(compare) {
-        base_type::c.reserve(1'000'000);
+        base_type::c.reserve(BuildConfiguration::ReservePerPQ);
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
     explicit BufferedPQ(value_compare const& compare, Alloc const& alloc) : base_type(compare, alloc) {
-        base_type::c.reserve(1'000'000);
+        base_type::c.reserve(BuildConfiguration::ReservePerPQ);
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
     explicit BufferedPQ(Alloc const& alloc) : base_type(alloc) {
-        base_type::c.reserve(1'000'000);
+        base_type::c.reserve(BuildConfiguration::ReservePerPQ);
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept {
@@ -119,18 +120,17 @@ class BufferedPQ : private PriorityQueue {
                 deletion_buffer_[in_pos] = std::move(value);
                 ++del_buf_size_;
                 return;
-            } else {
-                auto tmp = std::move(deletion_buffer_[0]);
-                size_type in_pos = 0;
-                while (in_pos + 1 != DeletionBufferSize && base_type::comp(deletion_buffer_[in_pos + 1], value)) {
-                    deletion_buffer_[in_pos] = std::move(deletion_buffer_[in_pos + 1]);
-                    ++in_pos;
-                }
-                assert(in_pos < DeletionBufferSize);
-                deletion_buffer_[in_pos] = std::move(value);
-                // Fallthrough, the last element needs to be inserted into the insertion buffer
-                value = std::move(tmp);
             }
+            auto tmp = std::move(deletion_buffer_[0]);
+            size_type in_pos = 0;
+            while (in_pos + 1 != DeletionBufferSize && base_type::comp(deletion_buffer_[in_pos + 1], value)) {
+                deletion_buffer_[in_pos] = std::move(deletion_buffer_[in_pos + 1]);
+                ++in_pos;
+            }
+            assert(in_pos < DeletionBufferSize);
+            deletion_buffer_[in_pos] = std::move(value);
+            // Fallthrough, the last element needs to be inserted into the insertion buffer
+            value = std::move(tmp);
         }
         // Insert `value` into insertion buffer
         if (ins_buf_size_ == InsertionBufferSize) {

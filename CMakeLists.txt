@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
+project(multiqueue VERSION 2.0.0 LANGUAGES CXX)
+
 include(cmake/utils.cmake)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
@@ -7,13 +9,18 @@ include(GNUInstallDirs)
 discourage_intree_builds()
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-option(MULTIQUEUE_BUILD_TESTS "Build unit tests for multiqueue" OFF)
-option(MULTIQUEUE_BUILD_BENCHMARKS "Build micro benchmarks for multiqueue internals" OFF)
-option(MULTIQUEUE_BUILD_EXAMPLES "Build examples" OFF)
+set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party")
+
 option(MULTIQUEUE_ABORT_MISALIGNMENT "Check if data is not aligned as expected" OFF)
 option(MULTIQUEUE_ELEMENT_DISTRIBUTION "Support functions to examine element distributions" OFF)
-
-project(multiqueue VERSION 2.0.0 LANGUAGES CXX)
+option(MULTIQUEUE_BUILD_EXAMPLES "Build examples" OFF)
+if(IS_DIRECTORY "${EXTERNAL_DIR}/Catch2")
+  add_subdirectory("${EXTERNAL_DIR}/Catch2" EXCLUDE_FROM_ALL)
+  option(MULTIQUEUE_BUILD_TESTS "Build unit tests for multiqueue" OFF)
+  option(MULTIQUEUE_BUILD_BENCHMARKS "Build micro benchmarks for multiqueue internals" OFF)
+else()
+  message(STATUS "Catch2 not found in ${EXTERNAL_DIR}/Catch2, building tests and benchmarks not possible")
+endif()
 
 # The target to be linked against by other targets. This library is header-only
 # and as such does not compile by itself. This target rather sets include
@@ -51,24 +58,14 @@ find_package(Threads)
 # subproject.
 add_library("multiqueue::multiqueue" ALIAS multiqueue)
 
-set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/external")
-
-if(MULTIQUEUE_BUILD_TESTS OR MULTIQUEUE_BUILD_BENCHMARKS)
-  if(IS_DIRECTORY "${EXTERNAL_DIR}/Catch2")
-    add_subdirectory("${EXTERNAL_DIR}/Catch2" EXCLUDE_FROM_ALL)
-  else()
-    message(FATAL_ERROR "Catch2 not found in ${EXTERNAL_DIR}/Catch2")
-  endif()
-  if(MULTIQUEUE_BUILD_TESTS)
-    include(CTest)
-    set(TEST_RUNNER_PARAMS "" CACHE STRING "Options added to the test runner")
-    add_subdirectory(tests)
-  endif()
-  if(MULTIQUEUE_BUILD_BENCHMARKS)
-    add_subdirectory(benchmarks)
-  endif()
+if(MULTIQUEUE_BUILD_TESTS)
+  include(CTest)
+  set(TEST_RUNNER_PARAMS "" CACHE STRING "Options added to the test runner")
+  add_subdirectory(tests)
 endif()
-
+if(MULTIQUEUE_BUILD_BENCHMARKS)
+  add_subdirectory(benchmarks)
+endif()
 if(MULTIQUEUE_BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()

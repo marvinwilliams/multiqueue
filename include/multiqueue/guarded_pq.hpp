@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include "multiqueue/build_config.hpp"
+
 #include <atomic>
 #include <cassert>
 #include <limits>
@@ -20,20 +22,10 @@
 #include <string>
 #include <type_traits>
 
-#ifndef L1_CACHE_LINESIZE
-#define L1_CACHE_LINESIZE 64
-#endif
-
-#ifndef PAGESIZE
-#define PAGESIZE 4096
-#endif
-
-#define GUARDED_PQ_ALIGNMENT PAGESIZE
-
 namespace multiqueue {
 
 template <typename Key, typename KeyOfValue, typename PriorityQueue, typename Sentinel>
-class alignas(GUARDED_PQ_ALIGNMENT) GuardedPQ {
+class alignas(BuildConfiguration::Pagesize) GuardedPQ {
    public:
     using key_type = Key;
     using value_type = typename PriorityQueue::value_type;
@@ -50,7 +42,7 @@ class alignas(GUARDED_PQ_ALIGNMENT) GuardedPQ {
    private:
     std::atomic_bool lock_;
     std::atomic<key_type> top_key_;
-    alignas(L1_CACHE_LINESIZE) pq_type pq_;
+    alignas(BuildConfiguration::L1CacheLinesize) pq_type pq_;
 
    public:
     explicit GuardedPQ(value_compare const& comp = value_compare())
@@ -100,8 +92,7 @@ class alignas(GUARDED_PQ_ALIGNMENT) GuardedPQ {
     void unsafe_pop() {
         assert(!unsafe_empty());
         pq_.pop();
-        top_key_.store(pq_.empty() ? Sentinel::get() : KeyOfValue::get(pq_.top()),
-                       std::memory_order_relaxed);
+        top_key_.store(pq_.empty() ? Sentinel::get() : KeyOfValue::get(pq_.top()), std::memory_order_relaxed);
     }
 
     void unsafe_push(const_reference value) {
