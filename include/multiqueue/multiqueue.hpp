@@ -9,16 +9,9 @@
 **/
 #pragma once
 
-#ifndef L1_CACHE_LINESIZE
-#define L1_CACHE_LINESIZE 64
-#endif
-
-#ifndef PAGESIZE
-#define PAGESIZE 4096
-#endif
-
 #include "multiqueue/config.hpp"
 #include "multiqueue/guarded_pq.hpp"
+#include "multiqueue/buffered_pq.hpp"
 #include "multiqueue/heap.hpp"
 #include "multiqueue/multiqueue_impl.hpp"
 #include "multiqueue/sentinel_traits.hpp"
@@ -84,7 +77,7 @@ struct MultiQueueImplBase {
     using const_reference = value_type const &;
 
    public:
-    pq_type *pq_list;
+    pq_type *pq_list = nullptr;
     size_type num_pqs;
     xoroshiro256starstar rng;
     [[no_unique_address]] key_compare comp;

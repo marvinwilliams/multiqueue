@@ -14,7 +14,7 @@ struct nocopy {
         return i < other.i;
     }
 
-    int i;
+    int i = 0;
 };
 
 struct nodefault {

@@ -11,7 +11,7 @@ using mq_t = multiqueue::MultiQueue<unsigned, unsigned>;
 static const unsigned int n_threads = 4;
 static const std::size_t iterations_per_thread = 1'000;
 
-void work(mq_t& pq) {
+static void work(mq_t& pq) {
     auto handle = pq.get_handle();
     mq_t::value_type ret;
     for (unsigned int i = 1; i <= iterations_per_thread; ++i) {

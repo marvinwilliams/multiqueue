@@ -1,22 +1,14 @@
 #include "multiqueue/buffered_pq.hpp"
-#include "test_types.hpp"
+#include "multiqueue/heap.hpp"
 
 #include "catch2/catch_template_test_macros.hpp"
-#include "catch2/catch_test_macros.hpp"
 #include "catch2/generators/catch_generators_all.hpp"
-#include "catch2/generators/catch_generators_random.hpp"
 
-#include <algorithm>
 #include <array>
-#include <cstdlib>
-#include <functional>
-#include <iterator>
 #include <list>
 #include <queue>
 #include <random>
-#include <string>
 #include <type_traits>
-#include <utility>
 #include <vector>
 
 TEST_CASE("buffered pq supports basic operations", "[buffered_pq][basic]") {
@@ -116,7 +108,7 @@ TEST_CASE("buffered pq works with randomized workloads", "[buffered_pq][workload
 
     auto pq = pq_t{};
     auto ref_pq = std::priority_queue<int, std::vector<int>, std::greater<>>{};
-    auto gen = std::mt19937{0};
+    auto gen = std::mt19937{42};
 
     SECTION("push random numbers and pop them") {
         auto dist = std::uniform_int_distribution{-100, 100};

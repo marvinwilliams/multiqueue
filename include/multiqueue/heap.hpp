@@ -193,9 +193,9 @@ class Heap {
         return comp;
     }
 
-    bool verify() const noexcept {
+    [[nodiscard]] bool verify() const noexcept {
         auto const end_full = current_parent();
-        for (size_type i = 0; i < end_full; i++) {
+        for (size_type i = 0; i < end_full; ++i) {
             auto const first = first_child(i);
             for (size_type j = first; j < first + Degree; ++j) {
                 assert(j < size());

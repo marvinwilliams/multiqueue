@@ -3,19 +3,15 @@
 
 #include "catch2/benchmark/catch_benchmark.hpp"
 #include "catch2/catch_template_test_macros.hpp"
-#include "catch2/catch_test_macros.hpp"
 
 #include <vector>
-#include <functional>
 #include <queue>
 #include <iterator>
-#include <queue>
-#include <random>
 
 static constexpr int reps = 500'000;
 
 TEST_CASE("std::priority_queue", "[benchmark][std]") {
-    auto pq = std::priority_queue<int, std::vector<int>, std::greater<int>>{};
+    auto pq = std::priority_queue<int, std::vector<int>, std::greater<>>{};
 
     BENCHMARK("up") {
         for (int i = 1; i <= reps; ++i) {

@@ -84,7 +84,7 @@ class BufferedPQ : private PriorityQueue {
         return del_buf_size_ == 0;
     }
 
-    constexpr size_type size() const noexcept {
+    [[nodiscard]] constexpr size_type size() const noexcept {
         return ins_buf_size_ + del_buf_size_ + base_type::size();
     }
 
@@ -128,7 +128,7 @@ class BufferedPQ : private PriorityQueue {
                 }
                 assert(in_pos < DeletionBufferSize);
                 deletion_buffer_[in_pos] = std::move(value);
-                // Fallthrough, greatest element needs to be inserted into the insertion buffer
+                // Fallthrough, the last element needs to be inserted into the insertion buffer
                 value = std::move(tmp);
             }
         }

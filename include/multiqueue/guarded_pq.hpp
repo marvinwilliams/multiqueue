@@ -21,11 +21,11 @@
 #include <type_traits>
 
 #ifndef L1_CACHE_LINESIZE
-#error Need to define L1_CACHE_LINESIZE
+#define L1_CACHE_LINESIZE 64
 #endif
 
 #ifndef PAGESIZE
-#error Need to define PAGESIZE
+#define PAGESIZE 4096
 #endif
 
 #define GUARDED_PQ_ALIGNMENT PAGESIZE

@@ -54,7 +54,6 @@ struct MultiQueueImpl<Base, StickPolicy::None> : public Base {
        private:
         explicit Handle(MultiQueueImpl &impl) noexcept : rng_{impl.rng()}, impl_{impl} {
         }
-
        public:
         void push(const_reference value) noexcept {
             size_type index;
@@ -68,6 +67,9 @@ struct MultiQueueImpl<Base, StickPolicy::None> : public Base {
         bool try_pop(reference retval) noexcept {
             do {
                 size_type index[2] = {impl_.random_index(rng_), impl_.random_index(rng_)};
+                while (index[1] == index[0]) {
+                    index[1] = impl_.random_index(rng_);
+                }
                 key_type key[2] = {impl_.pq_list[index[0]].concurrent_top_key(),
                                    impl_.pq_list[index[1]].concurrent_top_key()};
                 unsigned int select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
@@ -138,6 +140,9 @@ struct MultiQueueImpl<Base, StickPolicy::RandomStrict> : public Base {
               impl_{impl},
               stick_index_{impl_.random_index(rng_), impl_.random_index(rng_)},
               use_count_{2 * impl_.stickiness} {
+            while (stick_index_[0] == stick_index_[1]) {
+                stick_index_[1] = impl_.random_index(rng_);
+            }
         }
 
        public:
@@ -147,7 +152,9 @@ struct MultiQueueImpl<Base, StickPolicy::RandomStrict> : public Base {
                 do {
                     stick_index_[push_pq] = impl_.random_index(rng_);
                 } while (!impl_.pq_list[stick_index_[push_pq]].try_lock());
-                stick_index_[1 - push_pq] = impl_.random_index(rng_);
+                do {
+                    stick_index_[1 - push_pq] = impl_.random_index(rng_);
+                } while (stick_index_[0] == stick_index_[1]);
                 use_count_ = 2 * impl_.stickiness;
             }
             impl_.pq_list[stick_index_[push_pq]].unsafe_push(value);
@@ -180,7 +187,9 @@ struct MultiQueueImpl<Base, StickPolicy::RandomStrict> : public Base {
             }
             do {
                 stick_index_[0] = impl_.random_index(rng_);
-                stick_index_[1] = impl_.random_index(rng_);
+                do {
+                    stick_index_[1] = impl_.random_index(rng_);
+                } while (stick_index_[0] == stick_index_[1]);
                 key_type key[2] = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
                                    impl_.pq_list[stick_index_[1]].concurrent_top_key()};
                 unsigned int select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
@@ -854,11 +863,11 @@ struct MultiQueueImpl<Base, StickPolicy::Permutation> : public Base {
 
         void refresh_permutation() {
             if (use_count_ >= 2 * impl_.stickiness) {
-                auto permutation = impl_.permutation.load(std::memory_order_relaxed);
-                if (permutation == current_permutation_) {
+                auto p = impl_.permutation.load(std::memory_order_relaxed);
+                if (p == current_permutation_) {
                     return;
                 }
-                current_permutation_ = permutation;
+                current_permutation_ = p;
             } else {
                 update_permutation();
             }
@@ -871,9 +880,9 @@ struct MultiQueueImpl<Base, StickPolicy::Permutation> : public Base {
             bool push_pq = std::bernoulli_distribution{0.5}(rng_);
             size_type pq_index = get_index(push_pq);
             while (!impl_.pq_list[pq_index].try_lock()) {
-                auto permutation = impl_.permutation.load(std::memory_order_relaxed);
-                if (permutation != current_permutation_) {
-                    current_permutation_ = permutation;
+                auto p = impl_.permutation.load(std::memory_order_relaxed);
+                if (p != current_permutation_) {
+                    current_permutation_ = p;
                     use_count_ = 0;
                 }
             }
@@ -907,9 +916,9 @@ struct MultiQueueImpl<Base, StickPolicy::Permutation> : public Base {
                         impl_.pq_list[select_index].unlock();
                         break;
                     }
-                    auto permutation = impl_.permutation.load(std::memory_order_relaxed);
-                    if (permutation != current_permutation_) {
-                        current_permutation_ = permutation;
+                    auto p = impl_.permutation.load(std::memory_order_relaxed);
+                    if (p != current_permutation_) {
+                        current_permutation_ = p;
                         use_count_ = 0;
                         pq_index[0] = get_index(0);
                         pq_index[1] = get_index(1);

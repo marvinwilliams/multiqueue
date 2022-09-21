@@ -2,15 +2,9 @@
 #include "test_types.hpp"
 
 #include "catch2/catch_template_test_macros.hpp"
-#include "catch2/catch_test_macros.hpp"
 #include "catch2/generators/catch_generators_all.hpp"
-#include "catch2/generators/catch_generators_random.hpp"
 
-#include <algorithm>
 #include <array>
-#include <cstdlib>
-#include <functional>
-#include <iterator>
 #include <list>
 #include <queue>
 #include <random>
@@ -205,6 +199,7 @@ TEST_CASE("heap works with non-default-constructible types", "[heap][types]") {
     heap.push(tp);
     std::pair<test_types::nodefault, test_types::nodefault> t2{2, 3};
     t2 = heap.top();
+    (void) t2;
     heap.pop();
     heap.pop();
 }
