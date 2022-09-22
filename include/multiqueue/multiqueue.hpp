@@ -16,6 +16,7 @@
 #include "multiqueue/multiqueue_impl.hpp"
 #include "multiqueue/sentinel_traits.hpp"
 #include "multiqueue/stick_policy.hpp"
+#include "multiqueue/third_party/pcg_random.hpp"
 #include "multiqueue/value_traits.hpp"
 
 #include <cassert>
@@ -79,11 +80,11 @@ struct MultiQueueImplBase {
    public:
     pq_type *pq_list = nullptr;
     size_type num_pqs;
-    xoroshiro256starstar rng;
+    pcg32 rng;
     [[no_unique_address]] key_compare comp;
 
     explicit MultiQueueImplBase(size_type n, Config const &config, key_compare const &compare)
-        : num_pqs{n}, rng(config.seed), comp{compare} {
+        : num_pqs{n}, rng(std::seed_seq{config.seed}), comp{compare} {
     }
 
     template <typename Generator>
@@ -109,7 +110,7 @@ struct MultiQueueImplBase {
 };
 
 template <typename T, typename Compare>
-using DefaultPriorityQueue = BufferedPQ<64, 64, Heap<T, Compare, 8>>;
+using DefaultPriorityQueue = BufferedPQ<Heap<T, Compare>>;
 
 template <typename Key, typename T, typename KeyCompare = std::less<Key>, StickPolicy P = StickPolicy::None,
           template <typename, typename> typename PriorityQueue = DefaultPriorityQueue,
@@ -143,7 +144,7 @@ class MultiQueue {
     [[no_unique_address]] pq_alloc_type alloc_;
 
    public:
-    explicit MultiQueue(unsigned int num_threads, Config const &config, key_compare const &comp = key_compare(),
+    explicit MultiQueue(int num_threads, Config const &config, key_compare const &comp = key_compare(),
                         allocator_type const &alloc = allocator_type())
         : impl_{num_threads, config, comp}, alloc_{alloc} {
         assert(impl_.num_pqs > 0);

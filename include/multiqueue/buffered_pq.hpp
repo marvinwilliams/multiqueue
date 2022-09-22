@@ -23,7 +23,8 @@
 
 namespace multiqueue {
 
-template <std::size_t InsertionBufferSize, std::size_t DeletionBufferSize, typename PriorityQueue>
+template <typename PriorityQueue, std::size_t InsertionBuffersize = BuildConfiguration::DefaultInsertionBuffersize,
+          std::size_t DeletionBuffersize = BuildConfiguration::DefaultDeletionBuffersize>
 class BufferedPQ : private PriorityQueue {
    private:
     using base_type = PriorityQueue;
@@ -36,8 +37,8 @@ class BufferedPQ : private PriorityQueue {
     using size_type = std::size_t;
 
    private:
-    using insertion_buffer_type = std::array<value_type, InsertionBufferSize>;
-    using deletion_buffer_type = std::array<value_type, DeletionBufferSize>;
+    using insertion_buffer_type = std::array<value_type, InsertionBuffersize>;
+    using deletion_buffer_type = std::array<value_type, DeletionBuffersize>;
 
     size_type ins_buf_size_ = 0;
     insertion_buffer_type insertion_buffer_;
@@ -57,7 +58,7 @@ class BufferedPQ : private PriorityQueue {
         // deletion buffer from the heap. We could also merge the insertion
         // buffer and heap into the deletion buffer
         flush_insertion_buffer();
-        size_type num_refill = std::min(DeletionBufferSize, base_type::size());
+        size_type num_refill = std::min(DeletionBuffersize, base_type::size());
         del_buf_size_ = num_refill;
         while (num_refill != 0) {
             deletion_buffer_[--num_refill] = std::move(base_type::c.front());
@@ -109,7 +110,7 @@ class BufferedPQ : private PriorityQueue {
         }
         if (base_type::comp(deletion_buffer_[0], value)) {
             // value has to go into the deletion buffer
-            if (del_buf_size_ != DeletionBufferSize) {
+            if (del_buf_size_ != DeletionBuffersize) {
                 size_type in_pos = del_buf_size_;
                 while (!base_type::comp(deletion_buffer_[in_pos - 1], value)) {
                     deletion_buffer_[in_pos] = std::move(deletion_buffer_[in_pos - 1]);
@@ -123,17 +124,17 @@ class BufferedPQ : private PriorityQueue {
             }
             auto tmp = std::move(deletion_buffer_[0]);
             size_type in_pos = 0;
-            while (in_pos + 1 != DeletionBufferSize && base_type::comp(deletion_buffer_[in_pos + 1], value)) {
+            while (in_pos + 1 != DeletionBuffersize && base_type::comp(deletion_buffer_[in_pos + 1], value)) {
                 deletion_buffer_[in_pos] = std::move(deletion_buffer_[in_pos + 1]);
                 ++in_pos;
             }
-            assert(in_pos < DeletionBufferSize);
+            assert(in_pos < DeletionBuffersize);
             deletion_buffer_[in_pos] = std::move(value);
             // Fallthrough, the last element needs to be inserted into the insertion buffer
             value = std::move(tmp);
         }
         // Insert `value` into insertion buffer
-        if (ins_buf_size_ == InsertionBufferSize) {
+        if (ins_buf_size_ == InsertionBuffersize) {
             flush_insertion_buffer();
         }
         insertion_buffer_[ins_buf_size_++] = std::move(value);
@@ -153,8 +154,8 @@ class BufferedPQ : private PriorityQueue {
 }  // namespace multiqueue
 
 namespace std {
-template <std::size_t InsertionBufferSize, std::size_t DeletionBufferSize, typename PriorityQueue, typename Alloc>
-struct uses_allocator<multiqueue::BufferedPQ<InsertionBufferSize, DeletionBufferSize, PriorityQueue>, Alloc>
+template <typename PriorityQueue, std::size_t InsertionBuffersize, std::size_t DeletionBuffersize, typename Alloc>
+struct uses_allocator<multiqueue::BufferedPQ<PriorityQueue, InsertionBuffersize, DeletionBuffersize>, Alloc>
     : uses_allocator<PriorityQueue, Alloc>::type {};
 
 }  // namespace std
