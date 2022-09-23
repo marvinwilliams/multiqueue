@@ -16,7 +16,7 @@
 namespace multiqueue {
 
 struct Config {
-    std::uint64_t seed = 1;
+    std::uint32_t seed = 1;
     int c = BuildConfiguration::DefaultFactorThreadsPQ;
     int stickiness = BuildConfiguration::DefaultStickiness;
 };

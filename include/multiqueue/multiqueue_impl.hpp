@@ -55,7 +55,7 @@ struct MultiQueueImpl<Base, StickPolicy::None> : public Base {
         ~Handle() = default;
 
        private:
-        explicit Handle(MultiQueueImpl &impl) noexcept : rng_{impl.rng()}, impl_{impl} {
+        explicit Handle(MultiQueueImpl &impl) noexcept : rng_{std::seed_seq{impl.rng()}}, impl_{impl} {
         }
 
        public:
@@ -142,7 +142,7 @@ struct MultiQueueImpl<Base, StickPolicy::RandomStrict> : public Base {
 
        private:
         explicit Handle(MultiQueueImpl &impl) noexcept
-            : rng_{impl.rng()},
+            : rng_{std::seed_seq{impl.rng()}},
               impl_{impl},
               stick_index_{impl_.random_index(rng_), impl_.random_index(rng_)},
               use_count_{2 * impl_.stickiness} {
@@ -270,7 +270,7 @@ struct MultiQueueImpl<Base, StickPolicy::Random> : public Base {
 
        private:
         explicit Handle(MultiQueueImpl &impl) noexcept
-            : rng_{impl.rng()},
+            : rng_{std::seed_seq{impl.rng()}},
               impl_{impl},
               stick_index_{impl_.random_index(rng_), impl_.random_index(rng_)},
               use_count_{impl_.stickiness, impl_.stickiness} {
@@ -382,7 +382,7 @@ struct MultiQueueImpl<Base, StickPolicy::Swapping> : public Base {
 
        private:
         explicit Handle(MultiQueueImpl &impl) noexcept
-            : rng_{impl.rng()},
+            : rng_{std::seed_seq{impl.rng()}},
               impl_{impl},
               permutation_index_{impl_.handle_count * 2},
               stick_index_{impl_.permutation[permutation_index_].i.load(std::memory_order_relaxed),
@@ -537,7 +537,7 @@ struct MultiQueueImpl<Base, StickPolicy::SwappingLazy> : public Base {
 
        private:
         explicit Handle(MultiQueueImpl &impl) noexcept
-            : rng_{impl.rng()},
+            : rng_{std::seed_seq{impl.rng()}},
               impl_{impl},
               permutation_index_{impl_.handle_count * 2},
               stick_index_{impl_.permutation[permutation_index_].i.load(std::memory_order_relaxed),
@@ -684,7 +684,7 @@ struct MultiQueueImpl<Base, StickPolicy::SwappingBlocking> : public Base {
 
        private:
         explicit Handle(MultiQueueImpl &impl) noexcept
-            : rng_{impl.rng()},
+            : rng_{std::seed_seq{impl.rng()}},
               impl_{impl},
               permutation_index_{impl_.handle_count * 2},
               stick_index_{impl_.permutation[permutation_index_].i.load(std::memory_order_relaxed),
@@ -854,7 +854,7 @@ struct MultiQueueImpl<Base, StickPolicy::Permutation> : public Base {
 
        private:
         explicit Handle(MultiQueueImpl &impl) noexcept
-            : rng_{impl.rng()},
+            : rng_{std::seed_seq{impl.rng()}},
               impl_{impl},
               permutation_index_{impl_.handle_count * 2},
               current_permutation_{impl_.permutation.load(std::memory_order_relaxed)} {
