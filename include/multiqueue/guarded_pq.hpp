@@ -24,11 +24,13 @@
 
 namespace multiqueue {
 
-template <typename Key, typename KeyOfValue, typename PriorityQueue, typename Sentinel>
+template <typename PriorityQueue, typename ValueTraits, typename SentinelTraits>
 class alignas(BuildConfiguration::Pagesize) GuardedPQ {
    public:
-    using key_type = Key;
-    using value_type = typename PriorityQueue::value_type;
+    using key_type = typename ValueTraits::key_type;
+    using value_type = typename ValueTraits::value_type;
+    static_assert(std::is_same_v<value_type, typename PriorityQueue::value_type>,
+                  "PriorityQueue must have the same value_type as its ValueTraits");
 
    private:
     using pq_type = PriorityQueue;
@@ -40,22 +42,20 @@ class alignas(BuildConfiguration::Pagesize) GuardedPQ {
     using const_reference = typename pq_type::const_reference;
 
    private:
-    std::atomic_bool lock_;
-    std::atomic<key_type> top_key_;
+    std::atomic_bool lock_ = false;
+    std::atomic<key_type> top_key_ = SentinelTraits::sentinel();
     alignas(BuildConfiguration::L1CacheLinesize) pq_type pq_;
 
    public:
-    explicit GuardedPQ(value_compare const& comp = value_compare())
-        : lock_{false}, top_key_{Sentinel::get()}, pq_(comp) {
+    explicit GuardedPQ(value_compare const& comp = value_compare()) : pq_(comp) {
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<pq_type, Alloc>>>
-    explicit GuardedPQ(value_compare const& comp, Alloc const& alloc)
-        : lock_{false}, top_key_{Sentinel::get()}, pq_(comp, alloc) {
+    explicit GuardedPQ(value_compare const& comp, Alloc const& alloc) : pq_(comp, alloc) {
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<pq_type, Alloc>>>
-    explicit GuardedPQ(Alloc const& alloc) : lock_{false}, top_key_{Sentinel::get()}, pq_(alloc) {
+    explicit GuardedPQ(Alloc const& alloc) : pq_(alloc) {
     }
 
     key_type concurrent_top_key() const noexcept {
@@ -63,7 +63,7 @@ class alignas(BuildConfiguration::Pagesize) GuardedPQ {
     }
 
     [[nodiscard]] bool concurrent_empty() const noexcept {
-        return concurrent_top_key() == Sentinel::get();
+        return concurrent_top_key() == SentinelTraits::sentinel();
     }
 
     bool try_lock() noexcept {
@@ -71,16 +71,16 @@ class alignas(BuildConfiguration::Pagesize) GuardedPQ {
         return !lock_.exchange(true, std::memory_order_acquire);
     }
 
-    void unlock() noexcept {
+    void unlock() {
         assert(lock_.load());
         lock_.store(false, std::memory_order_release);
     }
 
-    [[nodiscard]] bool unsafe_empty() const noexcept {
+    [[nodiscard]] bool unsafe_empty() const {
         return pq_.empty();
     }
 
-    size_type unsafe_size() const noexcept {
+    size_type unsafe_size() const {
         return pq_.size();
     }
 
@@ -92,19 +92,14 @@ class alignas(BuildConfiguration::Pagesize) GuardedPQ {
     void unsafe_pop() {
         assert(!unsafe_empty());
         pq_.pop();
-        top_key_.store(pq_.empty() ? Sentinel::get() : KeyOfValue::get(pq_.top()), std::memory_order_relaxed);
+        top_key_.store(pq_.empty() ? SentinelTraits::get() : ValueTraits::get(pq_.top()), std::memory_order_relaxed);
     }
 
     void unsafe_push(const_reference value) {
         pq_.push(value);
-        if (KeyOfValue::get(pq_.top()) == KeyOfValue::get(value)) {
-            top_key_.store(KeyOfValue::get(pq_.top()), std::memory_order_relaxed);
+        if (ValueTraits::key_of_value(pq_.top()) == ValueTraits::key_of_value(value)) {
+            top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
         }
-    }
-
-    void unsafe_clear() noexcept {
-        pq_.clear();
-        top_key_.store(Sentinel::get(), std::memory_order_relaxed);
     }
 };
 
@@ -112,8 +107,8 @@ class alignas(BuildConfiguration::Pagesize) GuardedPQ {
 
 namespace std {
 
-template <typename Key, typename KeyOfValue, typename PriorityQueue, typename ComparatorTraits, typename Alloc>
-struct uses_allocator<multiqueue::GuardedPQ<Key, KeyOfValue, PriorityQueue, ComparatorTraits>, Alloc>
+template <typename PriorityQueue, typename ValueTraits, typename SentinelTraits, typename Alloc>
+struct uses_allocator<multiqueue::GuardedPQ<PriorityQueue, ValueTraits, SentinelTraits>, Alloc>
     : uses_allocator<PriorityQueue, Alloc>::type {};
 
 }  // namespace std

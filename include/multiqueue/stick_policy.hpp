@@ -13,4 +13,7 @@ namespace multiqueue {
 
 enum class StickPolicy { None, RandomStrict, Random, Swapping, SwappingLazy, SwappingBlocking, Permutation };
 
+template <typename Data, StickPolicy>
+struct StickPolicyImpl;
+
 }  // namespace multiqueue

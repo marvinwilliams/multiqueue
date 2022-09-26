@@ -13,7 +13,6 @@
 #include "multiqueue/config.hpp"
 #include "multiqueue/guarded_pq.hpp"
 #include "multiqueue/heap.hpp"
-#include "multiqueue/multiqueue_impl.hpp"
 #include "multiqueue/sentinel_traits.hpp"
 #include "multiqueue/stick_policy.hpp"
 #include "multiqueue/third_party/pcg_random.hpp"
@@ -36,76 +35,86 @@
 #endif
 
 namespace multiqueue {
-
 template <typename Key, typename T, typename KeyCompare, template <typename, typename> typename PriorityQueue,
           typename ValueTraits, typename SentinelTraits>
-struct MultiQueueImplBase {
-    using key_type = Key;
-    static_assert(std::is_same_v<key_type, typename ValueTraits::key_type>,
+struct MultiQueueData {
+    static_assert(std::is_same_v<Key, typename ValueTraits::key_type>,
                   "MultiQueue must have the same key_type as its ValueTraits");
-    using mapped_type = T;
-    static_assert(std::is_same_v<mapped_type, typename ValueTraits::mapped_type>,
+    static_assert(std::is_same_v<T, typename ValueTraits::mapped_type>,
                   "MultiQueue must have the same mapped_type as its ValueTraits");
+    using key_type = Key;
+    using mapped_type = typename ValueTraits::mapped_type;
     using value_type = typename ValueTraits::value_type;
     using key_compare = KeyCompare;
     class value_compare {
-        friend MultiQueueImplBase;
+        friend MultiQueueData;
         [[no_unique_address]] key_compare comp;
 
-        explicit value_compare(key_compare const &c = key_compare{}) : comp{c} {
+        explicit value_compare(key_compare const &compare = key_compare{}) : comp{compare} {
         }
 
        public:
-        constexpr bool operator()(value_type const &lhs, value_type const &rhs) const noexcept {
+        constexpr bool operator()(value_type const &lhs, value_type const &rhs) const {
             return comp(ValueTraits::key_of_value(lhs), ValueTraits::key_of_value(rhs));
         }
     };
-
-    struct KeyOfValue {
-        static constexpr key_type get(value_type const &v) noexcept {
-            return ValueTraits::key_of_value(v);
-        }
-    };
-    struct Sentinel {
-        static constexpr key_type get() noexcept {
-            return SentinelTraits::sentinel();
-        }
-    };
-    using inner_pq_type = PriorityQueue<value_type, value_compare>;
-    using pq_type = GuardedPQ<key_type, KeyOfValue, inner_pq_type, Sentinel>;
-    using size_type = std::size_t;
+    using value_traits_type = ValueTraits;
+    using sentinel_traits_type = SentinelTraits;
     using reference = value_type &;
     using const_reference = value_type const &;
+    using size_type = std::size_t;
 
-   public:
+    using pq_type = GuardedPQ<PriorityQueue<value_type, value_compare>, ValueTraits, SentinelTraits>;
+
+    class sentinel_aware_compare {
+        friend MultiQueueData;
+        [[no_unique_address]] key_compare comp;
+
+        explicit sentinel_aware_compare(key_compare const &compare = key_compare{}) : comp{compare} {
+        }
+
+       public:
+        constexpr bool operator()(key_type const &lhs, key_type const &rhs) const {
+            if constexpr (!SentinelTraits::is_implicit) {
+                if (rhs == SentinelTraits::sentinel()) {
+                    return false;
+                }
+                if (lhs == SentinelTraits::sentinel()) {
+                    return true;
+                }
+            }
+            return comp(lhs, rhs);
+        }
+    };
+
     pq_type *pq_list = nullptr;
-    size_type num_pqs;
+    size_type num_pqs{0};
     pcg32 rng;
     [[no_unique_address]] key_compare comp;
 
-    explicit MultiQueueImplBase(size_type n, Config const &config, key_compare const &compare)
-        : num_pqs{n}, rng(std::seed_seq{config.seed}), comp{compare} {
+    explicit MultiQueueData(size_type n, std::uint32_t seed, key_compare const &compare)
+        : num_pqs{n}, rng(std::seed_seq{seed}), comp{compare} {
     }
 
     template <typename Generator>
-    size_type random_index(Generator &g) noexcept {
+    size_type random_pq_index(Generator &g) noexcept {
         return std::uniform_int_distribution<size_type>{0, num_pqs - 1}(g);
     }
 
-    bool compare_top_key(key_type const &lhs, key_type const &rhs) noexcept {
-        if constexpr (!SentinelTraits::is_implicit) {
-            if (rhs == SentinelTraits::sentinel()) {
-                return false;
-            }
-            if (lhs == SentinelTraits::sentinel()) {
-                return true;
-            }
-        }
-        return comp(lhs, rhs);
+    size_type random_pq_index() noexcept {
+        return random_pq_index(rng);
     }
 
     value_compare value_comp() const {
         return value_compare{comp};
+    }
+
+    sentinel_aware_compare sentinel_aware_comp() const {
+        return sentinel_aware_compare{comp};
+    }
+
+    static constexpr bool is_sentinel(key_type const &key) noexcept {
+        return key == SentinelTraits::sentinel();
     }
 };
 
@@ -117,21 +126,20 @@ template <typename Key, typename T, typename KeyCompare = std::less<Key>, StickP
           typename ValueTraits = value_traits<Key, T>, typename SentinelTraits = sentinel_traits<Key, KeyCompare>,
           typename Allocator = std::allocator<Key>>
 class MultiQueue {
-    using impl_base_type = MultiQueueImplBase<Key, T, KeyCompare, PriorityQueue, ValueTraits, SentinelTraits>;
-    using impl_type = MultiQueueImpl<impl_base_type, P>;
+    using policy_type = StickPolicyImpl<MultiQueueData<Key, T, KeyCompare, PriorityQueue, ValueTraits, SentinelTraits>, P>;
 
    public:
-    using key_type = typename impl_type::key_type;
-    using mapped_type = typename impl_type::mapped_type;
-    using value_type = typename impl_type::value_type;
-    using key_compare = typename impl_type::key_compare;
-    using value_compare = typename impl_type::value_compare;
-    using size_type = typename impl_type::size_type;
-    using reference = typename impl_type::reference;
-    using const_reference = typename impl_type::const_reference;
-    using handle_type = typename impl_type::handle_type;
-    using inner_pq_type = typename impl_type::inner_pq_type;
-    using pq_type = typename impl_type::pq_type;
+    using key_type = typename policy_type::key_type;
+    using mapped_type = typename policy_type::mapped_type;
+    using value_type = typename policy_type::value_type;
+    using key_compare = typename policy_type::key_compare;
+    using value_compare = typename policy_type::value_compare;
+    using size_type = typename policy_type::size_type;
+    using reference = typename policy_type::reference;
+    using const_reference = typename policy_type::const_reference;
+    using pq_type = typename policy_type::pq_type;
+
+    using handle_type = typename policy_type::handle_type;
     using allocator_type = Allocator;
 
    private:
@@ -140,23 +148,23 @@ class MultiQueue {
 
     // False sharing is avoided by class alignment, but the members do not need to reside in individual cache lines,
     // as they are not written concurrently
-    impl_type impl_;
+    policy_type policy_;
     [[no_unique_address]] pq_alloc_type alloc_;
 
    public:
     explicit MultiQueue(int num_threads, Config const &config, key_compare const &comp = key_compare(),
                         allocator_type const &alloc = allocator_type())
-        : impl_{num_threads, config, comp}, alloc_{alloc} {
-        assert(impl_.num_pqs > 0);
+        : policy_{num_threads, config, comp}, alloc_{alloc} {
+        assert(policy_.num_pqs > 0);
 
-        impl_.pq_list = pq_alloc_traits::allocate(alloc_, impl_.num_pqs);
+        policy_.pq_list = pq_alloc_traits::allocate(alloc_, policy_.num_pqs);
 #ifdef MULTIQUEUE_CHECK_ALIGNMENT
-        if (reinterpret_cast<std::uintptr_t>(impl_.pq_list) % (GUARDED_PQ_ALIGNMENT) != 0) {
+        if (reinterpret_cast<std::uintptr_t>(policy_.pq_list) % (BuildConfiguration::Pagesize) != 0) {
             std::abort();
         }
 #endif
-        for (pq_type *pq = impl_.pq_list; pq != impl_.pq_list + impl_.num_pqs; ++pq) {
-            pq_alloc_traits::construct(alloc_, pq, impl_.value_comp());
+        for (pq_type *pq = policy_.pq_list; pq != policy_.pq_list + policy_.num_pqs; ++pq) {
+            pq_alloc_traits::construct(alloc_, pq, policy_.value_comp());
         }
     }
 
@@ -166,24 +174,24 @@ class MultiQueue {
     MultiQueue &operator=(MultiQueue &&) = delete;
 
     ~MultiQueue() noexcept {
-        for (pq_type *pq = impl_.pq_list; pq != impl_.pq_list + impl_.num_pqs; ++pq) {
+        for (pq_type *pq = policy_.pq_list; pq != policy_.pq_list + policy_.num_pqs; ++pq) {
             pq_alloc_traits::destroy(alloc_, pq);
         }
-        pq_alloc_traits::deallocate(alloc_, impl_.pq_list, impl_.num_pqs);
+        pq_alloc_traits::deallocate(alloc_, policy_.pq_list, policy_.num_pqs);
     }
 
     handle_type get_handle() noexcept {
-        return impl_.get_handle();
+        return policy_.get_handle();
     }
 
     bool try_pop(reference retval) noexcept {
-        pq_type &first = impl_.pq_list[impl_.random_index(impl_.rng)];
-        pq_type &second = impl_.pq_list[impl_.random_index(impl_.rng)];
+        pq_type &first = policy_.pq_list[policy_.random_index()];
+        pq_type &second = policy_.pq_list[policy_.random_index()];
         if (first.unsafe_empty() && second.unsafe_empty()) {
             return false;
         }
         if (first.unsafe_empty() ||
-            (!second.unsafe_empty() && impl_.value_comp()(first.unsafe_top(), second.unsafe_top()))) {
+            (!second.unsafe_empty() && policy_.value_comp()(first.unsafe_top(), second.unsafe_top()))) {
             retval = second.unsafe_top();
             second.unsafe_pop();
         } else {
@@ -194,20 +202,20 @@ class MultiQueue {
     }
 
     void push(const_reference value) noexcept {
-        impl_.pq_list[impl_.random_index()].unsafe_push(value);
+        policy_.pq_list[policy_.random_index()].unsafe_push(value);
     }
 
     size_type num_pqs() const noexcept {
-        return impl_.num_pqs;
+        return policy_.num_pqs;
     }
 
     value_compare value_comp() const {
-        return impl_.value_comp();
+        return policy_.value_comp();
     }
 #ifdef MULTIQUEUE_ELEMENT_DISTRIBUTION
     [[nodiscard]] std::vector<std::size_t> get_distribution() const {
         std::vector<std::size_t> distribution(num_pqs());
-        std::transform(impl_.pq_list, impl_.pq_list + impl_.num_pqs, distribution.begin(),
+        std::transform(policy_.pq_list, policy_.pq_list + policy_.num_pqs, distribution.begin(),
                        [](auto const &pq) { return pq.size(); });
         return distribution;
     }
@@ -218,8 +226,8 @@ class MultiQueue {
         std::vector<std::size_t> distribution(num_pqs(), 0);
         for (std::size_t i = 0; i < k; ++i) {
             auto pq =
-                std::max_element(impl_.pq_list, impl_.pq_list + impl_.num_pqs, [&](auto const &lhs, auto const &rhs) {
-                    return impl_.compare(lhs.concurrent_top_key(), rhs.concurrent_top_key());
+                std::max_element(policy_.pq_list, policy_.pq_list + policy_.num_pqs, [&](auto const &lhs, auto const &rhs) {
+                    return policy_.compare(lhs.concurrent_top_key(), rhs.concurrent_top_key());
                 });
             if (pq->concurrent_top_key() == SentinelTraits::sentinel()) {
                 break;
@@ -228,25 +236,16 @@ class MultiQueue {
             std::pair<value_type, std::size_t> result;
             result.first = pq->unsafe_top();
             pq->unsafe_pop();
-            result.second = static_cast<std::size_t>(std::distance(impl_.pq_list, pq));
+            result.second = static_cast<std::size_t>(std::distance(policy_.pq_list, pq));
             removed_elements.push_back(result);
             ++distribution[result.second];
         }
         for (auto [val, index] : removed_elements) {
-            impl_.pq_list[index].unsafe_push(std::move(val));
+            policy_.pq_list[index].unsafe_push(std::move(val));
         }
         return distribution;
     }
 #endif
-
-    std::ostream &describe(std::ostream &out) const {
-        out << "MultiQueue\n";
-        out << "Number of PQs: " << impl_.num_pqs << '\n';
-        out << "Sentinel: " << SentinelTraits::sentinel() << " ("
-            << (SentinelTraits::is_implicit ? "implicit" : "explicit") << ")\n";
-        impl_.describe(out);
-        return out;
-    }
 };
 
 }  // namespace multiqueue

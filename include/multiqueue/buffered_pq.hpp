@@ -10,23 +10,40 @@
 
 #pragma once
 
-#include "multiqueue/build_config.hpp"
-
 #include <algorithm>
 #include <array>
-#include <cassert>
 #include <cstddef>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <utility>
 
+#ifdef NDEBUG_MQ_BUFFERED_PQ
+
+#define BUFFERED_PQ_ASSERT(x) \
+    do {                      \
+    } while (false)
+
+#else
+
+#include <cassert>
+#define BUFFERED_PQ_ASSERT(x) \
+    do {                      \
+        assert(x);            \
+    } while (false)
+
+#endif
+
 namespace multiqueue {
 
-template <typename PriorityQueue, std::size_t InsertionBuffersize = BuildConfiguration::DefaultInsertionBuffersize,
-          std::size_t DeletionBuffersize = BuildConfiguration::DefaultDeletionBuffersize>
+static constexpr std::size_t DefaultInsertionBuffersize = 64;
+static constexpr std::size_t DefaultDeletionBuffersize = 64;
+
+template <typename PriorityQueue, std::size_t InsertionBuffersize = DefaultInsertionBuffersize,
+          std::size_t DeletionBuffersize = DefaultDeletionBuffersize>
 class BufferedPQ : private PriorityQueue {
    private:
+    static constexpr std::size_t ReservePerPQ = std::size_t{1} << 20;
     using base_type = PriorityQueue;
 
    public:
@@ -53,7 +70,7 @@ class BufferedPQ : private PriorityQueue {
     }
 
     void refill_deletion_buffer() {
-        assert(del_buf_size_ == 0);
+        BUFFERED_PQ_ASSERT(del_buf_size_ == 0);
         // We flush the insertion buffer into the heap, then refill the
         // deletion buffer from the heap. We could also merge the insertion
         // buffer and heap into the deletion buffer
@@ -68,21 +85,21 @@ class BufferedPQ : private PriorityQueue {
 
    public:
     explicit BufferedPQ(value_compare compare = value_compare()) : base_type(compare) {
-        base_type::c.reserve(BuildConfiguration::ReservePerPQ);
+        base_type::c.reserve(ReservePerPQ);
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
     explicit BufferedPQ(value_compare const& compare, Alloc const& alloc) : base_type(compare, alloc) {
-        base_type::c.reserve(BuildConfiguration::ReservePerPQ);
+        base_type::c.reserve(ReservePerPQ);
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
     explicit BufferedPQ(Alloc const& alloc) : base_type(alloc) {
-        base_type::c.reserve(BuildConfiguration::ReservePerPQ);
+        base_type::c.reserve(ReservePerPQ);
     }
 
-    [[nodiscard]] constexpr bool empty() const noexcept {
-        assert(del_buf_size_ != 0 || (ins_buf_size_ == 0 && base_type::empty()));
+    [[nodiscard]] constexpr bool empty() const {
+        BUFFERED_PQ_ASSERT(del_buf_size_ != 0 || (ins_buf_size_ == 0 && base_type::empty()));
         return del_buf_size_ == 0;
     }
 
@@ -91,12 +108,12 @@ class BufferedPQ : private PriorityQueue {
     }
 
     constexpr const_reference top() const {
-        assert(!empty());
+        BUFFERED_PQ_ASSERT(!empty());
         return deletion_buffer_[del_buf_size_ - 1];
     }
 
     void pop() {
-        assert(!empty());
+        BUFFERED_PQ_ASSERT(!empty());
         if (--del_buf_size_ == 0) {
             refill_deletion_buffer();
         }
@@ -116,7 +133,7 @@ class BufferedPQ : private PriorityQueue {
                     deletion_buffer_[in_pos] = std::move(deletion_buffer_[in_pos - 1]);
                     // No need to check for underflow
                     --in_pos;
-                    assert(in_pos >= 1);
+                    BUFFERED_PQ_ASSERT(in_pos >= 1);
                 }
                 deletion_buffer_[in_pos] = std::move(value);
                 ++del_buf_size_;
@@ -128,7 +145,7 @@ class BufferedPQ : private PriorityQueue {
                 deletion_buffer_[in_pos] = std::move(deletion_buffer_[in_pos + 1]);
                 ++in_pos;
             }
-            assert(in_pos < DeletionBuffersize);
+            BUFFERED_PQ_ASSERT(in_pos < DeletionBuffersize);
             deletion_buffer_[in_pos] = std::move(value);
             // Fallthrough, the last element needs to be inserted into the insertion buffer
             value = std::move(tmp);
@@ -138,12 +155,6 @@ class BufferedPQ : private PriorityQueue {
             flush_insertion_buffer();
         }
         insertion_buffer_[ins_buf_size_++] = std::move(value);
-    }
-
-    constexpr void clear() noexcept {
-        ins_buf_size_ = 0;
-        del_buf_size_ = 0;
-        base_type::clear();
     }
 
     constexpr value_compare value_comp() const {

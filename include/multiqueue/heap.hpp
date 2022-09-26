@@ -9,39 +9,35 @@
 **/
 #pragma once
 
-#include "multiqueue/build_config.hpp"
-
-#include <cassert>
 #include <cstddef>
 #include <functional>
-#include <memory>  // allocator
-#include <sstream>
-#include <string>
-#include <type_traits>  // is_constructible, enable_if
-#include <utility>      // move, forward, pair
+#include <utility>
 #include <vector>
 
-#ifdef HEAP_DEBUG
+#ifdef NDEBUG_MQ_HEAP
 
 #define HEAP_ASSERT(x) \
     do {               \
-        assert(x);     \
     } while (false)
 
 #else
 
+#include <cassert>
 #define HEAP_ASSERT(x) \
     do {               \
+        assert(x);     \
     } while (false)
 
 #endif
 
 namespace multiqueue {
 
-template <typename T, typename Compare = std::less<>, unsigned int Degree = BuildConfiguration::HeapArity,
+static constexpr unsigned int DefaultHeapArity = 8;
+
+template <typename T, typename Compare = std::less<>, unsigned int Arity = DefaultHeapArity,
           typename Container = std::vector<T>>
 class Heap {
-    static_assert(Degree >= 2, "Degree must be at least two");
+    static_assert(Arity >= 2, "Arity must be at least two");
 
    public:
     using value_type = T;
@@ -61,17 +57,17 @@ class Heap {
    private:
     static constexpr size_type root = size_type{0};
 
-    static constexpr size_type parent(size_type index) noexcept {
+    static constexpr size_type parent(size_type index) {
         HEAP_ASSERT(index != root);
-        return (index - size_type(1)) / Degree;
+        return (index - size_type(1)) / Arity;
     }
 
     static constexpr size_type first_child(size_type index) noexcept {
-        return index * Degree + size_type(1);
+        return index * Arity + size_type(1);
     }
 
     // returns the index of the first node without all children
-    constexpr size_type current_parent() const noexcept {
+    constexpr size_type current_parent() const {
         HEAP_ASSERT(!empty());
         return parent(size());
     }
@@ -115,7 +111,7 @@ class Heap {
         size_type const end_full = current_parent();
         while (index < end_full) {
             auto const first = first_child(index);
-            auto const last = first + Degree;
+            auto const last = first + Arity;
             auto const next = new_parent(first, last, value);
             if (next == last) {
                 c[index] = std::move(value);
@@ -139,8 +135,28 @@ class Heap {
         }
     }
 
+#ifndef NDEBUG_MQ_HEAP
+    [[nodiscard]] bool verify() const {
+        auto const end_full = current_parent();
+        for (size_type i = 0; i < end_full; ++i) {
+            auto const first = first_child(i);
+            for (size_type j = first; j < first + Arity; ++j) {
+                assert(j < size());
+                if (comp(c[i], c[j])) {
+                    return false;
+                }
+            }
+        }
+        for (size_type j = first_child(end_full); j < size(); ++j) {
+            if (comp(c[end_full], c[j])) {
+                return false;
+            }
+        }
+    }
+#endif
+
    public:
-    explicit Heap(value_compare const &compare = value_compare()) noexcept : c(), comp{compare} {
+    explicit Heap(value_compare const &compare = value_compare()) noexcept(noexcept(Container())) : c(), comp{compare} {
     }
 
     template <typename Alloc>
@@ -197,31 +213,13 @@ class Heap {
     constexpr value_compare value_comp() const {
         return comp;
     }
-
-    [[nodiscard]] bool verify() const noexcept {
-        auto const end_full = current_parent();
-        for (size_type i = 0; i < end_full; ++i) {
-            auto const first = first_child(i);
-            for (size_type j = first; j < first + Degree; ++j) {
-                assert(j < size());
-                if (comp(c[i], c[j])) {
-                    return false;
-                }
-            }
-        }
-        for (size_type j = first_child(end_full); j < size(); ++j) {
-            if (comp(c[end_full], c[j])) {
-                return false;
-            }
-        }
-    }
 };
 
 }  // namespace multiqueue
 
 namespace std {
-template <typename T, typename Compare, unsigned int Degree, typename Container, typename Alloc>
-struct uses_allocator<multiqueue::Heap<T, Compare, Degree, Container>, Alloc> : uses_allocator<Container, Alloc>::type {
+template <typename T, typename Compare, unsigned int Arity, typename Container, typename Alloc>
+struct uses_allocator<multiqueue::Heap<T, Compare, Arity, Container>, Alloc> : uses_allocator<Container, Alloc>::type {
 };
 
 }  // namespace std

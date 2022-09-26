@@ -24,11 +24,6 @@ struct BuildConfiguration {
 #else
     static constexpr std::size_t Pagesize = 4096;
 #endif
-
-    static constexpr std::size_t ReservePerPQ = 1 << 20;
-    static constexpr std::size_t HeapArity = 8;
-    static constexpr std::size_t DefaultInsertionBuffersize = 64;
-    static constexpr std::size_t DefaultDeletionBuffersize = 64;
     static constexpr int DefaultFactorThreadsPQ = 8;
     static constexpr int DefaultStickiness = 16;
 };
