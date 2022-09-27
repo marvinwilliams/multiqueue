@@ -35,9 +35,12 @@
 #endif
 
 namespace multiqueue {
+
+namespace detail {
+
 template <typename Key, typename T, typename KeyCompare, template <typename, typename> typename PriorityQueue,
           typename ValueTraits, typename SentinelTraits>
-struct MultiQueueData {
+struct MultiQueueImplData {
     static_assert(std::is_same_v<Key, typename ValueTraits::key_type>,
                   "MultiQueue must have the same key_type as its ValueTraits");
     static_assert(std::is_same_v<T, typename ValueTraits::mapped_type>,
@@ -47,7 +50,7 @@ struct MultiQueueData {
     using value_type = typename ValueTraits::value_type;
     using key_compare = KeyCompare;
     class value_compare {
-        friend MultiQueueData;
+        friend MultiQueueImplData;
         [[no_unique_address]] key_compare comp;
 
         explicit value_compare(key_compare const &compare = key_compare{}) : comp{compare} {
@@ -67,7 +70,7 @@ struct MultiQueueData {
     using pq_type = GuardedPQ<PriorityQueue<value_type, value_compare>, ValueTraits, SentinelTraits>;
 
     class sentinel_aware_compare {
-        friend MultiQueueData;
+        friend MultiQueueImplData;
         [[no_unique_address]] key_compare comp;
 
         explicit sentinel_aware_compare(key_compare const &compare = key_compare{}) : comp{compare} {
@@ -92,13 +95,14 @@ struct MultiQueueData {
     pcg32 rng;
     [[no_unique_address]] key_compare comp;
 
-    explicit MultiQueueData(size_type n, std::uint32_t seed, key_compare const &compare)
+    explicit MultiQueueImplData(size_type n, std::uint32_t seed, key_compare const &compare)
         : num_pqs{n}, rng(std::seed_seq{seed}), comp{compare} {
     }
 
     template <typename Generator>
     size_type random_pq_index(Generator &g) noexcept {
-        return std::uniform_int_distribution<size_type>{0, num_pqs - 1}(g);
+        /* return std::uniform_int_distribution<size_type>{0, num_pqs - 1}(g); */
+        return g & (num_pqs - 1);
     }
 
     size_type random_pq_index() noexcept {
@@ -121,12 +125,15 @@ struct MultiQueueData {
 template <typename T, typename Compare>
 using DefaultPriorityQueue = BufferedPQ<Heap<T, Compare>>;
 
+}  // namespace detail
+
 template <typename Key, typename T, typename KeyCompare = std::less<Key>, StickPolicy P = StickPolicy::None,
-          template <typename, typename> typename PriorityQueue = DefaultPriorityQueue,
+          template <typename, typename> typename PriorityQueue = detail::DefaultPriorityQueue,
           typename ValueTraits = value_traits<Key, T>, typename SentinelTraits = sentinel_traits<Key, KeyCompare>,
           typename Allocator = std::allocator<Key>>
 class MultiQueue {
-    using policy_type = StickPolicyImpl<MultiQueueData<Key, T, KeyCompare, PriorityQueue, ValueTraits, SentinelTraits>, P>;
+    using impl_data_type = detail::MultiQueueImplData<Key, T, KeyCompare, PriorityQueue, ValueTraits, SentinelTraits>;
+    using policy_type = stick_policy_impl_type<impl_data_type, P>;
 
    public:
     using key_type = typename policy_type::key_type;
@@ -151,10 +158,14 @@ class MultiQueue {
     policy_type policy_;
     [[no_unique_address]] pq_alloc_type alloc_;
 
+    static constexpr std::size_t next_power_of_two(std::size_t n) {
+        return std::size_t{1} << static_cast<unsigned int>(std::ceil(std::log2(n)));
+    }
+
    public:
     explicit MultiQueue(int num_threads, Config const &config, key_compare const &comp = key_compare(),
                         allocator_type const &alloc = allocator_type())
-        : policy_{num_threads, config, comp}, alloc_{alloc} {
+        : policy_{next_power_of_two(static_cast<std::size_t>(num_threads) * config.c), config, comp}, alloc_{alloc} {
         assert(policy_.num_pqs > 0);
 
         policy_.pq_list = pq_alloc_traits::allocate(alloc_, policy_.num_pqs);
@@ -185,8 +196,8 @@ class MultiQueue {
     }
 
     bool try_pop(reference retval) noexcept {
-        pq_type &first = policy_.pq_list[policy_.random_index()];
-        pq_type &second = policy_.pq_list[policy_.random_index()];
+        pq_type &first = policy_.pq_list[policy_.random_pq_index()];
+        pq_type &second = policy_.pq_list[policy_.random_pq_index()];
         if (first.unsafe_empty() && second.unsafe_empty()) {
             return false;
         }
@@ -202,7 +213,7 @@ class MultiQueue {
     }
 
     void push(const_reference value) noexcept {
-        policy_.pq_list[policy_.random_index()].unsafe_push(value);
+        policy_.pq_list[policy_.random_pq_index()].unsafe_push(value);
     }
 
     size_type num_pqs() const noexcept {
@@ -225,10 +236,10 @@ class MultiQueue {
         removed_elements.reserve(k);
         std::vector<std::size_t> distribution(num_pqs(), 0);
         for (std::size_t i = 0; i < k; ++i) {
-            auto pq =
-                std::max_element(policy_.pq_list, policy_.pq_list + policy_.num_pqs, [&](auto const &lhs, auto const &rhs) {
-                    return policy_.compare(lhs.concurrent_top_key(), rhs.concurrent_top_key());
-                });
+            auto pq = std::max_element(policy_.pq_list, policy_.pq_list + policy_.num_pqs,
+                                       [&](auto const &lhs, auto const &rhs) {
+                                           return policy_.compare(lhs.concurrent_top_key(), rhs.concurrent_top_key());
+                                       });
             if (pq->concurrent_top_key() == SentinelTraits::sentinel()) {
                 break;
             }
