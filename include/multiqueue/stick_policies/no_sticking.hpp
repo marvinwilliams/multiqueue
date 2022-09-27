@@ -1,7 +1,8 @@
 #pragma once
 
 #include "multiqueue/config.hpp"
-#include "multiqueue/third_party/pcg_random.hpp"
+
+#include "pcg_random.hpp"
 
 #include <cstdint>
 #include <array>
@@ -72,8 +73,8 @@ struct NoSticking : ImplData {
 
     using handle_type = Handle;
 
-    NoSticking(std::size_t num_pqs, Config const &config, typename ImplData::key_compare const &compare)
-        : ImplData(num_pqs, config.seed, compare) {
+    NoSticking(std::size_t n, Config const &config, typename ImplData::key_compare const &compare)
+        : ImplData(n, config.seed, compare) {
     }
 
     handle_type get_handle() noexcept {

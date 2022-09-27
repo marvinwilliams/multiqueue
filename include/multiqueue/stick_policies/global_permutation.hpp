@@ -1,7 +1,8 @@
 #pragma once
 
 #include "multiqueue/config.hpp"
-#include "multiqueue/third_party/pcg_random.hpp"
+
+#include "pcg_random.hpp"
 
 #include <cassert>
 #include <array>
@@ -136,9 +137,9 @@ struct GlobalPermutation : public ImplData {
     int stickiness;
     int handle_count = 0;
 
-    GlobalPermutation(std::size_t num_pqs, Config const &config, typename ImplData::key_compare const &compare)
-        : ImplData(num_pqs, config.seed, compare), stickiness{config.stickiness}, permutation{1} {
-        assert((num_pqs & (num_pqs - 1)) == 0);
+    GlobalPermutation(std::size_t n, Config const &config, typename ImplData::key_compare const &compare)
+        : ImplData(n, config.seed, compare), stickiness{config.stickiness}, permutation{1} {
+        assert((n & (n - 1)) == 0);
     }
 
     handle_type get_handle() noexcept {

@@ -1,7 +1,8 @@
 #pragma once
 
 #include "multiqueue/config.hpp"
-#include "multiqueue/third_party/pcg_random.hpp"
+
+#include "pcg_random.hpp"
 
 #include <array>
 #include <atomic>
@@ -150,8 +151,8 @@ struct SwappingBlocking : public ImplData {
     int stickiness;
     int handle_count = 0;
 
-    SwappingBlocking(std::size_t num_pqs, Config const &config, typename ImplData::key_compare const &compare)
-        : ImplData(num_pqs, config.seed, compare), permutation(this->num_pqs), stickiness{config.stickiness} {
+    SwappingBlocking(std::size_t n, Config const &config, typename ImplData::key_compare const &compare)
+        : ImplData(n, config.seed, compare), permutation(this->num_pqs), stickiness{config.stickiness} {
         for (std::size_t i = 0; i < this->num_pqs; ++i) {
             permutation[i].i = i;
         }

@@ -1,7 +1,8 @@
 #pragma once
 
 #include "multiqueue/config.hpp"
-#include "multiqueue/third_party/pcg_random.hpp"
+
+#include "pcg_random.hpp"
 
 #include <array>
 #include <random>
@@ -114,8 +115,8 @@ struct RandomStrict : public ImplData {
 
     int stickiness;
 
-    RandomStrict(int num_threads, Config const &config, typename ImplData::key_compare const &compare)
-        : ImplData(num_threads * config.c, config.seed, compare), stickiness{config.stickiness} {
+    RandomStrict(std::size_t n, Config const &config, typename ImplData::key_compare const &compare)
+        : ImplData(n, config.seed, compare), stickiness{config.stickiness} {
     }
 
     handle_type get_handle() noexcept {

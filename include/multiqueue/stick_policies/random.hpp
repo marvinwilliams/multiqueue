@@ -2,7 +2,8 @@
 
 #include "multiqueue/config.hpp"
 #include "multiqueue/stick_policy.hpp"
-#include "multiqueue/third_party/pcg_random.hpp"
+
+#include "pcg_random.hpp"
 
 #include <array>
 #include <random>
@@ -98,8 +99,8 @@ struct Random : public ImplData {
 
     int stickiness;
 
-    Random(std::size_t num_pqs, Config const &config, typename ImplData::key_compare const &compare)
-        : ImplData(num_pqs, config.seed, compare), stickiness{config.stickiness} {
+    Random(std::size_t n, Config const &config, typename ImplData::key_compare const &compare)
+        : ImplData(n, config.seed, compare), stickiness{config.stickiness} {
     }
 
     handle_type get_handle() noexcept {

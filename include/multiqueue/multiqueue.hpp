@@ -15,8 +15,9 @@
 #include "multiqueue/heap.hpp"
 #include "multiqueue/sentinel_traits.hpp"
 #include "multiqueue/stick_policy.hpp"
-#include "multiqueue/third_party/pcg_random.hpp"
 #include "multiqueue/value_traits.hpp"
+
+#include "pcg_random.hpp"
 
 #include <cassert>
 #include <cstddef>
@@ -165,7 +166,11 @@ class MultiQueue {
    public:
     explicit MultiQueue(int num_threads, Config const &config, key_compare const &comp = key_compare(),
                         allocator_type const &alloc = allocator_type())
-        : policy_{next_power_of_two(static_cast<std::size_t>(num_threads) * config.c), config, comp}, alloc_{alloc} {
+        : policy_{next_power_of_two(static_cast<std::size_t>(num_threads) * static_cast<std::size_t>(config.c)), config,
+                  comp},
+          alloc_{alloc} {
+        assert(num_threads > 0);
+        assert(config.c > 0);
         assert(policy_.num_pqs > 0);
 
         policy_.pq_list = pq_alloc_traits::allocate(alloc_, policy_.num_pqs);
