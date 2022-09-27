@@ -4,9 +4,9 @@
 #include "catch2/benchmark/catch_benchmark.hpp"
 #include "catch2/catch_template_test_macros.hpp"
 
-#include <vector>
-#include <queue>
 #include <iterator>
+#include <queue>
+#include <vector>
 
 static constexpr int reps = 500'000;
 
@@ -126,8 +126,9 @@ TEMPLATE_TEST_CASE_SIG("Degree", "[benchmark][heap][degree]", ((unsigned int Deg
     };
 }
 
-TEMPLATE_TEST_CASE_SIG("BufferedPQ", "[benchmark][buffered_pq]", ((unsigned int Buffersize), Buffersize), 4, 8, 16, 64, 256) {
-    using pq_t = multiqueue::BufferedPQ<Buffersize, Buffersize, multiqueue::Heap<int, std::less<>>>;
+TEMPLATE_TEST_CASE_SIG("BufferedPQ", "[benchmark][buffered_pq]", ((unsigned int Buffersize), Buffersize), 4, 8, 16, 64,
+                       256) {
+    using pq_t = multiqueue::BufferedPQ<multiqueue::Heap<int, std::less<>>, Buffersize, Buffersize>;
 
     auto pq = pq_t{};
 
@@ -185,8 +186,10 @@ TEMPLATE_TEST_CASE_SIG("BufferedPQ", "[benchmark][buffered_pq]", ((unsigned int 
     };
 }
 
-TEMPLATE_TEST_CASE_SIG("BufferedPQ std::pq", "[benchmark][buffered_pq]", ((unsigned int Buffersize), Buffersize), 4, 8, 16, 64, 256) {
-    using pq_t = multiqueue::BufferedPQ<Buffersize, Buffersize, std::priority_queue<int, std::vector<int>, std::greater<>>>;
+TEMPLATE_TEST_CASE_SIG("BufferedPQ std::pq", "[benchmark][buffered_pq]", ((unsigned int Buffersize), Buffersize), 4, 8,
+                       16, 64, 256) {
+    using pq_t =
+        multiqueue::BufferedPQ<std::priority_queue<int, std::vector<int>, std::greater<>>, Buffersize, Buffersize>;
 
     auto pq = pq_t{};
 

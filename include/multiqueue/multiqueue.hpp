@@ -102,7 +102,7 @@ struct MultiQueueImplData {
     template <typename Generator>
     size_type random_pq_index(Generator &g) noexcept {
         /* return std::uniform_int_distribution<size_type>{0, num_pqs - 1}(g); */
-        return g & (num_pqs - 1);
+        return g() & (num_pqs - 1);
     }
 
     size_type random_pq_index() noexcept {
@@ -177,6 +177,11 @@ class MultiQueue {
         for (pq_type *pq = policy_.pq_list; pq != policy_.pq_list + policy_.num_pqs; ++pq) {
             pq_alloc_traits::construct(alloc_, pq, policy_.value_comp());
         }
+    }
+
+    explicit MultiQueue(int num_threads, key_compare const &comp = key_compare(),
+                        allocator_type const &alloc = allocator_type())
+        : MultiQueue(num_threads, Config{}, comp, alloc) {
     }
 
     MultiQueue(MultiQueue const &) = delete;

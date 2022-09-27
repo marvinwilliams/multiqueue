@@ -33,7 +33,7 @@ struct NoSticking : ImplData {
         void push(typename ImplData::const_reference value) {
             size_type index;
             do {
-                index = impl_.random_index(rng_);
+                index = impl_.random_pq_index(rng_);
             } while (!impl_.pq_list[index].try_lock());
             impl_.pq_list[index].unsafe_push(value);
             impl_.pq_list[index].unlock();
@@ -41,9 +41,9 @@ struct NoSticking : ImplData {
 
         bool try_pop(typename ImplData::reference retval) {
             do {
-                std::array<size_type, 2> index = {impl_.random_index(rng_), impl_.random_index(rng_)};
+                std::array<size_type, 2> index = {impl_.random_pq_index(rng_), impl_.random_pq_index(rng_)};
                 while (index[0] == index[1]) {
-                    index[1] = impl_.random_index(rng_);
+                    index[1] = impl_.random_pq_index(rng_);
                 }
                 std::array<key_type, 2> key = {impl_.pq_list[index[0]].concurrent_top_key(),
                                                impl_.pq_list[index[1]].concurrent_top_key()};

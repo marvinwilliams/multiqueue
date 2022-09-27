@@ -22,9 +22,7 @@ static void work(mq_t& pq) {
 
 int main() {
     std::vector<std::thread> threads;
-    mq_t pq(n_threads, mq_t::config_type{});
+    mq_t pq(n_threads);
     std::generate_n(std::back_inserter(threads), n_threads, [&pq]() { return std::thread{work, std::ref(pq)}; });
     std::for_each(threads.begin(), threads.end(), [](auto& t) { t.join(); });
-    auto d = pq.get_top_distribution(10);
-    
 }

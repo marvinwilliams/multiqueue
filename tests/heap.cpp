@@ -13,9 +13,9 @@
 #include <utility>
 #include <vector>
 
-TEMPLATE_TEST_CASE_SIG("heap supports basic operations", "[heap][basic]", ((unsigned int Degree), Degree), 2, 3, 4,
+TEMPLATE_TEST_CASE_SIG("heap supports basic operations", "[heap][basic]", ((unsigned int Arity), Arity), 2, 3, 4,
                        99) {
-    using heap_t = multiqueue::Heap<int, std::less<>, Degree>;
+    using heap_t = multiqueue::Heap<int, std::less<>, Arity>;
 
     auto heap = heap_t{};
 

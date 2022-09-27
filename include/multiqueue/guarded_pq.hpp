@@ -92,7 +92,7 @@ class alignas(BuildConfiguration::Pagesize) GuardedPQ {
     void unsafe_pop() {
         assert(!unsafe_empty());
         pq_.pop();
-        top_key_.store(pq_.empty() ? SentinelTraits::get() : ValueTraits::get(pq_.top()), std::memory_order_relaxed);
+        top_key_.store(pq_.empty() ? SentinelTraits::sentinel() : ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
     }
 
     void unsafe_push(const_reference value) {

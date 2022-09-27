@@ -12,7 +12,7 @@
 #include <vector>
 
 TEST_CASE("buffered pq supports basic operations", "[buffered_pq][basic]") {
-    using pq_t = multiqueue::BufferedPQ<8, 8, multiqueue::Heap<int>>;
+    using pq_t = multiqueue::BufferedPQ<multiqueue::Heap<int>>;
 
     auto pq = pq_t{};
 
@@ -58,7 +58,7 @@ TEST_CASE("buffered pq supports basic operations", "[buffered_pq][basic]") {
 }
 
 TEST_CASE("buffered pq can use std::greater as comparator", "[buffered_pq][comparator]") {
-    using pq_t = multiqueue::BufferedPQ<8, 8, multiqueue::Heap<int, std::greater<>>>;
+    using pq_t = multiqueue::BufferedPQ<multiqueue::Heap<int, std::greater<>>>;
 
     auto pq = pq_t{};
 
@@ -104,7 +104,7 @@ TEST_CASE("buffered pq can use std::greater as comparator", "[buffered_pq][compa
 }
 
 TEST_CASE("buffered pq works with randomized workloads", "[buffered_pq][workloads]") {
-    using pq_t = multiqueue::BufferedPQ<8, 8, multiqueue::Heap<int, std::greater<>>>;
+    using pq_t = multiqueue::BufferedPQ<multiqueue::Heap<int, std::greater<>>>;
 
     auto pq = pq_t{};
     auto ref_pq = std::priority_queue<int, std::vector<int>, std::greater<>>{};
