@@ -24,7 +24,7 @@ struct BuildConfiguration {
 #else
     static constexpr std::size_t Pagesize = 4096;
 #endif
-    static constexpr int DefaultFactorThreadsPQ = 8;
+    static constexpr int DefaultFactorThreadsPQ = 4;
     static constexpr int DefaultStickiness = 16;
 };
 

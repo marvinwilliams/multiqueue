@@ -2,11 +2,13 @@ cmake_minimum_required(VERSION 3.16)
 
 project(multiqueue VERSION 2.0.0 LANGUAGES CXX)
 
-include(cmake/utils.cmake)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
-discourage_intree_builds()
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(utils)
+disable_intree_builds()
+
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party")
@@ -14,14 +16,8 @@ set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party")
 option(MULTIQUEUE_ABORT_MISALIGNMENT "Check if data is not aligned as expected" OFF)
 option(MULTIQUEUE_ELEMENT_DISTRIBUTION "Support functions to examine element distributions" OFF)
 option(MULTIQUEUE_BUILD_EXAMPLES "Build examples" OFF)
-if(EXISTS "${EXTERNAL_DIR}/Catch2/CMakeLists.txt")
-  add_subdirectory("${EXTERNAL_DIR}/Catch2" EXCLUDE_FROM_ALL)
-  option(MULTIQUEUE_BUILD_TESTS "Build unit tests for multiqueue" OFF)
-  option(MULTIQUEUE_BUILD_BENCHMARKS "Build micro benchmarks for multiqueue internals" OFF)
-else()
-  message(STATUS "Catch2 not found in ${EXTERNAL_DIR}/Catch2, building tests and benchmarks not possible")
-endif()
-
+option(MULTIQUEUE_BUILD_TESTS "Build unit tests for multiqueue" ON)
+option(MULTIQUEUE_BUILD_BENCHMARKS "Build micro benchmarks for multiqueue internals" ON)
 # The target to be linked against by other targets. This library is header-only
 # and as such does not compile by itself. This target rather sets include
 # directories and required compiler flags.
@@ -65,12 +61,20 @@ find_package(Threads)
 # subproject.
 add_library("multiqueue::multiqueue" ALIAS multiqueue)
 
-if(MULTIQUEUE_BUILD_TESTS)
+if(NOT TARGET Catch2::Catch2WithMain)
+  if(EXISTS "${EXTERNAL_DIR}/Catch2/CMakeLists.txt")
+    add_subdirectory("${EXTERNAL_DIR}/Catch2" EXCLUDE_FROM_ALL)
+  else()
+    message(WARNING "Catch2 not found, building tests and benchmarks not possible")
+  endif()
+endif()
+
+if(MULTIQUEUE_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
   include(CTest)
   set(TEST_RUNNER_PARAMS "" CACHE STRING "Options added to the test runner")
   add_subdirectory(tests)
 endif()
-if(MULTIQUEUE_BUILD_BENCHMARKS)
+if(MULTIQUEUE_BUILD_BENCHMARKS AND TARGET Catch2::Catch2WithMain)
   add_subdirectory(benchmarks)
 endif()
 if(MULTIQUEUE_BUILD_EXAMPLES)
@@ -92,7 +96,7 @@ endif()
 include(InstallRequiredSystemLibraries)
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/License.txt")
-set(CPACK_RESOURCE_FILE_README ${CMAKE_CURRENT_LIST_DIR}/README.md)
+set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_LIST_DIR}/README.md")
 include(CPack)
 
 set(INSTALL_MODULEDIR "${CMAKE_INSTALL_LIBDIR}/cmake")

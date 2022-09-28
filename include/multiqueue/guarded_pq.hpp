@@ -32,10 +32,7 @@ class alignas(BuildConfiguration::Pagesize) GuardedPQ {
     static_assert(std::is_same_v<value_type, typename PriorityQueue::value_type>,
                   "PriorityQueue must have the same value_type as its ValueTraits");
 
-   private:
     using pq_type = PriorityQueue;
-
-   public:
     using value_compare = typename pq_type::value_compare;
     using size_type = typename pq_type::size_type;
     using reference = typename pq_type::reference;
