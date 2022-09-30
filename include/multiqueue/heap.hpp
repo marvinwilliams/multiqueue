@@ -137,21 +137,12 @@ class Heap {
 
 #ifndef NDEBUG_MQ_HEAP
     [[nodiscard]] bool verify() const {
-        auto const end_full = current_parent();
-        for (size_type i = 0; i < end_full; ++i) {
-            auto const first = first_child(i);
-            for (size_type j = first; j < first + Arity; ++j) {
-                assert(j < size());
-                if (comp(c[i], c[j])) {
-                    return false;
-                }
-            }
-        }
-        for (size_type j = first_child(end_full); j < size(); ++j) {
-            if (comp(c[end_full], c[j])) {
+        for (std::size_t i = 1; i < c.size(); ++i) {
+            if (comp(c[parent(i)], c[i])) {
                 return false;
             }
         }
+        return true;
     }
 #endif
 

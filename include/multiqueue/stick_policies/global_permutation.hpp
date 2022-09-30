@@ -4,9 +4,9 @@
 
 #include "pcg_random.hpp"
 
-#include <cassert>
 #include <array>
 #include <atomic>
+#include <cassert>
 #include <random>
 
 namespace multiqueue {
@@ -33,7 +33,7 @@ struct GlobalPermutation : public ImplData {
         explicit Handle(std::uint32_t seed, GlobalPermutation &impl) noexcept
             : rng_{std::seed_seq{seed}},
               impl_{impl},
-              permutation_index_{impl_.handle_count * 2},
+              permutation_index_{static_cast<std::size_t>(impl_.handle_count * 2)},
               current_permutation_{impl_.permutation.load(std::memory_order_relaxed)} {
             ++impl_.handle_count;
         }
@@ -91,7 +91,7 @@ struct GlobalPermutation : public ImplData {
             std::array<key_type, 2> key = {impl_.pq_list[pq_index[0]].concurrent_top_key(),
                                            impl_.pq_list[pq_index[1]].concurrent_top_key()};
             do {
-                std::size_t const select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
+                std::size_t const select_pq = impl_.sentinel_aware_comp()(key[0], key[1]) ? 1 : 0;
                 if (ImplData::is_sentinel(key[select_pq])) {
                     use_count_ = 2 * impl_.stickiness;
                     return false;
@@ -138,7 +138,7 @@ struct GlobalPermutation : public ImplData {
     int handle_count = 0;
 
     GlobalPermutation(std::size_t n, Config const &config, typename ImplData::key_compare const &compare)
-        : ImplData(n, config.seed, compare), stickiness{config.stickiness}, permutation{1} {
+        : ImplData(n, config.seed, compare), permutation{1}, stickiness{static_cast<int>(config.stickiness)} {
         assert((n & (n - 1)) == 0);
     }
 

@@ -64,7 +64,7 @@ struct Random : public ImplData {
             std::array<key_type, 2> key = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
                                            impl_.pq_list[stick_index_[1]].concurrent_top_key()};
             do {
-                std::size_t const select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
+                std::size_t const select_pq = impl_.sentinel_aware_comp()(key[0], key[1]) ? 1 : 0;
                 if (ImplData::is_sentinel(key[select_pq])) {
                     // Both pqs are empty
                     use_count_[0] = 0;
@@ -100,7 +100,7 @@ struct Random : public ImplData {
     int stickiness;
 
     Random(std::size_t n, Config const &config, typename ImplData::key_compare const &compare)
-        : ImplData(n, config.seed, compare), stickiness{config.stickiness} {
+        : ImplData(n, config.seed, compare), stickiness{static_cast<int>(config.stickiness)} {
     }
 
     handle_type get_handle() noexcept {

@@ -27,7 +27,7 @@ struct SwappingLazy : public ImplData {
         explicit Handle(std::uint32_t seed, SwappingLazy &impl) noexcept
             : rng_{std::seed_seq{seed}},
               impl_{impl},
-              permutation_index_{impl_.handle_count * 2},
+              permutation_index_{static_cast<std::size_t>(impl_.handle_count * 2)},
               stick_index_{impl_.permutation[permutation_index_].i.load(std::memory_order_relaxed),
                            impl_.permutation[permutation_index_ + 1].i.load(std::memory_order_relaxed)},
               use_count_{impl_.stickiness, impl_.stickiness} {
@@ -90,7 +90,7 @@ struct SwappingLazy : public ImplData {
             std::array<key_type, 2> key = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
                                            impl_.pq_list[stick_index_[1]].concurrent_top_key()};
             do {
-                std::size_t const select_pq = impl_.compare_top_key(key[0], key[1]) ? 1 : 0;
+                std::size_t const select_pq = impl_.sentinel_aware_comp()(key[0], key[1]) ? 1 : 0;
                 if (ImplData::is_sentinel(key[select_pq])) {
                     // Both pqs are empty
                     use_count_[0] = 0;
@@ -134,7 +134,7 @@ struct SwappingLazy : public ImplData {
     int handle_count = 0;
 
     SwappingLazy(std::size_t n, Config const &config, typename ImplData::key_compare const &compare)
-        : ImplData(n, config.seed, compare), permutation(this->num_pqs), stickiness{config.stickiness} {
+        : ImplData(n, config.seed, compare), permutation(this->num_pqs), stickiness{static_cast<int>(config.stickiness)} {
         for (std::size_t i = 0; i < this->num_pqs; ++i) {
             permutation[i].i = i;
         }
