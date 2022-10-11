@@ -32,7 +32,7 @@
 
 namespace multiqueue {
 
-static constexpr unsigned int DefaultHeapArity = 8;
+static constexpr unsigned int DefaultHeapArity = 16;
 
 template <typename T, typename Compare = std::less<>, unsigned int Arity = DefaultHeapArity,
           typename Container = std::vector<T>>

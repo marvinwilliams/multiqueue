@@ -36,8 +36,8 @@
 
 namespace multiqueue {
 
-static constexpr std::size_t DefaultInsertionBuffersize = 64;
-static constexpr std::size_t DefaultDeletionBuffersize = 64;
+static constexpr std::size_t DefaultInsertionBuffersize = 128;
+static constexpr std::size_t DefaultDeletionBuffersize = 128;
 
 template <typename PriorityQueue, std::size_t InsertionBuffersize = DefaultInsertionBuffersize,
           std::size_t DeletionBuffersize = DefaultDeletionBuffersize>
