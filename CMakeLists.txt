@@ -13,8 +13,9 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party")
 
-option(MULTIQUEUE_ABORT_MISALIGNMENT "Check if data is not aligned as expected" OFF)
+option(MULTIQUEUE_CHECK_ALIGNMENT "Abort if data is not aligned as expected" OFF)
 option(MULTIQUEUE_ELEMENT_DISTRIBUTION "Support functions to examine element distributions" OFF)
+option(MULTIQUEUE_COUNT_STATS "Count various stats" OFF)
 option(MULTIQUEUE_BUILD_EXAMPLES "Build examples" OFF)
 option(MULTIQUEUE_BUILD_TESTS "Build unit tests for multiqueue" ON)
 option(MULTIQUEUE_BUILD_BENCHMARKS "Build micro benchmarks for multiqueue internals" ON)
@@ -47,11 +48,14 @@ target_compile_features(
   cxx_std_17
 )
 
-if(MULTIQUEUE_ABORT_MISALIGNMENT)
-  target_compile_definitions(multiqueue INTERFACE MULTIQUEUE_ABORT_MISALIGNMENT)
+if(MULTIQUEUE_CHECK_ALIGNMENT)
+  target_compile_definitions(multiqueue INTERFACE MULTIQUEUE_CHECK_ALIGNMENT)
 endif()
 if(MULTIQUEUE_ELEMENT_DISTRIBUTION)
   target_compile_definitions(multiqueue INTERFACE MULTIQUEUE_ELEMENT_DISTRIBUTION)
+endif()
+if(MULTIQUEUE_COUNT_STATS)
+  target_compile_definitions(multiqueue INTERFACE MULTIQUEUE_COUNT_STATS)
 endif()
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)

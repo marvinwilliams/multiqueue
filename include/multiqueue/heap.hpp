@@ -14,7 +14,11 @@
 #include <utility>
 #include <vector>
 
-#ifdef NDEBUG_MQ_HEAP
+#ifdef MULTIQUEUE_HEAP_SELF_VERIFY
+#include <cstdlib>
+#endif
+
+#ifdef MULTIQUEUE_NDEBUG_HEAP
 
 #define HEAP_ASSERT(x) \
     do {               \
@@ -135,7 +139,7 @@ class Heap {
         }
     }
 
-#ifndef NDEBUG_MQ_HEAP
+#ifndef MULTIQUEUE_HEAP_SELF_VERIFY
     [[nodiscard]] bool verify() const {
         for (std::size_t i = 1; i < c.size(); ++i) {
             if (comp(c[parent(i)], c[i])) {
@@ -175,26 +179,42 @@ class Heap {
         } else {
             c.pop_back();
         }
-        HEAP_ASSERT(verify());
+#ifdef MULTIQUEUE_HEAP_SELF_VERIFY
+        if (!verify()) {
+            std::abort();
+        }
+#endif
     }
 
     void push(const_reference value) {
         c.push_back(value);
         sift_up(size() - 1);
-        HEAP_ASSERT(verify());
+#ifdef MULTIQUEUE_HEAP_SELF_VERIFY
+        if (!verify()) {
+            std::abort();
+        }
+#endif
     }
 
     void push(value_type &&value) {
         c.push_back(std::move(value));
         sift_up(size() - 1);
-        HEAP_ASSERT(verify());
+#ifdef MULTIQUEUE_HEAP_SELF_VERIFY
+        if (!verify()) {
+            std::abort();
+        }
+#endif
     }
 
     template <typename... Args>
     void emplace(Args &&...args) {
         c.emplace_back(std::forward<Args>(args)...);
         sift_up(size() - 1);
-        HEAP_ASSERT(verify());
+#ifdef MULTIQUEUE_HEAP_SELF_VERIFY
+        if (!verify()) {
+            std::abort();
+        }
+#endif
     }
 
     constexpr void clear() noexcept {

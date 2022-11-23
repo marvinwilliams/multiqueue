@@ -91,6 +91,12 @@ struct MultiQueueImplData {
         }
     };
 
+#ifdef MULTIQUEUE_COUNT_STATS
+    struct Stats {
+        std::size_t failed_locks{0};
+    };
+#endif
+
     pq_type *pq_list = nullptr;
     size_type num_pqs{0};
     pcg32 rng;
@@ -120,6 +126,16 @@ struct MultiQueueImplData {
     static constexpr bool is_sentinel(key_type const &key) noexcept {
         return key == SentinelTraits::sentinel();
     }
+
+#ifdef MULTIQUEUE_COUNT_STATS
+    Stats get_stats() const noexcept {
+        Stats stats;
+        for (std::size_t i = 0; i < num_pqs; ++i) {
+            stats.failed_locks += pq_list[i].failed_locks;
+        }
+        return stats;
+    }
+#endif
 };
 
 template <typename T, typename Compare>
@@ -146,6 +162,9 @@ class MultiQueue {
     using const_reference = typename policy_type::const_reference;
     using pq_type = typename policy_type::pq_type;
 
+#ifdef MULTIQUEUE_COUNT_STATS
+    using stats_type = typename policy_type::Stats;
+#endif
     using handle_type = typename policy_type::handle_type;
     using allocator_type = Allocator;
 
@@ -262,6 +281,12 @@ class MultiQueue {
             policy_.pq_list[index].unsafe_push(std::move(val));
         }
         return distribution;
+    }
+#endif
+
+#ifdef MULTIQUEUE_COUNT_STATS
+    auto get_stats() const noexcept {
+        return policy_.get_stats();
     }
 #endif
 };

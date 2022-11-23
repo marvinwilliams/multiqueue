@@ -41,6 +41,13 @@ class alignas(BuildConfiguration::Pagesize) GuardedPQ {
    private:
     std::atomic_bool lock_ = false;
     std::atomic<key_type> top_key_ = SentinelTraits::sentinel();
+
+#ifdef MULTIQUEUE_COUNT_STATS
+   public:
+    std::atomic_size_t failed_locks{0};
+
+   private:
+#endif
     alignas(BuildConfiguration::L1CacheLinesize) pq_type pq_;
 
    public:
@@ -64,8 +71,17 @@ class alignas(BuildConfiguration::Pagesize) GuardedPQ {
     }
 
     bool try_lock() noexcept {
+#ifdef MULTIQUEUE_COUNT_STATS
+        bool expected = false;
+        if (!lock_.compare_exchange_strong(expected, true, std::memory_order_acquire, std::memory_order_relaxed)) {
+            failed_locks.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+        return true;
+#else
         // Maybe test, but expect unlocked
         return !lock_.exchange(true, std::memory_order_acquire);
+#endif
     }
 
     void unlock() {
@@ -89,7 +105,8 @@ class alignas(BuildConfiguration::Pagesize) GuardedPQ {
     void unsafe_pop() {
         assert(!unsafe_empty());
         pq_.pop();
-        top_key_.store(pq_.empty() ? SentinelTraits::sentinel() : ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
+        top_key_.store(pq_.empty() ? SentinelTraits::sentinel() : ValueTraits::key_of_value(pq_.top()),
+                       std::memory_order_relaxed);
     }
 
     void unsafe_push(const_reference value) {

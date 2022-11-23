@@ -23,7 +23,9 @@ struct Swapping : public ImplData {
         std::size_t permutation_index_;
         std::array<size_type, 2> stick_index_;
         std::array<int, 2> use_count_;
-
+#ifdef MULTIQUEUE_COUNT_STATS
+        std::size_t num_resets_{0};
+#endif
         explicit Handle(std::uint32_t seed, Swapping &impl) noexcept
             : rng_{std::seed_seq{seed}},
               impl_{impl},
@@ -64,6 +66,9 @@ struct Swapping : public ImplData {
                 stick_index_[pq] = current_index;
             } else {
                 swap_assignment(pq);
+#ifdef MULTIQUEUE_COUNT_STATS
+                ++num_resets_;
+#endif
             }
             use_count_[pq] = impl_.stickiness;
         }
@@ -82,6 +87,9 @@ struct Swapping : public ImplData {
                 do {
                     swap_assignment(push_pq);
                 } while (!impl_.pq_list[stick_index_[push_pq]].try_lock());
+#ifdef MULTIQUEUE_COUNT_STATS
+                ++num_resets_;
+#endif
                 use_count_[push_pq] = impl_.stickiness;
             }
             impl_.pq_list[stick_index_[push_pq]].unsafe_push(value);

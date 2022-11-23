@@ -26,6 +26,11 @@ struct BuildConfiguration {
 #endif
     static constexpr int DefaultFactorThreadsPQ = 4;
     static constexpr int DefaultStickiness = 16;
+#ifdef MULTIQUEUE_COUNT_STATS
+    static constexpr bool CountStats = true;
+#else
+    static constexpr bool CountStats = false;
+#endif
 };
 
 }  // namespace multiqueue
