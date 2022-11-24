@@ -66,9 +66,6 @@ struct Swapping : public ImplData {
                 stick_index_[pq] = current_index;
             } else {
                 swap_assignment(pq);
-#ifdef MULTIQUEUE_COUNT_STATS
-                ++num_resets_;
-#endif
             }
             use_count_[pq] = impl_.stickiness;
         }
@@ -87,13 +84,15 @@ struct Swapping : public ImplData {
                 do {
                     swap_assignment(push_pq);
                 } while (!impl_.pq_list[stick_index_[push_pq]].try_lock());
-#ifdef MULTIQUEUE_COUNT_STATS
-                ++num_resets_;
-#endif
                 use_count_[push_pq] = impl_.stickiness;
             }
             impl_.pq_list[stick_index_[push_pq]].unsafe_push(value);
             impl_.pq_list[stick_index_[push_pq]].unlock();
+#ifdef MULTIQUEUE_COUNT_STATS
+            if (use_count_[push_pq] == impl_.stickiness) {
+                ++num_resets_;
+            }
+#endif
             assert(use_count_[push_pq] > 0);
             --use_count_[push_pq];
         }
@@ -123,6 +122,11 @@ struct Swapping : public ImplData {
                         return true;
                     }
                     impl_.pq_list[select_index].unlock();
+#ifdef MULTIQUEUE_COUNT_STATS
+                    if (use_count_[select_pq] == impl_.stickiness) {
+                        ++num_resets_;
+                    }
+#endif
                 }
                 swap_assignment(select_pq);
                 use_count_[select_pq] = impl_.stickiness;
