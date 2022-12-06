@@ -1,11 +1,12 @@
 #pragma once
 
 #include "multiqueue/config.hpp"
+#include "multiqueue/stats.hpp"
 
 #include "pcg_random.hpp"
 
-#include <cstdint>
 #include <array>
+#include <cstdint>
 #include <random>
 
 namespace multiqueue {
@@ -25,6 +26,7 @@ struct NoSticking : ImplData {
         }
 
        public:
+        INJECT_STATS_MEMBER
         Handle(Handle const &) = delete;
         Handle &operator=(Handle const &) = delete;
         Handle &operator=(Handle &&) noexcept = default;
@@ -32,10 +34,12 @@ struct NoSticking : ImplData {
         ~Handle() = default;
 
         void push(typename ImplData::const_reference value) {
-            size_type index;
-            do {
+            size_type index = impl_.random_pq_index(rng_);
+            while (!impl_.pq_list[index].try_lock()) {
+                INCREMENT_STAT(num_locking_failed);
                 index = impl_.random_pq_index(rng_);
-            } while (!impl_.pq_list[index].try_lock());
+            }
+            INCREMENT_STAT(num_resets);
             impl_.pq_list[index].unsafe_push(value);
             impl_.pq_list[index].unlock();
         }
@@ -53,15 +57,18 @@ struct NoSticking : ImplData {
                     return false;
                 }
                 size_type select_index = index[select_pq];
-                if (impl_.pq_list[select_index].try_lock()) {
-                    if (!impl_.pq_list[select_index].unsafe_empty()) {
-                        retval = impl_.pq_list[select_index].unsafe_top();
-                        impl_.pq_list[select_index].unsafe_pop();
-                        impl_.pq_list[select_index].unlock();
-                        return true;
-                    }
-                    impl_.pq_list[select_index].unlock();
+                if (!impl_.pq_list[select_index].try_lock()) {
+                    INCREMENT_STAT(num_locking_failed);
+                    continue;
                 }
+                if (!impl_.pq_list[select_index].unsafe_empty()) {
+                    retval = impl_.pq_list[select_index].unsafe_top();
+                    impl_.pq_list[select_index].unsafe_pop();
+                    impl_.pq_list[select_index].unlock();
+                    INCREMENT_STAT(num_resets);
+                    return true;
+                }
+                impl_.pq_list[select_index].unlock();
             } while (true);
         }
 
