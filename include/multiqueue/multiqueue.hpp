@@ -29,12 +29,6 @@
 #include <string>
 #include <type_traits>
 
-#ifdef MULTIQUEUE_ELEMENT_DISTRIBUTION
-#include <algorithm>
-#include <utility>
-#include <vector>
-#endif
-
 namespace multiqueue {
 
 namespace detail {
@@ -91,12 +85,6 @@ struct MultiQueueImplData {
         }
     };
 
-#ifdef MULTIQUEUE_COUNT_STATS
-    struct Stats {
-        std::size_t failed_locks{0};
-    };
-#endif
-
     pq_type *pq_list = nullptr;
     size_type num_pqs{0};
     pcg32 rng;
@@ -126,16 +114,6 @@ struct MultiQueueImplData {
     static constexpr bool is_sentinel(key_type const &key) noexcept {
         return key == SentinelTraits::sentinel();
     }
-
-#ifdef MULTIQUEUE_COUNT_STATS
-    Stats get_stats() const noexcept {
-        Stats stats;
-        for (std::size_t i = 0; i < num_pqs; ++i) {
-            stats.failed_locks += pq_list[i].failed_locks;
-        }
-        return stats;
-    }
-#endif
 };
 
 template <typename T, typename Compare>
@@ -162,9 +140,6 @@ class MultiQueue {
     using const_reference = typename policy_type::const_reference;
     using pq_type = typename policy_type::pq_type;
 
-#ifdef MULTIQUEUE_COUNT_STATS
-    using stats_type = typename policy_type::Stats;
-#endif
     using handle_type = typename policy_type::handle_type;
     using allocator_type = Allocator;
 
@@ -249,46 +224,6 @@ class MultiQueue {
     value_compare value_comp() const {
         return policy_.value_comp();
     }
-#ifdef MULTIQUEUE_ELEMENT_DISTRIBUTION
-    [[nodiscard]] std::vector<std::size_t> get_distribution() const {
-        std::vector<std::size_t> distribution(num_pqs());
-        std::transform(policy_.pq_list, policy_.pq_list + policy_.num_pqs, distribution.begin(),
-                       [](auto const &pq) { return pq.size(); });
-        return distribution;
-    }
-
-    std::vector<std::size_t> get_top_distribution(std::size_t k) {
-        std::vector<std::pair<value_type, std::size_t>> removed_elements;
-        removed_elements.reserve(k);
-        std::vector<std::size_t> distribution(num_pqs(), 0);
-        for (std::size_t i = 0; i < k; ++i) {
-            auto pq = std::max_element(policy_.pq_list, policy_.pq_list + policy_.num_pqs,
-                                       [&](auto const &lhs, auto const &rhs) {
-                                           return policy_.compare(lhs.concurrent_top_key(), rhs.concurrent_top_key());
-                                       });
-            if (pq->concurrent_top_key() == SentinelTraits::sentinel()) {
-                break;
-            }
-            assert(!pq->unsafe_empty());
-            std::pair<value_type, std::size_t> result;
-            result.first = pq->unsafe_top();
-            pq->unsafe_pop();
-            result.second = static_cast<std::size_t>(std::distance(policy_.pq_list, pq));
-            removed_elements.push_back(result);
-            ++distribution[result.second];
-        }
-        for (auto [val, index] : removed_elements) {
-            policy_.pq_list[index].unsafe_push(std::move(val));
-        }
-        return distribution;
-    }
-#endif
-
-#ifdef MULTIQUEUE_COUNT_STATS
-    auto get_stats() const noexcept {
-        return policy_.get_stats();
-    }
-#endif
 };
 
 }  // namespace multiqueue
