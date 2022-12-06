@@ -76,14 +76,16 @@ class Heap {
         return parent(size());
     }
 
-    // Find the index of the largest child
-    size_type max_child(size_type first, size_type last) const {
-        HEAP_ASSERT(first < last);
+    // Find the index of the node that should become the parent of the others
+    // If no index is better than val, return last
+    size_type new_parent(size_type first, size_type last, value_type val) const {
+        HEAP_ASSERT(first <= last);
         HEAP_ASSERT(last <= size());
-        auto best = first++;
+        auto best = last;
         for (; first != last; ++first) {
-            if (comp(c[best], c[first])) {
+            if (comp(val, c[first])) {
                 best = first;
+                val = c[first];
             }
         }
         return best;
@@ -113,25 +115,26 @@ class Heap {
         size_type const end_full = current_parent();
         while (index < end_full) {
             auto const first = first_child(index);
-            auto const child = max_child(first, first + Arity);
-            if (!comp(value, c[child])) {
+            auto const last = first + Arity;
+            auto const next = new_parent(first, last, value);
+            if (next == last) {
                 c[index] = std::move(value);
                 return;
             }
-            c[index] = std::move(c[child]);
-            index = child;
+            c[index] = std::move(c[next]);
+            index = next;
         }
         if (index == end_full) {
             auto const first = first_child(index);
-            if (first != size()) {
-                auto const child = max_child(first, size());
-                if (!comp(value, c[child])) {
-                    c[index] = std::move(value);
-                    return;
-                }
-                c[index] = std::move(c[child]);
-                index = child;
+            auto const last = size();
+            auto const next = new_parent(first, last, value);
+            if (next == last) {
+                c[index] = std::move(value);
+                return;
             }
+
+            c[index] = std::move(c[next]);
+            index = next;
         }
         c[index] = std::move(value);
     }
