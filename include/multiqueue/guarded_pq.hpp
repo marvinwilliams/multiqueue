@@ -65,8 +65,8 @@ class alignas(BuildConfiguration::Pagesize) GuardedPQ {
     }
 
     bool try_lock() noexcept {
-        // Maybe test, but expect unlocked
-        return !lock_.exchange(true, std::memory_order_acquire);
+        // Test first but expect success
+        return !(lock_.load(std::memory_order_relaxed) || lock_.exchange(true, std::memory_order_acquire));
     }
 
     void unlock() {
