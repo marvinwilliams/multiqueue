@@ -89,8 +89,8 @@ class Heap {
         return best;
     }
 
-    void sift_up(size_type index) {
-        HEAP_ASSERT(index < size());
+    void sift_up() {
+        size_type index = c.size() - 1;
         if (index == root) {
             return;
         }
@@ -107,33 +107,36 @@ class Heap {
         c[index] = std::move(value);
     }
 
-    void sift_down(size_type index) {
-        HEAP_ASSERT(index < size());
-        value_type value = std::move(c[index]);
-        size_type const end_full = current_parent();
+    void sift_down() {
+        size_type const last = c.size() - 1;
+        if (last == 0) {
+            return;
+        }
+        size_type const end_full = parent(last);
+        size_type index = 0;
         while (index < end_full) {
+            auto best = last;
             auto const first = first_child(index);
-            auto const child = max_child(first, first + Arity);
-            if (!comp(value, c[child])) {
-                c[index] = std::move(value);
-                return;
-            }
-            c[index] = std::move(c[child]);
-            index = child;
-        }
-        if (index == end_full) {
-            auto const first = first_child(index);
-            if (first != size()) {
-                auto const child = max_child(first, size());
-                if (!comp(value, c[child])) {
-                    c[index] = std::move(value);
-                    return;
+            for (std::size_t i = 0; i != Arity; ++i) {
+                if (comp(c[best], c[first + i])) {
+                    best = first + i;
                 }
-                c[index] = std::move(c[child]);
-                index = child;
+            }
+            c[index] = std::move(c[best]);
+            index = best;
+        };
+        if (index != last) {
+            auto best = last;
+            for (auto first = first_child(index); first < last; ++first) {
+                if (comp(c[best], c[first])) {
+                    best = first;
+                }
+            }
+            c[index] = std::move(c[best]);
+            if (best != last) {
+                c[best] = std::move(c[last]);
             }
         }
-        c[index] = std::move(value);
     }
 
 #ifndef MULTIQUEUE_HEAP_SELF_VERIFY
@@ -169,13 +172,8 @@ class Heap {
 
     void pop() {
         HEAP_ASSERT(!empty());
-        if (size() > size_type(1)) {
-            c.front() = std::move(c.back());
-            c.pop_back();
-            sift_down(0);
-        } else {
-            c.pop_back();
-        }
+        sift_down();
+        c.pop_back();
 #ifdef MULTIQUEUE_HEAP_SELF_VERIFY
         if (!verify()) {
             std::abort();
@@ -184,8 +182,35 @@ class Heap {
     }
 
     void push(const_reference value) {
-        c.push_back(value);
-        sift_up(size() - 1);
+        if (empty()) {
+            c.push_back(value);
+#ifdef MULTIQUEUE_HEAP_SELF_VERIFY
+            if (!verify()) {
+                std::abort();
+            }
+#endif
+            return;
+        }
+        size_type index = parent(size());
+        if (!comp(c[index], value)) {
+            c.push_back(value);
+#ifdef MULTIQUEUE_HEAP_SELF_VERIFY
+            if (!verify()) {
+                std::abort();
+            }
+#endif
+            return;
+        }
+        c.push_back(std::move(c[index]));
+        while (index != root) {
+            size_type const p = parent(index);
+            if (!comp(c[p], value)) {
+                break;
+            }
+            c[index] = std::move(c[p]);
+            index = p;
+        }
+        c[index] = value;
 #ifdef MULTIQUEUE_HEAP_SELF_VERIFY
         if (!verify()) {
             std::abort();
@@ -194,8 +219,35 @@ class Heap {
     }
 
     void push(value_type &&value) {
-        c.push_back(std::move(value));
-        sift_up(size() - 1);
+        if (empty()) {
+            c.push_back(std::move(value));
+#ifdef MULTIQUEUE_HEAP_SELF_VERIFY
+            if (!verify()) {
+                std::abort();
+            }
+#endif
+            return;
+        }
+        size_type index = parent(size());
+        if (!comp(c[index], value)) {
+            c.push_back(std::move(value));
+#ifdef MULTIQUEUE_HEAP_SELF_VERIFY
+            if (!verify()) {
+                std::abort();
+            }
+#endif
+            return;
+        }
+        c.push_back(std::move(c[index]));
+        while (index != root) {
+            size_type const p = parent(index);
+            if (!comp(c[p], value)) {
+                break;
+            }
+            c[index] = std::move(c[p]);
+            index = p;
+        }
+        c[index] = std::move(value);
 #ifdef MULTIQUEUE_HEAP_SELF_VERIFY
         if (!verify()) {
             std::abort();
