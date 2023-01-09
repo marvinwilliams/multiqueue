@@ -39,9 +39,10 @@ struct NoSticking : ImplData {
                 INCREMENT_STAT(num_locking_failed);
                 index = impl_.random_pq_index(rng_);
             }
-            INCREMENT_STAT(num_resets);
             impl_.pq_list[index].unsafe_push(value);
             impl_.pq_list[index].unlock();
+            INCREMENT_STAT(num_resets);
+            INCREMENT_STAT(use_counts);
         }
 
         bool try_pop(typename ImplData::reference retval) {
@@ -66,6 +67,7 @@ struct NoSticking : ImplData {
                     impl_.pq_list[select_index].unsafe_pop();
                     impl_.pq_list[select_index].unlock();
                     INCREMENT_STAT(num_resets);
+                    INCREMENT_STAT(use_counts);
                     return true;
                 }
                 impl_.pq_list[select_index].unlock();

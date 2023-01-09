@@ -33,8 +33,6 @@ struct Swapping : public ImplData {
                            impl_.permutation[permutation_index_ + 1].i.load(std::memory_order_relaxed)},
               use_count_{impl_.stickiness, impl_.stickiness} {
             ++impl_.handle_count;
-            INCREMENT_STAT(num_resets);
-            INCREMENT_STAT(num_resets);
         }
 
         void swap_assignment(std::size_t pq) noexcept {
@@ -59,17 +57,20 @@ struct Swapping : public ImplData {
         }
 
         void refresh_pq(std::size_t pq) noexcept {
-            if (use_count_[pq] != 0) {
-                auto current_index = impl_.permutation[permutation_index_ + pq].i.load(std::memory_order_relaxed);
-                if (current_index == stick_index_[pq]) {
-                    return;
-                }
-                stick_index_[pq] = current_index;
-            } else {
+            if (use_count_[pq] == 0) {
                 swap_assignment(pq);
+                INCREMENT_STAT(num_resets);
+                INCREMENT_STAT_BY(use_counts, impl_.stickiness);
+                use_count_[pq] = impl_.stickiness;
+                return;
             }
-            use_count_[pq] = impl_.stickiness;
-            INCREMENT_STAT(num_resets);
+            auto current_index = impl_.permutation[permutation_index_ + pq].i.load(std::memory_order_relaxed);
+            if (current_index != stick_index_[pq]) {
+                INCREMENT_STAT(num_resets);
+                INCREMENT_STAT_BY(use_counts, impl_.stickiness - use_count_[pq]);
+                stick_index_[pq] = current_index;
+                use_count_[pq] = impl_.stickiness;
+            }
         }
 
        public:
@@ -84,11 +85,13 @@ struct Swapping : public ImplData {
             std::size_t const push_pq = std::bernoulli_distribution{}(rng_) ? 1 : 0;
             refresh_pq(push_pq);
             if (!impl_.pq_list[stick_index_[push_pq]].try_lock()) {
-                INCREMENT_STAT_IF(use_count_[push_pq] != impl_.stickiness, num_resets);
                 do {
                     INCREMENT_STAT(num_locking_failed);
                     swap_assignment(push_pq);
                 } while (!impl_.pq_list[stick_index_[push_pq]].try_lock());
+                INCREMENT_STAT_IF(use_count_[push_pq] != impl_.stickiness, num_resets);
+                INCREMENT_STAT_BY_IF(use_count_[push_pq] != impl_.stickiness, use_counts,
+                                     impl_.stickiness - use_count_[push_pq]);
                 use_count_[push_pq] = impl_.stickiness;
             }
             impl_.pq_list[stick_index_[push_pq]].unsafe_push(value);
@@ -127,6 +130,7 @@ struct Swapping : public ImplData {
                 }
                 swap_assignment(select_pq);
                 INCREMENT_STAT_IF(use_count_[select_pq] != impl_.stickiness, num_resets);
+                INCREMENT_STAT_BY_IF(use_count_[select_pq] != impl_.stickiness, use_counts, impl_.stickiness - use_count_[select_pq]);
                 use_count_[select_pq] = impl_.stickiness;
                 key[select_pq] = impl_.pq_list[stick_index_[select_pq]].concurrent_top_key();
             } while (true);

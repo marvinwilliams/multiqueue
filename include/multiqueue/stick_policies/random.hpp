@@ -30,8 +30,6 @@ struct Random : public ImplData {
               impl_{impl},
               stick_index_{impl_.random_pq_index(rng_), impl_.random_pq_index(rng_)},
               use_count_{impl_.stickiness, impl_.stickiness} {
-            INCREMENT_STAT(num_resets);
-            INCREMENT_STAT(num_resets);
         }
 
        public:
@@ -47,6 +45,7 @@ struct Random : public ImplData {
             if (use_count_[push_pq] == 0 || !impl_.pq_list[stick_index_[push_pq]].try_lock()) {
                 INCREMENT_STAT_IF(use_count_[push_pq] != 0, num_locking_failed);
                 INCREMENT_STAT(num_resets);
+                INCREMENT_STAT_BY(use_counts, impl_.stickiness - use_count_[push_pq]);
                 stick_index_[push_pq] = impl_.random_pq_index(rng_);
                 while (!impl_.pq_list[stick_index_[push_pq]].try_lock()) {
                     INCREMENT_STAT(num_locking_failed);
@@ -65,11 +64,13 @@ struct Random : public ImplData {
                 stick_index_[0] = impl_.random_pq_index(rng_);
                 use_count_[0] = impl_.stickiness;
                 INCREMENT_STAT(num_resets);
+                INCREMENT_STAT_BY(use_counts, impl_.stickiness);
             }
             if (use_count_[1] == 0) {
                 stick_index_[1] = impl_.random_pq_index(rng_);
                 use_count_[1] = impl_.stickiness;
                 INCREMENT_STAT(num_resets);
+                INCREMENT_STAT_BY(use_counts, impl_.stickiness);
             }
             assert(use_count_[0] > 0 && use_count_[1] > 0);
             std::array<key_type, 2> key = {impl_.pq_list[stick_index_[0]].concurrent_top_key(),
@@ -98,6 +99,8 @@ struct Random : public ImplData {
                 }
                 stick_index_[select_pq] = impl_.random_pq_index(rng_);
                 INCREMENT_STAT_IF(use_count_[select_pq] != impl_.stickiness, num_resets);
+                INCREMENT_STAT_BY_IF(use_count_[select_pq] != impl_.stickiness, use_counts,
+                                     impl_.stickiness - use_count_[select_pq]);
                 use_count_[select_pq] = impl_.stickiness;
                 key[select_pq] = impl_.pq_list[stick_index_[select_pq]].concurrent_top_key();
             } while (true);
