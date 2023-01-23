@@ -71,15 +71,29 @@ class BufferedPQ : private PriorityQueue {
 
     void refill_deletion_buffer() {
         BUFFERED_PQ_ASSERT(del_buf_size_ == 0);
-        // We flush the insertion buffer into the heap, then refill the
-        // deletion buffer from the heap. We could also merge the insertion
-        // buffer and heap into the deletion buffer
-        flush_insertion_buffer();
-        size_type num_refill = std::min(DeletionBuffersize, base_type::size());
+        auto first = std::begin(insertion_buffer_);
+        std::sort(first, first + ins_buf_size_, base_type::comp);
+        size_type num_refill = std::min(DeletionBuffersize, base_type::size() + ins_buf_size_);
         del_buf_size_ = num_refill;
-        while (num_refill != 0) {
-            deletion_buffer_[--num_refill] = std::move(base_type::c.front());
-            base_type::pop();
+        while (num_refill > 0 && ins_buf_size_ != 0 && !base_type::empty()) {
+            if (base_type::comp(insertion_buffer_[ins_buf_size_ - 1], base_type::top())) {
+                deletion_buffer_[--num_refill] = std::move(base_type::c.front());
+                base_type::pop();
+            } else {
+                deletion_buffer_[--num_refill] = std::move(insertion_buffer_[ins_buf_size_ - 1]);
+                --ins_buf_size_;
+            }
+        }
+        if (ins_buf_size_ == 0) {
+            while (num_refill > 0 && !base_type::empty()) {
+                deletion_buffer_[--num_refill] = std::move(base_type::c.front());
+                base_type::pop();
+            }
+        } else {
+            while (num_refill > 0 && ins_buf_size_ != 0) {
+                deletion_buffer_[--num_refill] = std::move(insertion_buffer_[ins_buf_size_ - 1]);
+                --ins_buf_size_;
+            }
         }
     }
 
