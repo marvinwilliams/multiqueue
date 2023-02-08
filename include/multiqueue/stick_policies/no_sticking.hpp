@@ -42,12 +42,11 @@ struct NoSticking {
     }
 
     bool try_pop(reference retval) {
-        std::array<size_type, 2> idx;
         do {
-            idx[0] = random_pq_index();
-            do {
+            std::array<size_type, 2> idx{random_pq_index(), random_pq_index()};
+            while (idx[0] == idx[1]) {
                 idx[1] = random_pq_index();
-            } while (idx[0] == idx[1]);
+            }
             auto result = impl.try_pop_compare(idx, retval);
             if (result == Impl::pop_result::Success) {
                 return true;

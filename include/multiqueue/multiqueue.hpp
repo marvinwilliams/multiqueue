@@ -161,15 +161,13 @@ class MultiQueueImpl {
         std::array<key_type, 2> key = {pq_list_[idx[0]].concurrent_top_key(), pq_list_[idx[1]].concurrent_top_key()};
         if constexpr (SentinelTraits::is_implicit) {
             if (comp_(key[0], key[1])) {
+                assert(key[1] != SentinelTraits::sentinel());
                 select_idx = idx[1];
-                if (key[1] == SentinelTraits::sentinel()) {
-                    return PopResult::Empty;
-                }
             } else {
-                select_idx = idx[0];
                 if (key[0] == SentinelTraits::sentinel()) {
                     return PopResult::Empty;
                 }
+                select_idx = idx[0];
             }
         } else {
             if (key[0] == SentinelTraits::sentinel()) {
