@@ -141,12 +141,6 @@ class MultiQueueImpl {
         return PushResult::Success;
     }
 
-    PushResult try_push_compare(std::array<size_type, 2> const &idx, const_reference value) {
-        auto select_idx =
-            static_cast<std::size_t>(pq_list_[idx[0]].concurrent_size() > pq_list_[idx[1]].concurrent_size());
-        return try_push(idx[select_idx], value);
-    }
-
     PopResult try_pop_from(size_type idx, reference retval) {
         assert(idx < num_pqs_);
         if (!pq_list_[idx].try_lock()) {
@@ -163,12 +157,19 @@ class MultiQueueImpl {
     }
 
     PopResult try_pop_compare(std::array<size_type, 2> const &idx, reference retval) {
-        std::size_t select_idx;
+        size_type select_idx;
         std::array<key_type, 2> key = {pq_list_[idx[0]].concurrent_top_key(), pq_list_[idx[1]].concurrent_top_key()};
         if constexpr (SentinelTraits::is_implicit) {
-            select_idx = static_cast<std::size_t>(comp_(key[0], key[1]));
-            if (key[select_idx] == SentinelTraits::sentinel()) {
-                return PopResult::Empty;
+            if (comp_(key[0], key[1])) {
+                select_idx = idx[1];
+                if (key[1] == SentinelTraits::sentinel()) {
+                    return PopResult::Empty;
+                }
+            } else {
+                select_idx = idx[0];
+                if (key[0] == SentinelTraits::sentinel()) {
+                    return PopResult::Empty;
+                }
             }
         } else {
             if (key[0] == SentinelTraits::sentinel()) {
@@ -184,10 +185,10 @@ class MultiQueueImpl {
                 }
             }
         }
-        auto result = try_pop_from(idx[select_idx], retval);
-        if (result == PopResult::Empty && key[1 - select_idx] != SentinelTraits::sentinel()) {
-            return try_pop_from(idx[select_idx], retval);
-        }
+        auto result = try_pop_from(select_idx, retval);
+        /* if (result == PopResult::Empty && key[1 - select_idx] != SentinelTraits::sentinel()) { */
+        /*     return try_pop_from(idx[select_idx], retval); */
+        /* } */
         return result;
     }
 

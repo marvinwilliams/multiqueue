@@ -35,10 +35,9 @@ struct NoSticking {
     }
 
     void push(const_reference value) {
-        std::array<size_type, 2> idx{random_pq_index(), random_pq_index()};
-        while (impl.try_push_compare(idx, value) == Impl::push_result::Locked) {
-            idx[0] = random_pq_index();
-            idx[1] = random_pq_index();
+        auto idx = random_pq_index();
+        while (impl.try_push(idx, value) == Impl::push_result::Locked) {
+            idx = random_pq_index();
         }
     }
 
