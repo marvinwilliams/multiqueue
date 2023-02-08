@@ -21,7 +21,8 @@ struct NoStickingStrict : ImplData {
         pcg32 rng_;
         NoStickingStrict &impl_;
 
-        explicit Handle(std::uint32_t seed, NoStickingStrict &impl) noexcept : rng_{std::seed_seq{seed}}, impl_{impl} {
+        explicit Handle(unsigned int id, NoStickingStrict &impl) noexcept
+            : rng_{std::seed_seq{impl.seed, id}}, impl_{impl} {
         }
 
        public:
@@ -86,13 +87,13 @@ struct NoStickingStrict : ImplData {
     };
 
     using handle_type = Handle;
-
+ndle(std::uint32_t seed,/Handle(unsigned int id,/g
     NoStickingStrict(std::size_t n, Config const &config, typename ImplData::key_compare const &compare)
         : ImplData(n, config.seed, compare) {
     }
 
-    handle_type get_handle() noexcept {
-        return handle_type{this->rng(), *this};
+    handle_type get_handle(unsigned int id) noexcept {
+        return handle_type{id, *this};
     }
 };
 

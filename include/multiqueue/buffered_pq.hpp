@@ -156,10 +156,6 @@ class BufferedPQ : private PriorityQueue {
         }
         insertion_buffer_[ins_buf_size_++] = std::move(value);
     }
-
-    constexpr value_compare value_comp() const {
-        return base_type::comp;
-    }
 };
 
 }  // namespace multiqueue

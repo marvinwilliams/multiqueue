@@ -26,14 +26,13 @@ struct Swapping : public ImplData {
 #ifdef MULTIQUEUE_COUNT_STATS
         std::size_t num_resets_{0};
 #endif
-        explicit Handle(std::uint32_t seed, Swapping &impl) noexcept
-            : rng_{std::seed_seq{seed}},
+        explicit Handle(unsigned int id, Swapping &impl) noexcept
+            : rng_{std::seed_seq{impl.seed, id}},
               impl_{impl},
               permutation_index_{static_cast<std::size_t>(impl_.handle_count * 2)},
               stick_index_{impl_.permutation[permutation_index_].i.load(std::memory_order_relaxed),
                            impl_.permutation[permutation_index_ + 1].i.load(std::memory_order_relaxed)},
               use_count_{impl_.stickiness, impl_.stickiness} {
-            ++impl_.handle_count;
         }
 
         void swap_assignment(std::size_t pq) noexcept {
@@ -134,9 +133,8 @@ struct Swapping : public ImplData {
             } while (true);
         }
 
-        [[nodiscard]] bool is_empty(size_type pos) noexcept {
-            assert(pos < impl_.num_pqs);
-            return impl_.pq_list[pos].concurrent_empty();
+        bool try_pop_from(size_type idx, typename ImplData::reference retval) {
+            return impl_.try_pop_from(idx, retval);
         }
     };
 
@@ -150,7 +148,6 @@ struct Swapping : public ImplData {
 
     Permutation permutation;
     int stickiness;
-    int handle_count = 0;
 
     Swapping(std::size_t n, Config const &config, typename ImplData::key_compare const &compare)
         : ImplData(n, config.seed, compare),
@@ -161,8 +158,8 @@ struct Swapping : public ImplData {
         }
     }
 
-    handle_type get_handle() noexcept {
-        return handle_type{this->rng(), *this};
+    handle_type get_handle(unsigned int id) noexcept {
+        return handle_type{id, *this};
     }
 };
 

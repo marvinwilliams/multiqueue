@@ -24,14 +24,13 @@ struct SwappingLazy : public ImplData {
         std::array<size_type, 2> stick_index_;
         std::array<int, 2> use_count_;
 
-        explicit Handle(std::uint32_t seed, SwappingLazy &impl) noexcept
-            : rng_{std::seed_seq{seed}},
+        explicit Handle(unsigned int id, SwappingLazy &impl) noexcept
+            : rng_{std::seed_seq{impl.seed, id}},
               impl_{impl},
-              permutation_index_{static_cast<std::size_t>(impl_.handle_count * 2)},
+              permutation_index_{static_cast<std::size_t>(id * 2)},
               stick_index_{impl_.permutation[permutation_index_].i.load(std::memory_order_relaxed),
                            impl_.permutation[permutation_index_ + 1].i.load(std::memory_order_relaxed)},
               use_count_{impl_.stickiness, impl_.stickiness} {
-            ++impl_.handle_count;
         }
 
        private:
@@ -131,17 +130,18 @@ struct SwappingLazy : public ImplData {
 
     Permutation permutation;
     int stickiness;
-    int handle_count = 0;
 
     SwappingLazy(std::size_t n, Config const &config, typename ImplData::key_compare const &compare)
-        : ImplData(n, config.seed, compare), permutation(this->num_pqs), stickiness{static_cast<int>(config.stickiness)} {
+        : ImplData(n, config.seed, compare),
+          permutation(this->num_pqs),
+          stickiness{static_cast<int>(config.stickiness)} {
         for (std::size_t i = 0; i < this->num_pqs; ++i) {
             permutation[i].i = i;
         }
     }
 
-    handle_type get_handle() noexcept {
-        return handle_type{this->rng(), *this};
+    handle_type get_handle(unsigned int id) noexcept {
+        return handle_type{id, *this};
     }
 };
 

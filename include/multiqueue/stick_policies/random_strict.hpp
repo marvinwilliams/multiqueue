@@ -22,8 +22,8 @@ struct RandomStrict : public ImplData {
         std::array<size_type, 2> stick_index_;
         int use_count_;
 
-        explicit Handle(std::uint32_t seed, RandomStrict &impl) noexcept
-            : rng_{std::seed_seq{seed}},
+        explicit Handle(unsigned int id, RandomStrict &impl) noexcept
+            : rng_{std::seed_seq{impl.seed, id}},
               impl_{impl},
               stick_index_{impl_.random_pq_index(rng_), impl_.random_pq_index(rng_)},
               use_count_{2 * impl_.stickiness} {
@@ -119,8 +119,8 @@ struct RandomStrict : public ImplData {
         : ImplData(n, config.seed, compare), stickiness{static_cast<int>(config.stickiness)} {
     }
 
-    handle_type get_handle() noexcept {
-        return handle_type{this->rng(), *this};
+    handle_type get_handle(unsigned int id) noexcept {
+        return handle_type{id, *this};
     }
 };
 

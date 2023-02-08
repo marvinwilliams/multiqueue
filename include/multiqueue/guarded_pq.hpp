@@ -40,6 +40,7 @@ class alignas(BuildConfiguration::Pagesize) GuardedPQ {
 
    private:
     std::atomic_bool lock_ = false;
+    std::atomic<size_type> size_ = 0;
     std::atomic<key_type> top_key_ = SentinelTraits::sentinel();
 
     alignas(BuildConfiguration::L1CacheLinesize) pq_type pq_;
@@ -58,6 +59,10 @@ class alignas(BuildConfiguration::Pagesize) GuardedPQ {
 
     key_type concurrent_top_key() const noexcept {
         return top_key_.load(std::memory_order_relaxed);
+    }
+
+    size_type concurrent_size() const noexcept {
+        return size_.load(std::memory_order_relaxed);
     }
 
     [[nodiscard]] bool concurrent_empty() const noexcept {
@@ -90,13 +95,15 @@ class alignas(BuildConfiguration::Pagesize) GuardedPQ {
     void unsafe_pop() {
         assert(!unsafe_empty());
         pq_.pop();
+        size_.store(pq_.size(), std::memory_order_relaxed);
         top_key_.store(pq_.empty() ? SentinelTraits::sentinel() : ValueTraits::key_of_value(pq_.top()),
                        std::memory_order_relaxed);
     }
 
     void unsafe_push(const_reference value) {
         pq_.push(value);
-        if (ValueTraits::key_of_value(pq_.top()) == ValueTraits::key_of_value(value)) {
+        size_.store(pq_.size(), std::memory_order_relaxed);
+        if (ValueTraits::key_of_value(pq_.top()) != top_key_.load(std::memory_order_relaxed)) {
             top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
         }
     }

@@ -30,16 +30,15 @@ struct GlobalPermutation : public ImplData {
         std::uint64_t current_permutation_;
         int use_count_{};
 
-        explicit Handle(std::uint32_t seed, GlobalPermutation &impl) noexcept
-            : rng_{std::seed_seq{seed}},
+        explicit Handle(unsigned int id, GlobalPermutation &impl) noexcept
+            : rng_{std::seed_seq{impl.seed, id}},
               impl_{impl},
-              permutation_index_{static_cast<std::size_t>(impl_.handle_count * 2)},
+              permutation_index_{static_cast<std::size_t>(id * 2)},
               current_permutation_{impl_.permutation.load(std::memory_order_relaxed)} {
-            ++impl_.handle_count;
         }
 
         void update_permutation() {
-            std::uint64_t new_permutation = rng_() | 1;
+            std::uint64_t new_permutation = rng_() | 1; // lower half must be uneven
             if (impl_.permutation.compare_exchange_strong(current_permutation_, new_permutation,
                                                           std::memory_order_relaxed)) {
                 current_permutation_ = new_permutation;
@@ -135,15 +134,14 @@ struct GlobalPermutation : public ImplData {
 
     alignas(BuildConfiguration::L1CacheLinesize) std::atomic_uint64_t permutation;
     int stickiness;
-    int handle_count = 0;
 
     GlobalPermutation(std::size_t n, Config const &config, typename ImplData::key_compare const &compare)
         : ImplData(n, config.seed, compare), permutation{1}, stickiness{static_cast<int>(config.stickiness)} {
         assert((n & (n - 1)) == 0);
     }
 
-    handle_type get_handle() noexcept {
-        return handle_type{this->rng(), *this};
+    handle_type get_handle(unsigned int id) noexcept {
+        return handle_type{id, *this};
     }
 };
 

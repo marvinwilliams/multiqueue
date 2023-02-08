@@ -4,8 +4,8 @@
 
 #include "pcg_random.hpp"
 
-#include <cstdint>
 #include <array>
+#include <cstdint>
 #include <random>
 
 namespace multiqueue {
@@ -21,7 +21,7 @@ struct NoSticking : ImplData {
         pcg32 rng_;
         NoSticking &impl_;
 
-        explicit Handle(std::uint32_t seed, NoSticking &impl) noexcept : rng_{std::seed_seq{seed}}, impl_{impl} {
+        explicit Handle(unsigned int id, NoSticking &impl) noexcept : rng_{std::seed_seq{impl.seed, id}}, impl_{impl} {
         }
 
        public:
@@ -65,9 +65,8 @@ struct NoSticking : ImplData {
             } while (true);
         }
 
-        [[nodiscard]] bool is_empty(size_type pos) noexcept {
-            assert(pos < impl_.num_pqs);
-            return impl_.pq_list[pos].concurrent_empty();
+        bool try_pop_from(size_type idx, typename ImplData::reference retval) {
+            return impl_.try_pop_from(idx, retval);
         }
     };
 
@@ -77,8 +76,8 @@ struct NoSticking : ImplData {
         : ImplData(n, config.seed, compare) {
     }
 
-    handle_type get_handle() noexcept {
-        return handle_type{this->rng(), *this};
+    handle_type get_handle(unsigned int id) noexcept {
+        return handle_type{id, *this};
     }
 };
 
