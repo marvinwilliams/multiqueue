@@ -38,6 +38,9 @@ namespace multiqueue {
 
 namespace detail {
 
+enum class PushResult { Success, Locked };
+enum class PopResult { Success, Locked, Empty };
+
 template <typename Key, typename T, typename KeyCompare, StickPolicy Policy,
           template <typename, typename> typename PriorityQueue, typename ValueTraits, typename SentinelTraits,
           typename Allocator>
@@ -59,6 +62,8 @@ class MultiQueueImpl {
     using const_reference = value_type const &;
     using size_type = std::size_t;
     using allocator_type = Allocator;
+    using push_result = PushResult;
+    using pop_result = PopResult;
 
     class value_compare {
         friend MultiQueueImpl;
@@ -138,7 +143,7 @@ class MultiQueueImpl {
 
     PushResult try_push_compare(std::array<size_type, 2> const &idx, const_reference value) {
         auto select_idx =
-            static_cast<std::size_t>(comp_(pq_list_[idx[0]].concurrent_size(), pq_list_[idx[1]].concurrent_size()));
+            static_cast<std::size_t>(pq_list_[idx[0]].concurrent_size() > pq_list_[idx[1]].concurrent_size());
         return try_push(idx[select_idx], value);
     }
 
@@ -179,7 +184,11 @@ class MultiQueueImpl {
                 }
             }
         }
-        return try_pop_from(idx[select_idx], retval);
+        auto result = try_pop_from(idx[select_idx], retval);
+        if (result == PopResult::Empty && key[1 - select_idx] != SentinelTraits::sentinel()) {
+            return try_pop_from(idx[select_idx], retval);
+        }
+        return result;
     }
 
     bool try_pop_any(size_type start_idx, reference retval) {
@@ -222,7 +231,6 @@ class MultiQueue {
     using value_type = typename impl_type::value_type;
     using key_compare = typename impl_type::key_compare;
     using value_compare = typename impl_type::value_compare;
-    using policy = typename impl_type::policy;
     using size_type = typename impl_type::size_type;
     using reference = typename impl_type::reference;
     using const_reference = typename impl_type::const_reference;
@@ -230,11 +238,13 @@ class MultiQueue {
     using allocator_type = typename impl_type::allocator_type;
 
     class Handle {
+        friend MultiQueue;
         typename impl_type::policy_impl_type policy_impl_;
 
         explicit Handle(unsigned int id, impl_type &d) noexcept : policy_impl_(id, d) {
         }
 
+       public:
         void push(const_reference value) {
             policy_impl_.push(value);
         }
@@ -243,7 +253,6 @@ class MultiQueue {
             return policy_impl_.try_pop(retval);
         }
 
-       public:
         Handle(Handle const &) = delete;
         Handle &operator=(Handle const &) = delete;
         Handle &operator=(Handle &&) noexcept = default;
@@ -261,7 +270,7 @@ class MultiQueue {
    public:
     explicit MultiQueue(unsigned int num_threads, Config const &cfg, key_compare const &kc = key_compare(),
                         allocator_type const &a = allocator_type())
-        : impl_((assert(num_threads > 0), next_power_of_two(num_threads *cfg.c)), cfg, kc, a) {
+        : impl_(next_power_of_two(num_threads * cfg.c), cfg, kc, a) {
     }
 
     explicit MultiQueue(unsigned int num_threads, key_compare const &kc = key_compare(),

@@ -87,7 +87,7 @@ struct NoStickingStrict : ImplData {
     };
 
     using handle_type = Handle;
-ndle(std::uint32_t seed,/Handle(unsigned int id,/g
+
     NoStickingStrict(std::size_t n, Config const &config, typename ImplData::key_compare const &compare)
         : ImplData(n, config.seed, compare) {
     }

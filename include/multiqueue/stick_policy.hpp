@@ -31,9 +31,6 @@ enum class StickPolicy {
     Permutation
 };
 
-enum class PushResult { Success, Locked };
-enum class PopResult { Success, Locked, Empty };
-
 namespace detail {
 
 template <typename Impl, StickPolicy>
