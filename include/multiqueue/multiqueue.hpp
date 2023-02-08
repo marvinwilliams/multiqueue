@@ -23,6 +23,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <memory>
+#include <mutex>
 #include <ostream>
 #include <random>
 #include <stdexcept>
@@ -140,6 +141,7 @@ class MultiQueue {
     using const_reference = typename policy_type::const_reference;
     using pq_type = typename policy_type::pq_type;
 
+    using Handle = typename policy_type::Handle;
     using handle_type = typename policy_type::handle_type;
     using allocator_type = Allocator;
 
@@ -192,7 +194,9 @@ class MultiQueue {
         pq_alloc_traits::deallocate(alloc_, policy_.pq_list, policy_.num_pqs);
     }
 
-    handle_type get_handle() noexcept {
+    handle_type get_handle(unsigned int) noexcept {
+        static std::mutex m;
+        auto l = std::scoped_lock(m);
         return policy_.get_handle();
     }
 
