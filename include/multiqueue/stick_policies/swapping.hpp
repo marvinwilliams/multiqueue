@@ -64,7 +64,7 @@ struct Swapping {
             target_index = random_pq_index();
             target_assigned = impl.shared_data().permutation[target_index].idx.load(std::memory_order_relaxed);
         } while (target_assigned == impl.num_pqs() ||
-                 !impl.shared_data().permutation[target_index].idx.compare_exchange_strong(
+                 !impl.shared_data().permutation[target_index].idx.compare_exchange_weak(
                      target_assigned, stick_index[pq], std::memory_order_relaxed));
         impl.shared_data().permutation[idx + pq].idx.store(target_assigned, std::memory_order_relaxed);
         stick_index[pq] = target_assigned;
@@ -87,6 +87,7 @@ struct Swapping {
         auto i = std::uniform_int_distribution<size_type>{0, 1}(rng);
         refresh_pq(i);
         if (impl.try_push(stick_index[i], value) == Impl::push_result::Success) {
+            --use_count[i];
             return;
         }
         do {
