@@ -25,7 +25,7 @@
 namespace multiqueue {
 
 template <typename PriorityQueue, typename ValueTraits, typename SentinelTraits>
-class alignas(BuildConfiguration::Pagesize) GuardedPQ {
+class alignas(BuildConfiguration::L1CacheLinesize) GuardedPQ {
    public:
     using key_type = typename ValueTraits::key_type;
     using value_type = typename ValueTraits::value_type;
@@ -39,9 +39,8 @@ class alignas(BuildConfiguration::Pagesize) GuardedPQ {
     using const_reference = typename pq_type::const_reference;
 
    private:
-    std::atomic_bool lock_ = false;
     std::atomic<key_type> top_key_ = SentinelTraits::sentinel();
-
+    std::atomic_bool lock_ = false;
     alignas(BuildConfiguration::L1CacheLinesize) pq_type pq_;
 
    public:
@@ -96,7 +95,7 @@ class alignas(BuildConfiguration::Pagesize) GuardedPQ {
 
     void unsafe_push(const_reference value) {
         pq_.push(value);
-        if (ValueTraits::key_of_value(pq_.top()) == ValueTraits::key_of_value(value)) {
+        if (ValueTraits::key_of_value(pq_.top()) != top_key_.load(std::memory_order_relaxed)) {
             top_key_.store(ValueTraits::key_of_value(pq_.top()), std::memory_order_relaxed);
         }
     }

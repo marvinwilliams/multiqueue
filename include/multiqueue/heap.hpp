@@ -14,11 +14,11 @@
 #include <utility>
 #include <vector>
 
-#ifdef MULTIQUEUE_HEAP_SELF_VERIFY
+#ifdef MQ_HEAP_SELF_VERIFY
 #include <cstdlib>
 #endif
 
-#ifdef MULTIQUEUE_NDEBUG_HEAP
+#ifdef MQ_NDEBUG_HEAP
 
 #define HEAP_ASSERT(x) \
     do {               \
@@ -139,7 +139,7 @@ class Heap {
         c[index] = std::move(value);
     }
 
-#ifndef MULTIQUEUE_HEAP_SELF_VERIFY
+#ifndef MQ_HEAP_SELF_VERIFY
     [[nodiscard]] bool verify() const {
         for (std::size_t i = 1; i < c.size(); ++i) {
             if (comp(c[parent(i)], c[i])) {
@@ -179,7 +179,7 @@ class Heap {
         } else {
             c.pop_back();
         }
-#ifdef MULTIQUEUE_HEAP_SELF_VERIFY
+#ifdef MQ_HEAP_SELF_VERIFY
         if (!verify()) {
             std::abort();
         }
@@ -189,7 +189,7 @@ class Heap {
     void push(const_reference value) {
         c.push_back(value);
         sift_up(size() - 1);
-#ifdef MULTIQUEUE_HEAP_SELF_VERIFY
+#ifdef MQ_HEAP_SELF_VERIFY
         if (!verify()) {
             std::abort();
         }
@@ -199,7 +199,7 @@ class Heap {
     void push(value_type &&value) {
         c.push_back(std::move(value));
         sift_up(size() - 1);
-#ifdef MULTIQUEUE_HEAP_SELF_VERIFY
+#ifdef MQ_HEAP_SELF_VERIFY
         if (!verify()) {
             std::abort();
         }
@@ -210,7 +210,7 @@ class Heap {
     void emplace(Args &&...args) {
         c.emplace_back(std::forward<Args>(args)...);
         sift_up(size() - 1);
-#ifdef MULTIQUEUE_HEAP_SELF_VERIFY
+#ifdef MQ_HEAP_SELF_VERIFY
         if (!verify()) {
             std::abort();
         }

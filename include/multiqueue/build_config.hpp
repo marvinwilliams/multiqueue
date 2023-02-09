@@ -24,9 +24,14 @@ struct BuildConfiguration {
 #else
     static constexpr std::size_t Pagesize = 4096;
 #endif
+#ifdef MQ_NUM_COMPARE
+    static constexpr std::size_t DefaultNumCompare = MQ_NUM_COMPARE;
+#else
+    static constexpr std::size_t DefaultNumCompare = 2;
+#endif
     static constexpr int DefaultFactorThreadsPQ = 4;
     static constexpr int DefaultStickiness = 16;
-#ifdef MULTIQUEUE_COUNT_STATS
+#ifdef MQ_COUNT_STATS
     static constexpr bool CountStats = true;
 #else
     static constexpr bool CountStats = false;

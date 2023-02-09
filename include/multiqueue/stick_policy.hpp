@@ -11,7 +11,6 @@
 
 #include "multiqueue/stick_policies/global_permutation.hpp"
 #include "multiqueue/stick_policies/no_sticking.hpp"
-#include "multiqueue/stick_policies/no_sticking_strict.hpp"
 #include "multiqueue/stick_policies/random.hpp"
 #include "multiqueue/stick_policies/random_strict.hpp"
 #include "multiqueue/stick_policies/swapping.hpp"
@@ -20,56 +19,59 @@
 
 namespace multiqueue {
 
-enum class StickPolicy { NoneStrict, None, RandomStrict, Random, Swapping, SwappingLazy, SwappingBlocking, Permutation };
+enum class StickPolicy {
+    None,
+    RandomStrict,
+    Random,
+    Swapping,
+    SwappingLazy,
+    SwappingBlocking,
+    Permutation
+};
 
 namespace detail {
 
-template <typename ImplData, StickPolicy>
+template <typename Impl, StickPolicy>
 struct StickPolicyImpl;
 
-template <typename ImplData>
-struct StickPolicyImpl<ImplData, StickPolicy::NoneStrict> {
-    using type = NoStickingStrict<ImplData>;
+template <typename Impl>
+struct StickPolicyImpl<Impl, StickPolicy::None> {
+    using type = NoSticking<Impl>;
 };
 
-template <typename ImplData>
-struct StickPolicyImpl<ImplData, StickPolicy::None> {
-    using type = NoSticking<ImplData>;
+template <typename Impl>
+struct StickPolicyImpl<Impl, StickPolicy::RandomStrict> {
+    using type = RandomStrict<Impl>;
 };
 
-template <typename ImplData>
-struct StickPolicyImpl<ImplData, StickPolicy::RandomStrict> {
-    using type = RandomStrict<ImplData>;
+template <typename Impl>
+struct StickPolicyImpl<Impl, StickPolicy::Random> {
+    using type = Random<Impl>;
 };
 
-template <typename ImplData>
-struct StickPolicyImpl<ImplData, StickPolicy::Random> {
-    using type = Random<ImplData>;
+template <typename Impl>
+struct StickPolicyImpl<Impl, StickPolicy::Swapping> {
+    using type = Swapping<Impl>;
 };
 
-template <typename ImplData>
-struct StickPolicyImpl<ImplData, StickPolicy::Swapping> {
-    using type = Swapping<ImplData>;
+template <typename Impl>
+struct StickPolicyImpl<Impl, StickPolicy::SwappingLazy> {
+    using type = SwappingLazy<Impl>;
 };
 
-template <typename ImplData>
-struct StickPolicyImpl<ImplData, StickPolicy::SwappingLazy> {
-    using type = SwappingLazy<ImplData>;
+template <typename Impl>
+struct StickPolicyImpl<Impl, StickPolicy::SwappingBlocking> {
+    using type = SwappingBlocking<Impl>;
 };
 
-template <typename ImplData>
-struct StickPolicyImpl<ImplData, StickPolicy::SwappingBlocking> {
-    using type = SwappingBlocking<ImplData>;
+template <typename Impl>
+struct StickPolicyImpl<Impl, StickPolicy::Permutation> {
+    using type = GlobalPermutation<Impl>;
 };
 
-template <typename ImplData>
-struct StickPolicyImpl<ImplData, StickPolicy::Permutation> {
-    using type = GlobalPermutation<ImplData>;
-};
+template <typename Impl, StickPolicy P>
+using stick_policy_impl_type = typename detail::StickPolicyImpl<Impl, P>::type;
 
 }  // namespace detail
-
-template <typename ImplData, StickPolicy P>
-using stick_policy_impl_type = typename detail::StickPolicyImpl<ImplData, P>::type;
 
 }  // namespace multiqueue
