@@ -18,7 +18,7 @@
 #include <string>
 #include <utility>
 
-#ifdef NDEBUG_MQ_BUFFERED_PQ
+#ifdef MQ_NDEBUG_BUFFERED_PQ
 
 #define BUFFERED_PQ_ASSERT(x) \
     do {                      \
@@ -166,3 +166,5 @@ struct uses_allocator<multiqueue::BufferedPQ<PriorityQueue, InsertionBuffersize,
     : uses_allocator<PriorityQueue, Alloc>::type {};
 
 }  // namespace std
+
+#undef BUFFERED_PQ_ASSERT

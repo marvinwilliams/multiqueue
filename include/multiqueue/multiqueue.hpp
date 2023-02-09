@@ -9,9 +9,6 @@
 **/
 #pragma once
 
-#include "config.hpp"
-#include "guarded_pq.hpp"
-#include "heap.hpp"
 #include "multiqueue/buffered_pq.hpp"
 #include "multiqueue/config.hpp"
 #include "multiqueue/guarded_pq.hpp"
@@ -19,9 +16,6 @@
 #include "multiqueue/sentinel_traits.hpp"
 #include "multiqueue/stick_policy.hpp"
 #include "multiqueue/value_traits.hpp"
-#include "sentinel_traits.hpp"
-#include "stick_policy.hpp"
-#include "value_traits.hpp"
 
 #include <array>
 #include <cassert>
@@ -39,7 +33,7 @@ namespace multiqueue {
 namespace detail {
 
 enum class PushResult { Success, Locked };
-enum class PopResult { Success, Locked, Empty };
+enum class PopResult { Success, Locked, Invalid, Empty };
 
 template <typename Key, typename T, typename KeyCompare, StickPolicy Policy,
           template <typename, typename> typename PriorityQueue, typename ValueTraits, typename SentinelTraits,
@@ -103,7 +97,7 @@ class MultiQueueImpl {
         assert(n > 0);
 
         pq_list_ = pq_alloc_traits::allocate(alloc_, num_pqs_);
-#ifdef MULTIQUEUE_CHECK_ALIGNMENT
+#ifdef MQ_CHECK_ALIGNMENT
         if (reinterpret_cast<std::uintptr_t>(pq_list_) % (BuildConfiguration::Pagesize) != 0) {
             std::abort();
         }
@@ -141,14 +135,24 @@ class MultiQueueImpl {
         return PushResult::Success;
     }
 
-    PopResult try_pop_from(size_type idx, reference retval) {
+    PopResult try_pop_from(size_type idx, reference retval
+#ifdef MQ_COMPARE_STRICT
+                           ,
+                           key_type const &ref_key
+#endif
+    ) {
         assert(idx < num_pqs_);
         if (!pq_list_[idx].try_lock()) {
             return PopResult::Locked;
         }
-        if (pq_list_[idx].unsafe_empty()) {
+        if (pq_list_[idx].unsafe_empty()
+#ifdef MQ_COMPARE_STRICT
+            || ValueTraits::key_of_value(pq_list_[idx].unsafe_top()) != ref_key
+#endif
+        ) {
+            // Top got changed before locking
             pq_list_[idx].unlock();
-            return PopResult::Empty;
+            return PopResult::Invalid;
         }
         retval = pq_list_[idx].unsafe_top();
         pq_list_[idx].unsafe_pop();
@@ -156,47 +160,82 @@ class MultiQueueImpl {
         return PopResult::Success;
     }
 
-    PopResult try_pop_compare(std::array<size_type, 2> const &idx, reference retval) {
-        size_type select_idx;
-        std::array<key_type, 2> key = {pq_list_[idx[0]].concurrent_top_key(), pq_list_[idx[1]].concurrent_top_key()};
-        if constexpr (SentinelTraits::is_implicit) {
-            if (comp_(key[0], key[1])) {
-                assert(key[1] != SentinelTraits::sentinel());
-                select_idx = idx[1];
-            } else {
+    template <std::size_t N>
+    PopResult try_pop_compare(std::array<size_type, N> const &idx, reference retval) {
+        if constexpr (N == 1) {
+            auto key = pq_list_[idx[0]].concurrent_top_key();
+            return key == SentinelTraits::sentinel() ? PopResult::Empty
+                                                     : try_pop_from(idx[0], retval
+#ifdef MQ_COMPARE_STRICT
+                                                                    ,
+                                                                    key
+#endif
+                                                       );
+        } else if constexpr (N == 2) {
+            std::array<key_type, 2> key = {pq_list_[idx[0]].concurrent_top_key(),
+                                           pq_list_[idx[1]].concurrent_top_key()};
+            if constexpr (!SentinelTraits::is_implicit) {
                 if (key[0] == SentinelTraits::sentinel()) {
-                    return PopResult::Empty;
+                    return key[1] == SentinelTraits::sentinel() ? PopResult::Empty
+                                                                : try_pop_from(idx[1], retval
+#ifdef MQ_COMPARE_STRICT
+                                                                               ,
+                                                                               key[1]
+#endif
+                                                                  );
                 }
-                select_idx = idx[0];
+                if (key[1] == SentinelTraits::sentinel()) {
+                    return try_pop_from(idx[0], retval
+#ifdef MQ_COMPARE_STRICT
+                                        ,
+                                        key[0]
+#endif
+                    );
+                }
             }
+            size_type i = comp_(key[0], key[1]) ? 1 : 0;
+            return key[i] == SentinelTraits::sentinel() ? PopResult::Empty
+                                                        : try_pop_from(idx[i], retval
+#ifdef MQ_COMPARE_STRICT
+                                                                       ,
+                                                                       key[i]
+#endif
+                                                          );
         } else {
-            if (key[0] == SentinelTraits::sentinel()) {
-                if (key[1] == SentinelTraits::sentinel()) {
-                    return PopResult::Empty;
-                }
-                select_idx = 1;
-            } else {
-                if (key[1] == SentinelTraits::sentinel()) {
-                    select_idx = 0;
-                } else {
-                    select_idx = static_cast<std::size_t>(comp_(key[0], key[1]));
+            size_type best = 0;
+            auto best_key = pq_list_[idx[best]].concurrent_top_key();
+            for (size_type i = 1; i < N; ++i) {
+                if (auto key = pq_list_[idx[i]].concurrent_top_key(); key != SentinelTraits::sentinel() &&
+                    (best_key == SentinelTraits::sentinel() || comp_(best_key, key))) {
+                    best = i;
+                    best_key = key;
                 }
             }
+            return best_key == SentinelTraits::sentinel() ? PopResult::Empty
+                                                          : try_pop_from(idx[best], retval
+#ifdef MQ_COMPARE_STRICT
+                                                                         ,
+                                                                         best_key
+#endif
+                                                            );
         }
-        auto result = try_pop_from(select_idx, retval);
-        /* if (result == PopResult::Empty && key[1 - select_idx] != SentinelTraits::sentinel()) { */
-        /*     return try_pop_from(idx[select_idx], retval); */
-        /* } */
-        return result;
     }
 
     bool try_pop_any(size_type start_idx, reference retval) {
         assert(start_idx < num_pqs_);
         for (size_type i = 0; i < num_pqs_; ++i) {
             auto idx = (start_idx + i) % num_pqs_;
-            if (pq_list_[idx].concurrent_top_key() != SentinelTraits::sentinel() &&
-                try_pop_from(idx, retval) == PopResult::Success) {
-                return true;
+            auto key = pq_list_[idx].concurrent_top_key();
+            if (key != SentinelTraits::sentinel()) {
+                auto result = try_pop_from(idx, retval
+#ifdef MQ_COMPARE_STRICT
+                                           ,
+                                           key
+#endif
+                );
+                if (result == PopResult::Success) {
+                    return true;
+                }
             }
         }
         return false;
@@ -240,7 +279,7 @@ class MultiQueue {
         friend MultiQueue;
         typename impl_type::policy_impl_type policy_impl_;
 
-        explicit Handle(unsigned int id, impl_type &d) noexcept : policy_impl_(id, d) {
+        explicit Handle(int id, impl_type &d) noexcept : policy_impl_(id, d) {
         }
 
        public:
@@ -263,21 +302,25 @@ class MultiQueue {
     impl_type impl_;
 
     static constexpr unsigned int next_power_of_two(unsigned int n) {
-        return 1U << static_cast<unsigned int>(std::ceil(std::log2(n)));
+        unsigned int r = 1;
+        while (r < n) {
+            r <<= 1;
+        }
+        return r;
     }
 
    public:
-    explicit MultiQueue(unsigned int num_threads, Config const &cfg, key_compare const &kc = key_compare(),
+    explicit MultiQueue(int num_threads, Config const &cfg, key_compare const &kc = key_compare(),
                         allocator_type const &a = allocator_type())
-        : impl_(next_power_of_two(num_threads * cfg.c), cfg, kc, a) {
+        : impl_(next_power_of_two(static_cast<unsigned int>(num_threads * cfg.c)), cfg, kc, a) {
     }
 
-    explicit MultiQueue(unsigned int num_threads, key_compare const &kc = key_compare(),
+    explicit MultiQueue(int num_threads, key_compare const &kc = key_compare(),
                         allocator_type const &a = allocator_type())
         : MultiQueue(num_threads, Config{}, kc, a) {
     }
 
-    Handle get_handle(unsigned int id) noexcept {
+    Handle get_handle(int id) noexcept {
         return Handle(id, impl_);
     }
 
