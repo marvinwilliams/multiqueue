@@ -42,6 +42,8 @@ static constexpr std::size_t DefaultDeletionBuffersize = 128;
 template <typename PriorityQueue, std::size_t InsertionBuffersize = DefaultInsertionBuffersize,
           std::size_t DeletionBuffersize = DefaultDeletionBuffersize>
 class BufferedPQ : private PriorityQueue {
+    static_assert(InsertionBuffersize > 0 && DeletionBuffersize > 0, "Both bufferst must have nonzero capacity");
+
    private:
     static constexpr std::size_t ReservePerPQ = std::size_t{1} << 20;
     using base_type = PriorityQueue;
@@ -155,6 +157,56 @@ class BufferedPQ : private PriorityQueue {
             flush_insertion_buffer();
         }
         insertion_buffer_[ins_buf_size_++] = std::move(value);
+    }
+};
+
+template <typename PriorityQueue>
+class BufferedPQ<PriorityQueue, 0, 0> : private PriorityQueue {
+   private:
+    static constexpr std::size_t ReservePerPQ = std::size_t{1} << 20;
+    using base_type = PriorityQueue;
+
+   public:
+    using value_type = typename base_type::value_type;
+    using value_compare = typename base_type::value_compare;
+    using reference = typename base_type::reference;
+    using const_reference = typename base_type::const_reference;
+    using size_type = std::size_t;
+
+    explicit BufferedPQ(value_compare compare = value_compare()) : base_type(compare) {
+        base_type::c.reserve(ReservePerPQ);
+    }
+
+    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
+    explicit BufferedPQ(value_compare const& compare, Alloc const& alloc) : base_type(compare, alloc) {
+        base_type::c.reserve(ReservePerPQ);
+    }
+
+    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
+    explicit BufferedPQ(Alloc const& alloc) : base_type(alloc) {
+        base_type::c.reserve(ReservePerPQ);
+    }
+
+    [[nodiscard]] constexpr bool empty() const {
+        return base_type::empty();
+    }
+
+    [[nodiscard]] constexpr size_type size() const noexcept {
+        return base_type::size();
+    }
+
+    constexpr const_reference top() const {
+        BUFFERED_PQ_ASSERT(!empty());
+        return base_type::top();
+    }
+
+    void pop() {
+        BUFFERED_PQ_ASSERT(!empty());
+        base_type::pop();
+    }
+
+    void push(value_type value) {
+        base_type::push(std::move(value));
     }
 };
 

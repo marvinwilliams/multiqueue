@@ -70,29 +70,22 @@ class Heap {
         return index * Arity + size_type(1);
     }
 
-    // returns the index of the first node without all children
-    constexpr size_type current_parent() const {
-        HEAP_ASSERT(!empty());
-        return parent(size());
-    }
-
     // Find the index of the node that should become the parent of the others
-    // If no index is better than val, return last
-    size_type new_parent(size_type first, size_type last, value_type val) const {
+    // If no index is better than the last element, return last
+    size_type new_parent(size_type first, size_type last) const {
         HEAP_ASSERT(first <= last);
         HEAP_ASSERT(last <= size());
-        auto best = last;
+        auto best = size() - 1;
         for (; first != last; ++first) {
-            if (comp(val, c[first])) {
+            if (comp(c[best], c[first])) {
                 best = first;
-                val = c[first];
             }
         }
         return best;
     }
 
-    void sift_up(size_type index) {
-        HEAP_ASSERT(index < size());
+    void sift_up() {
+        size_type index = size() - 1;
         if (index == root) {
             return;
         }
@@ -109,16 +102,19 @@ class Heap {
         c[index] = std::move(value);
     }
 
-    void sift_down(size_type index) {
-        HEAP_ASSERT(index < size());
-        value_type value = std::move(c[index]);
-        size_type const end_full = current_parent();
+    void sift_down() {
+        HEAP_ASSERT(!empty());
+        if (size() == 1) {
+            return;
+        }
+        size_type const end_full = parent(size() - 1);
+        size_type index = 0;
         while (index < end_full) {
             auto const first = first_child(index);
             auto const last = first + Arity;
-            auto const next = new_parent(first, last, value);
-            if (next == last) {
-                c[index] = std::move(value);
+            auto const next = new_parent(first, last);
+            if (next == size() - 1) {
+                c[index] = std::move(c[size() - 1]);
                 return;
             }
             c[index] = std::move(c[next]);
@@ -126,17 +122,16 @@ class Heap {
         }
         if (index == end_full) {
             auto const first = first_child(index);
-            auto const last = size();
-            auto const next = new_parent(first, last, value);
+            auto const last = size() - 1;
+            auto const next = new_parent(first, last);
             if (next == last) {
-                c[index] = std::move(value);
+                c[index] = std::move(c[size() - 1]);
                 return;
             }
-
             c[index] = std::move(c[next]);
             index = next;
         }
-        c[index] = std::move(value);
+        c[index] = std::move(c[size() - 1]);
     }
 
 #ifndef MQ_HEAP_SELF_VERIFY
@@ -172,13 +167,8 @@ class Heap {
 
     void pop() {
         HEAP_ASSERT(!empty());
-        if (size() > size_type(1)) {
-            c.front() = std::move(c.back());
-            c.pop_back();
-            sift_down(0);
-        } else {
-            c.pop_back();
-        }
+        sift_down();
+        c.pop_back();
 #ifdef MQ_HEAP_SELF_VERIFY
         if (!verify()) {
             std::abort();
@@ -188,7 +178,7 @@ class Heap {
 
     void push(const_reference value) {
         c.push_back(value);
-        sift_up(size() - 1);
+        sift_up();
 #ifdef MQ_HEAP_SELF_VERIFY
         if (!verify()) {
             std::abort();
@@ -198,7 +188,7 @@ class Heap {
 
     void push(value_type &&value) {
         c.push_back(std::move(value));
-        sift_up(size() - 1);
+        sift_up();
 #ifdef MQ_HEAP_SELF_VERIFY
         if (!verify()) {
             std::abort();
@@ -209,7 +199,7 @@ class Heap {
     template <typename... Args>
     void emplace(Args &&...args) {
         c.emplace_back(std::forward<Args>(args)...);
-        sift_up(size() - 1);
+        sift_up();
 #ifdef MQ_HEAP_SELF_VERIFY
         if (!verify()) {
             std::abort();
