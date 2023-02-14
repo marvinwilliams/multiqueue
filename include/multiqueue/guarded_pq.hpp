@@ -44,15 +44,15 @@ class alignas(BuildConfiguration::L1CacheLinesize) GuardedPQ {
     alignas(BuildConfiguration::L1CacheLinesize) pq_type pq_;
 
    public:
-    explicit GuardedPQ(value_compare const& comp = value_compare()) : pq_(comp) {
+    explicit GuardedPQ(std::size_t cap, value_compare const& comp = value_compare()) : pq_(cap, comp) {
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<pq_type, Alloc>>>
-    explicit GuardedPQ(value_compare const& comp, Alloc const& alloc) : pq_(comp, alloc) {
+    explicit GuardedPQ(std::size_t cap, value_compare const& comp, Alloc const& alloc) : pq_(comp, alloc) {
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<pq_type, Alloc>>>
-    explicit GuardedPQ(Alloc const& alloc) : pq_(alloc) {
+    explicit GuardedPQ(std::size_t cap, Alloc const& alloc) : pq_(cap, alloc) {
     }
 
     key_type concurrent_top_key() const noexcept {

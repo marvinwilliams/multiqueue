@@ -93,13 +93,15 @@ class MultiQueueImpl {
     MultiQueueImpl &operator=(MultiQueueImpl const &) = delete;
     MultiQueueImpl &operator=(MultiQueueImpl &&) = delete;
 
-    explicit MultiQueueImpl(size_type n, Config const &c, key_compare const &kc, allocator_type const &a)
+    explicit MultiQueueImpl(size_type n, std::size_t cap, Config const &c, key_compare const &kc,
+                            allocator_type const &a)
         : num_pqs_{n}, config_{c}, comp_{kc}, alloc_(a), shared_data_(n) {
         assert(n > 0);
 
+        auto cap_per_queue = (2 * cap) / n;
         pq_list_ = pq_alloc_traits::allocate(alloc_, num_pqs_);
         for (pq_type *pq = pq_list_; pq != pq_list_ + num_pqs_; ++pq) {
-            pq_alloc_traits::construct(alloc_, pq, value_comp());
+            pq_alloc_traits::construct(alloc_, pq, cap_per_queue, value_comp());
         }
     }
 
@@ -306,14 +308,14 @@ class MultiQueue {
     }
 
    public:
-    explicit MultiQueue(int num_threads, Config const &cfg, key_compare const &kc = key_compare(),
+    explicit MultiQueue(int num_threads, Config const &cfg = Config{}, key_compare const &kc = key_compare(),
                         allocator_type const &a = allocator_type())
-        : impl_(next_power_of_two(static_cast<unsigned int>(num_threads * cfg.c)), cfg, kc, a) {
+        : impl_(next_power_of_two(static_cast<unsigned int>(num_threads * cfg.c)), 0U, cfg, kc, a) {
     }
 
-    explicit MultiQueue(int num_threads, key_compare const &kc = key_compare(),
-                        allocator_type const &a = allocator_type())
-        : MultiQueue(num_threads, Config{}, kc, a) {
+    explicit MultiQueue(int num_threads, std::size_t cap, Config const &cfg = Config{},
+                        key_compare const &kc = key_compare(), allocator_type const &a = allocator_type())
+        : impl_(next_power_of_two(static_cast<unsigned int>(num_threads * cfg.c)), cap, cfg, kc, a) {
     }
 
     Handle get_handle(int id) noexcept {
