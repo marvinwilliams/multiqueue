@@ -190,17 +190,34 @@ class BufferedPQ<PriorityQueue, 0, 0> : private PriorityQueue {
     using size_type = std::size_t;
 
     explicit BufferedPQ(value_compare compare = value_compare()) : base_type(compare) {
-        base_type::c.reserve(ReservePerPQ);
+    }
+
+    explicit BufferedPQ(std::size_t cap, value_compare compare = value_compare()) : base_type(compare) {
+        if (cap > 0) {
+            base_type::c.reserve(cap);
+        }
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
     explicit BufferedPQ(value_compare const& compare, Alloc const& alloc) : base_type(compare, alloc) {
-        base_type::c.reserve(ReservePerPQ);
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
     explicit BufferedPQ(Alloc const& alloc) : base_type(alloc) {
-        base_type::c.reserve(ReservePerPQ);
+    }
+
+    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
+    explicit BufferedPQ(std::size_t cap, value_compare const& compare, Alloc const& alloc) : base_type(compare, alloc) {
+        if (cap > 0) {
+            base_type::c.reserve(cap);
+        }
+    }
+
+    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
+    explicit BufferedPQ(std::size_t cap, Alloc const& alloc) : base_type(alloc) {
+        if (cap > 0) {
+            base_type::c.reserve(cap);
+        }
     }
 
     [[nodiscard]] constexpr bool empty() const {
