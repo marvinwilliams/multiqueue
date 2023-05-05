@@ -15,133 +15,98 @@ namespace multiqueue {
 // number from [0,p-1] for i in [0,p-1] For this to be a permutation, a and b needs to be coprime. Each handle
 // has a unique id, so that i in [3*id,3*id+2] identify the queues associated with this handle. The stickiness
 // counter is global and can occasionally
-template <typename ImplData>
-struct GlobalPermutation : public ImplData {
-    using key_type = typename ImplData::key_type;
-    using size_type = typename ImplData::size_type;
+template <typename Impl>
+struct GlobalPermutation {
+    using key_type = typename Impl::key_type;
+    using size_type = typename Impl::size_type;
+    using reference = typename Impl::reference;
+    using const_reference = typename Impl::const_reference;
 
-    class Handle {
-        friend GlobalPermutation;
+    static constexpr int Shift = 32;
+    static constexpr std::uint64_t Mask = (1ULL << Shift) - 1;
 
-        pcg32 rng_;
-        GlobalPermutation &impl_;
+    struct SharedData {
+        alignas(BuildConfiguration::L1CacheLinesize) std::atomic_uint64_t permutation{1};
 
-        std::size_t permutation_index_;
-        std::uint64_t current_permutation_;
-        int use_count_{};
-
-        explicit Handle(unsigned int id, GlobalPermutation &impl) noexcept
-            : rng_{std::seed_seq{impl.seed, id}},
-              impl_{impl},
-              permutation_index_{static_cast<std::size_t>(id * 2)},
-              current_permutation_{impl_.permutation.load(std::memory_order_relaxed)} {
-        }
-
-        void update_permutation() {
-            std::uint64_t new_permutation = rng_() | 1; // lower half must be uneven
-            if (impl_.permutation.compare_exchange_strong(current_permutation_, new_permutation,
-                                                          std::memory_order_relaxed)) {
-                current_permutation_ = new_permutation;
-            }
-        }
-
-        size_type get_index(std::size_t pq) const noexcept {
-            static constexpr int shift_width = 32;
-            size_type a = current_permutation_ & Mask;
-            size_type b = current_permutation_ >> shift_width;
-            assert((a & 1) == 1);
-            return ((permutation_index_ + pq) * a + b) & (impl_.num_pqs - 1);
-        }
-
-        void refresh_permutation() {
-            if (use_count_ >= 2 * impl_.stickiness) {
-                auto p = impl_.permutation.load(std::memory_order_relaxed);
-                if (p == current_permutation_) {
-                    return;
-                }
-                current_permutation_ = p;
-            } else {
-                update_permutation();
-            }
-            use_count_ = 0;
-        }
-
-       public:
-        void push(typename ImplData::const_reference value) noexcept {
-            refresh_permutation();
-            bool push_pq = std::bernoulli_distribution{}(rng_);
-            size_type pq_index = get_index(push_pq);
-            while (!impl_.pq_list[pq_index].try_lock()) {
-                auto p = impl_.permutation.load(std::memory_order_relaxed);
-                if (p != current_permutation_) {
-                    current_permutation_ = p;
-                    use_count_ = 0;
-                }
-            }
-            impl_.pq_list[pq_index].unsafe_push(value);
-            impl_.pq_list[pq_index].unlock();
-            ++use_count_;
-        }
-
-        bool try_pop(typename ImplData::reference retval) noexcept {
-            refresh_permutation();
-            assert(use_count_ <= 2 * impl_.stickiness);
-            std::array<size_type, 2> pq_index = {get_index(0), get_index(1)};
-            std::array<key_type, 2> key = {impl_.pq_list[pq_index[0]].concurrent_top_key(),
-                                           impl_.pq_list[pq_index[1]].concurrent_top_key()};
-            do {
-                std::size_t const select_pq = impl_.sentinel_aware_comp()(key[0], key[1]) ? 1 : 0;
-                if (ImplData::is_sentinel(key[select_pq])) {
-                    use_count_ = 2 * impl_.stickiness;
-                    return false;
-                }
-                size_type select_index = pq_index[select_pq];
-                while (true) {
-                    if (impl_.pq_list[select_index].try_lock()) {
-                        if (!impl_.pq_list[select_index].unsafe_empty()) {
-                            retval = impl_.pq_list[select_index].unsafe_top();
-                            impl_.pq_list[select_index].unsafe_pop();
-                            impl_.pq_list[select_index].unlock();
-                            return true;
-                        }
-                        impl_.pq_list[select_index].unlock();
-                        key[select_index] = impl_.pq_list[pq_index[select_index]].concurrent_top_key();
-                        break;
-                    }
-                    auto p = impl_.permutation.load(std::memory_order_relaxed);
-                    if (p != current_permutation_) {
-                        current_permutation_ = p;
-                        use_count_ = 0;
-                        pq_index[0] = get_index(0);
-                        pq_index[1] = get_index(1);
-                        key[0] = impl_.pq_list[pq_index[0]].concurrent_top_key();
-                        key[1] = impl_.pq_list[pq_index[1]].concurrent_top_key();
-                        break;
-                    }
-                }
-            } while (true);
-        }
-
-        [[nodiscard]] bool is_empty(size_type pos) noexcept {
-            assert(pos < impl_.num_pqs);
-            return impl_.pq_list[pos].concurrent_empty();
+        explicit SharedData(size_type /* unused */) {
         }
     };
 
-    using handle_type = Handle;
+    Impl &impl;
+    pcg32 rng{};
+    size_type idx;
+    std::array<size_type, 2> stick_index{};
+    std::uint64_t permutation{0};
+    int use_count{};
+    std::uint8_t push_pq{};
 
-    static constexpr std::uint64_t Mask = 0xffffffff;
-
-    alignas(BuildConfiguration::L1CacheLinesize) std::atomic_uint64_t permutation;
-    int stickiness;
-
-    GlobalPermutation(std::size_t n, Config const &config, typename ImplData::key_compare const &compare)
-        : ImplData(n, config.seed, compare), permutation{1}, stickiness{static_cast<int>(config.stickiness)} {
-        assert((n & (n - 1)) == 0);
+    explicit GlobalPermutation(int id, Impl &i) noexcept : impl{i}, idx{static_cast<size_type>(id * 2)} {
+        auto seq = std::seed_seq{impl.config().seed, id};
+        rng.seed(seq);
     }
 
-    handle_type get_handle(unsigned int id) noexcept {
-        return handle_type{id, *this};
+    size_type random_pq_index() noexcept {
+        return std::uniform_int_distribution<size_type>(0, impl.num_pqs() - 1)(rng);
+    }
+
+    void update_permutation() noexcept {
+        auto current_permutation = impl.shared_data().permutation.load(std::memory_order_relaxed);
+        if (current_permutation == permutation) {
+            return;
+        }
+        permutation = current_permutation;
+        use_count = 2 * impl.config().stickiness;
+        set_index();
+    }
+
+    void set_index() noexcept {
+        size_type a = permutation & Mask;
+        size_type b = (permutation >> Shift) & Mask;
+        assert((a & 1) == 1);
+        stick_index[0] = (idx * a + b) & (impl.num_pqs() - 1);
+        stick_index[1] = ((idx + 1) * a + b) & (impl.num_pqs() - 1);
+    }
+
+    void refresh_permutation() {
+        update_permutation();
+        if (use_count <= 0) {
+            std::uint64_t new_permutation{rng() | 1};  // lower half must be uneven
+            if (impl.shared_data().permutation.compare_exchange_strong(permutation, new_permutation, std::memory_order_relaxed)) {
+                permutation = new_permutation;
+            }
+            use_count = 2 * impl.config().stickiness;
+            set_index();
+        }
+    }
+
+   public:
+    void push(const_reference value) {
+        refresh_permutation();
+        push_pq = 1 - push_pq;
+        --use_count;
+        if (impl.try_push(stick_index[push_pq], value) == Impl::push_result::Success) {
+            return;
+        }
+        while (impl.try_push(random_pq_index(), value) != Impl::push_result::Success) {
+        }
+    }
+
+    bool try_pop(reference retval) {
+        refresh_permutation();
+        use_count -= 2;
+        auto i = stick_index;
+        do {
+            auto result = impl.try_pop_compare(i, retval);
+            if (result == Impl::pop_result::Success) {
+                return true;
+            }
+            if (result == Impl::pop_result::Empty) {
+                break;
+            }
+            i[0] = random_pq_index();
+            i[1] = random_pq_index();
+        } while (true);
+        return impl.try_pop_any(random_pq_index(), retval);
     }
 };
 

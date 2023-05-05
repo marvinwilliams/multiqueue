@@ -32,7 +32,7 @@ struct NoSticking {
         rng.seed(seq);
     }
 
-    inline size_type random_pq_index() noexcept {
+    size_type random_pq_index() noexcept {
         return std::uniform_int_distribution<size_type>(0, impl.num_pqs() - 1)(rng);
     }
 

@@ -27,7 +27,7 @@ struct Swapping {
 
         Permutation permutation;
 
-        explicit SharedData(std::size_t n) : permutation(n) {
+        explicit SharedData(size_type n) : permutation(n) {
             for (std::size_t i = 0; i < n; ++i) {
                 permutation[i].idx = i;
             }
@@ -36,20 +36,21 @@ struct Swapping {
 
     Impl &impl;
     pcg32 rng{};
-    std::size_t idx;
+    size_type idx;
     std::array<size_type, 2> stick_index{};
     std::array<int, 2> use_count{};
+    std::uint8_t push_pq{};
 
-    explicit Swapping(int id, Impl &i) noexcept : impl{i}, idx{static_cast<std::size_t>(id * 2)} {
+    explicit Swapping(int id, Impl &i) noexcept : impl{i}, idx{static_cast<size_type>(id * 2)} {
         auto seq = std::seed_seq{impl.config().seed, id};
         rng.seed(seq);
     }
 
-    inline size_type random_pq_index() noexcept {
+    size_type random_pq_index() noexcept {
         return std::uniform_int_distribution<size_type>(0, impl.num_pqs() - 1)(rng);
     }
 
-    void swap_assignment(std::size_t pq) noexcept {
+    void swap_assignment(std::uint8_t pq) noexcept {
         assert(pq <= 1);
         if (!impl.shared_data().permutation[idx + pq].idx.compare_exchange_strong(stick_index[pq], impl.num_pqs(),
                                                                                   std::memory_order_relaxed)) {
@@ -70,7 +71,7 @@ struct Swapping {
         stick_index[pq] = target_assigned;
     }
 
-    void refresh_pq(std::size_t pq) noexcept {
+    void refresh_pq(std::uint8_t pq) noexcept {
         if (use_count[pq] == 0) {
             swap_assignment(pq);
             use_count[pq] = impl.config().stickiness;
@@ -84,21 +85,21 @@ struct Swapping {
     }
 
     void push(const_reference value) {
-        auto i = std::uniform_int_distribution<size_type>{0, 1}(rng);
-        refresh_pq(i);
-        if (impl.try_push(stick_index[i], value) == Impl::push_result::Success) {
-            --use_count[i];
+        push_pq = 1 - push_pq;
+        refresh_pq(push_pq);
+        if (impl.try_push(stick_index[push_pq], value) == Impl::push_result::Success) {
+            --use_count[push_pq];
             return;
         }
         do {
-            swap_assignment(i);
-        } while (impl.try_push(stick_index[i], value) == Impl::push_result::Locked);
-        use_count[i] = impl.config().stickiness - 1;
+            swap_assignment(push_pq);
+        } while (impl.try_push(stick_index[push_pq], value) != Impl::push_result::Success);
+        use_count[push_pq] = impl.config().stickiness - 1;
     }
 
     bool try_pop(reference retval) {
-        refresh_pq(0);
-        refresh_pq(1);
+        refresh_pq(std::uint8_t{0});
+        refresh_pq(std::uint8_t{1});
         do {
             auto result = impl.try_pop_compare(stick_index, retval);
             if (result == Impl::pop_result::Success) {
@@ -109,8 +110,8 @@ struct Swapping {
             if (result == Impl::pop_result::Empty) {
                 break;
             }
-            swap_assignment(0);
-            swap_assignment(1);
+            swap_assignment(std::uint8_t{0});
+            swap_assignment(std::uint8_t{1});
             use_count[0] = impl.config().stickiness;
             use_count[1] = impl.config().stickiness;
         } while (true);

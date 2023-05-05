@@ -13,8 +13,6 @@
 #include "multiqueue/stick_policies/no_sticking.hpp"
 #include "multiqueue/stick_policies/random.hpp"
 #include "multiqueue/stick_policies/swapping.hpp"
-#include "multiqueue/stick_policies/swapping_blocking.hpp"
-#include "multiqueue/stick_policies/swapping_lazy.hpp"
 
 namespace multiqueue {
 
@@ -45,16 +43,6 @@ struct StickPolicyImpl<Impl, StickPolicy::Random> {
 template <typename Impl>
 struct StickPolicyImpl<Impl, StickPolicy::Swapping> {
     using type = Swapping<Impl>;
-};
-
-template <typename Impl>
-struct StickPolicyImpl<Impl, StickPolicy::SwappingLazy> {
-    using type = SwappingLazy<Impl>;
-};
-
-template <typename Impl>
-struct StickPolicyImpl<Impl, StickPolicy::SwappingBlocking> {
-    using type = SwappingBlocking<Impl>;
 };
 
 template <typename Impl>

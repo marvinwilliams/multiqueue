@@ -26,28 +26,29 @@ struct Random {
     pcg32 rng{};
     std::array<size_type, 2> stick_index{};
     std::array<int, 2> use_count{};
+    std::uint8_t push_pq{};
 
     explicit Random(int id, Impl &i) noexcept : impl{i} {
         auto seq = std::seed_seq{impl.config().seed, id};
         rng.seed(seq);
     }
 
-    inline size_type random_pq_index() noexcept {
+    size_type random_pq_index() noexcept {
         return std::uniform_int_distribution<size_type>(0, impl.num_pqs() - 1)(rng);
     }
 
     void push(const_reference value) {
-        auto i = std::uniform_int_distribution<size_type>{0, 1}(rng);
-        if (use_count[i] != 0) {
-            if (impl.try_push(stick_index[i], value) == Impl::push_result::Success) {
-                --use_count[i];
+        push_pq = 1 - push_pq;
+        if (use_count[push_pq] != 0) {
+            if (impl.try_push(stick_index[push_pq], value) == Impl::push_result::Success) {
+                --use_count[push_pq];
                 return;
             }
         }
         do {
-            stick_index[i] = random_pq_index();
-        } while (impl.try_push(stick_index[i], value) == Impl::push_result::Locked);
-        use_count[i] = impl.config().stickiness - 1;
+            stick_index[push_pq] = random_pq_index();
+        } while (impl.try_push(stick_index[push_pq], value) != Impl::push_result::Success);
+        use_count[push_pq] = impl.config().stickiness - 1;
     }
 
     bool try_pop(reference retval) {

@@ -45,7 +45,7 @@ class alignas(BuildConfiguration::L1CacheLinesize) GuardedPQ {
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<pq_type, Alloc>>>
-    explicit GuardedPQ(std::size_t cap, value_compare const& comp, Alloc const& alloc) : pq_(comp, alloc) {
+    explicit GuardedPQ(std::size_t cap, value_compare const& comp, Alloc const& alloc) : pq_(cap, comp, alloc) {
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<pq_type, Alloc>>>
