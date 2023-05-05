@@ -12,7 +12,6 @@
 #include "multiqueue/stick_policies/global_permutation.hpp"
 #include "multiqueue/stick_policies/no_sticking.hpp"
 #include "multiqueue/stick_policies/random.hpp"
-#include "multiqueue/stick_policies/random_strict.hpp"
 #include "multiqueue/stick_policies/swapping.hpp"
 #include "multiqueue/stick_policies/swapping_blocking.hpp"
 #include "multiqueue/stick_policies/swapping_lazy.hpp"
@@ -21,7 +20,6 @@ namespace multiqueue {
 
 enum class StickPolicy {
     None,
-    RandomStrict,
     Random,
     Swapping,
     SwappingLazy,
@@ -37,11 +35,6 @@ struct StickPolicyImpl;
 template <typename Impl>
 struct StickPolicyImpl<Impl, StickPolicy::None> {
     using type = NoSticking<Impl>;
-};
-
-template <typename Impl>
-struct StickPolicyImpl<Impl, StickPolicy::RandomStrict> {
-    using type = RandomStrict<Impl>;
 };
 
 template <typename Impl>

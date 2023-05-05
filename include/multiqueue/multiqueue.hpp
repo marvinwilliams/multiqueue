@@ -23,10 +23,8 @@
 #include <cstdlib>
 #include <memory>
 #include <mutex>
-#include <ostream>
 #include <random>
 #include <stdexcept>
-#include <string>
 #include <type_traits>
 
 namespace multiqueue {
@@ -68,7 +66,7 @@ class MultiQueueImpl {
         }
 
        public:
-        constexpr bool operator()(value_type const &lhs, value_type const &rhs) const {
+        constexpr bool operator()(value_type const &lhs, value_type const &rhs) const noexcept {
             return comp(ValueTraits::key_of_value(lhs), ValueTraits::key_of_value(rhs));
         }
     };

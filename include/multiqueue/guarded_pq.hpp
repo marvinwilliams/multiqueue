@@ -16,10 +16,7 @@
 #include <cassert>
 #include <limits>
 #include <memory>
-#include <ostream>
-#include <sstream>
 #include <stdexcept>
-#include <string>
 #include <type_traits>
 
 namespace multiqueue {
