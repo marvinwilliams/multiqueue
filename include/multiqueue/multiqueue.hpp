@@ -308,12 +308,12 @@ class MultiQueue {
    public:
     explicit MultiQueue(int num_threads, Config const &cfg = Config{}, key_compare const &kc = key_compare(),
                         allocator_type const &a = allocator_type())
-        : impl_(next_power_of_two(static_cast<unsigned int>(num_threads * cfg.c)), 0U, cfg, kc, a) {
+        : impl_(next_power_of_two(static_cast<unsigned int>(num_threads * cfg.pqs_per_thread)), 0U, cfg, kc, a) {
     }
 
     explicit MultiQueue(int num_threads, std::size_t cap, Config const &cfg = Config{},
                         key_compare const &kc = key_compare(), allocator_type const &a = allocator_type())
-        : impl_(next_power_of_two(static_cast<unsigned int>(num_threads * cfg.c)), cap, cfg, kc, a) {
+        : impl_(next_power_of_two(static_cast<unsigned int>(num_threads * cfg.pqs_per_thread)), cap, cfg, kc, a) {
     }
 
     Handle get_handle(int id) noexcept {

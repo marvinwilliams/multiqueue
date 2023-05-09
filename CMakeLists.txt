@@ -13,7 +13,6 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party")
 
-option(MULTIQUEUE_CHECK_ALIGNMENT "Abort if data is not aligned as expected" OFF)
 option(MULTIQUEUE_COMPARE_STRICT "Repeat comparison if key is stale" OFF)
 option(MULTIQUEUE_COUNT_STATS "Count various stats" OFF)
 option(MULTIQUEUE_BUILD_EXAMPLES "Build examples" OFF)
@@ -48,9 +47,6 @@ target_compile_features(
   cxx_std_17
 )
 
-if(MULTIQUEUE_CHECK_ALIGNMENT)
-  target_compile_definitions(multiqueue INTERFACE MQ_CHECK_ALIGNMENT)
-endif()
 if(MULTIQUEUE_COMPARE_STRICT)
   target_compile_definitions(multiqueue INTERFACE MQ_COMPARE_STRICT)
 endif()

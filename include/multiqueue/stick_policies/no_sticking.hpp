@@ -1,6 +1,5 @@
 #pragma once
 
-#include "multiqueue/build_config.hpp"
 #include "multiqueue/config.hpp"
 
 #include "pcg_random.hpp"
@@ -43,7 +42,7 @@ struct NoSticking {
         }
     }
 
-    template <std::size_t N = BuildConfiguration::DefaultNumCompare>
+    template <std::size_t N>
     bool try_pop(reference retval) {
         do {
             std::array<size_type, N> idx;
@@ -66,6 +65,10 @@ struct NoSticking {
                 return impl.try_pop_any(random_pq_index(), retval);
             }
         } while (true);
+    }
+
+    bool try_pop(reference retval) {
+        return try_pop<2>(retval);
     }
 };
 

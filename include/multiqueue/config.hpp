@@ -9,16 +9,14 @@
 **/
 #pragma once
 
-#include "multiqueue/build_config.hpp"
-
 #include <cstdint>
 
 namespace multiqueue {
 
 struct Config {
     int seed = 1;
-    int c = BuildConfiguration::DefaultFactorThreadsPQ;
-    int stickiness = BuildConfiguration::DefaultStickiness;
+    int pqs_per_thread = 2;
+    int stickiness = 16;
 };
 
 }  // namespace multiqueue

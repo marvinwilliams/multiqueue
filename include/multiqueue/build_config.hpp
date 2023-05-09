@@ -24,13 +24,11 @@ struct BuildConfiguration {
 #else
     static constexpr std::size_t Pagesize = 4096;
 #endif
-#ifdef MQ_NUM_COMPARE
-    static constexpr std::size_t DefaultNumCompare = MQ_NUM_COMPARE;
+#ifdef MQ_COMPARE_STRICT
+    static constexpr bool StrictComparison = true;
 #else
-    static constexpr std::size_t DefaultNumCompare = 2;
+    static constexpr bool StrictComparison = false;
 #endif
-    static constexpr int DefaultFactorThreadsPQ = 4;
-    static constexpr int DefaultStickiness = 16;
 #ifdef MQ_COUNT_STATS
     static constexpr bool CountStats = true;
 #else
