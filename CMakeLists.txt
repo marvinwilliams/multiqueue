@@ -13,6 +13,7 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party")
 
+option(MULTIQUEUE_DOXYGEN "Generate Doxygen target" OFF)
 option(MULTIQUEUE_COMPARE_STRICT "Repeat comparison if key is stale" OFF)
 option(MULTIQUEUE_COUNT_STATS "Count various stats" OFF)
 option(MULTIQUEUE_BUILD_EXAMPLES "Build examples" OFF)
@@ -82,6 +83,7 @@ if(MULTIQUEUE_BUILD_EXAMPLES)
 endif()
 
 find_package(Doxygen)
+if (MULTIQUEUE_DOXYGEN)
 if(Doxygen_FOUND)
   doxygen_add_docs(
     doxygen
@@ -91,6 +93,7 @@ if(Doxygen_FOUND)
   )
 else()
   message(WARNING "Doxygen not found, skipping documentation generation")
+endif()
 endif()
 
 include(InstallRequiredSystemLibraries)
