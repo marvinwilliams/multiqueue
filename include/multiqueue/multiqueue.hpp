@@ -34,23 +34,14 @@ namespace detail {
 enum class PushResult { Success, Locked };
 enum class PopResult { Success, Locked, Invalid, Empty };
 
-template <typename Key, typename T, typename KeyCompare, StickPolicy Policy,
-          template <typename, typename> typename PriorityQueue, typename ValueTraits, typename SentinelTraits,
+template <typename T, typename Compare, StickPolicy Policy, template <typename, typename> typename PriorityQueue,
           typename Allocator>
 class MultiQueueImpl {
-    static_assert(std::is_same_v<Key, typename ValueTraits::key_type>,
-                  "MultiQueue must have the same key_type as its ValueTraits");
-    static_assert(std::is_same_v<T, typename ValueTraits::mapped_type>,
-                  "MultiQueue must have the same mapped_type as its ValueTraits");
-
    public:
-    using key_type = Key;
-    using mapped_type = typename ValueTraits::mapped_type;
-    using value_type = typename ValueTraits::value_type;
-    using key_compare = KeyCompare;
-    using value_traits_type = ValueTraits;
+    using key_type = unsigned long;
+    using value_type = T;
+    using value_compare = Compare;
     using policy_impl_type = detail::stick_policy_impl_type<MultiQueueImpl, Policy>;
-    using sentinel_traits_type = SentinelTraits;
     using reference = value_type &;
     using const_reference = value_type const &;
     using size_type = std::size_t;
@@ -58,20 +49,7 @@ class MultiQueueImpl {
     using push_result = PushResult;
     using pop_result = PopResult;
 
-    class value_compare {
-        friend MultiQueueImpl;
-        [[no_unique_address]] key_compare comp;
-
-        explicit value_compare(key_compare const &compare = key_compare{}) : comp{compare} {
-        }
-
-       public:
-        constexpr bool operator()(value_type const &lhs, value_type const &rhs) const noexcept {
-            return comp(ValueTraits::key_of_value(lhs), ValueTraits::key_of_value(rhs));
-        }
-    };
-
-    using pq_type = GuardedPQ<PriorityQueue<value_type, value_compare>, ValueTraits, SentinelTraits>;
+    using pq_type = GuardedPQ<PriorityQueue<value_type, value_compare>>;
 
    private:
     using shared_data_type = typename policy_impl_type::SharedData;
@@ -81,7 +59,7 @@ class MultiQueueImpl {
     pq_type *pq_list_;
     size_type num_pqs_;
     Config config_;
-    [[no_unique_address]] key_compare comp_;
+    [[no_unique_address]] value_compare comp_;
     [[no_unique_address]] pq_alloc_type alloc_;
     [[no_unique_address]] shared_data_type shared_data_;
 
@@ -91,9 +69,9 @@ class MultiQueueImpl {
     MultiQueueImpl &operator=(MultiQueueImpl const &) = delete;
     MultiQueueImpl &operator=(MultiQueueImpl &&) = delete;
 
-    explicit MultiQueueImpl(size_type n, std::size_t cap, Config const &c, key_compare const &kc,
+    explicit MultiQueueImpl(size_type n, std::size_t cap, Config const &c, value_compare const &comp,
                             allocator_type const &a)
-        : num_pqs_{n}, config_{c}, comp_{kc}, alloc_(a), shared_data_(n) {
+        : num_pqs_{n}, config_{c}, comp_{comp}, alloc_(a), shared_data_(n) {
         assert(n > 0);
 
         auto cap_per_queue = (2 * cap) / n;
@@ -160,60 +138,59 @@ class MultiQueueImpl {
     PopResult try_pop_compare(std::array<size_type, N> const &idx, reference retval) {
         if constexpr (N == 1) {
             auto key = pq_list_[idx[0]].concurrent_top_key();
-            return key == SentinelTraits::sentinel() ? PopResult::Empty
-                                                     : try_pop_from(idx[0], retval
+            return key == std::numeric_limits<unsigned long>::max() ? PopResult::Empty
+                                                                    : try_pop_from(idx[0], retval
 #ifdef MQ_COMPARE_STRICT
-                                                                    ,
-                                                                    key
+                                                                                   ,
+                                                                                   key
 #endif
-                                                       );
+                                                                      );
         } else if constexpr (N == 2) {
             std::array<key_type, 2> key = {pq_list_[idx[0]].concurrent_top_key(),
                                            pq_list_[idx[1]].concurrent_top_key()};
-            if constexpr (!SentinelTraits::is_implicit) {
-                if (key[0] == SentinelTraits::sentinel()) {
-                    return key[1] == SentinelTraits::sentinel() ? PopResult::Empty
-                                                                : try_pop_from(idx[1], retval
+            if (key[0] == std::numeric_limits<unsigned long>::max()) {
+                return key[1] == std::numeric_limits<unsigned long>::max() ? PopResult::Empty
+                                                                           : try_pop_from(idx[1], retval
 #ifdef MQ_COMPARE_STRICT
-                                                                               ,
-                                                                               key[1]
+                                                                                          ,
+                                                                                          key[1]
 #endif
-                                                                  );
-                }
-                if (key[1] == SentinelTraits::sentinel()) {
-                    return try_pop_from(idx[0], retval
-#ifdef MQ_COMPARE_STRICT
-                                        ,
-                                        key[0]
-#endif
-                    );
-                }
+                                                                             );
             }
-            size_type i = comp_(key[0], key[1]) ? 1 : 0;
-            return key[i] == SentinelTraits::sentinel() ? PopResult::Empty
-                                                        : try_pop_from(idx[i], retval
+            if (key[1] == std::numeric_limits<unsigned long>::max()) {
+                return try_pop_from(idx[0], retval
 #ifdef MQ_COMPARE_STRICT
-                                                                       ,
-                                                                       key[i]
+                                    ,
+                                    key[0]
 #endif
-                                                          );
+                );
+            }
+            size_type i = key[0] > key[1] ? 1 : 0;
+            return key[i] == std::numeric_limits<unsigned long>::max() ? PopResult::Empty
+                                                                       : try_pop_from(idx[i], retval
+#ifdef MQ_COMPARE_STRICT
+                                                                                      ,
+                                                                                      key[i]
+#endif
+                                                                         );
         } else {
             size_type best = 0;
             auto best_key = pq_list_[idx[best]].concurrent_top_key();
             for (size_type i = 1; i < N; ++i) {
-                if (auto key = pq_list_[idx[i]].concurrent_top_key(); key != SentinelTraits::sentinel() &&
-                    (best_key == SentinelTraits::sentinel() || comp_(best_key, key))) {
+                if (auto key = pq_list_[idx[i]].concurrent_top_key();
+                    key != std::numeric_limits<unsigned long>::max() &&
+                    (best_key == std::numeric_limits<unsigned long>::max() || best_key > key)) {
                     best = i;
                     best_key = key;
                 }
             }
-            return best_key == SentinelTraits::sentinel() ? PopResult::Empty
-                                                          : try_pop_from(idx[best], retval
+            return best_key == std::numeric_limits<unsigned long>::max() ? PopResult::Empty
+                                                                         : try_pop_from(idx[best], retval
 #ifdef MQ_COMPARE_STRICT
-                                                                         ,
-                                                                         best_key
+                                                                                        ,
+                                                                                        best_key
 #endif
-                                                            );
+                                                                           );
         }
     }
 
@@ -222,7 +199,7 @@ class MultiQueueImpl {
         for (size_type i = 0; i < num_pqs_; ++i) {
             auto idx = (start_idx + i) % num_pqs_;
             auto key = pq_list_[idx].concurrent_top_key();
-            if (key != SentinelTraits::sentinel()) {
+            if (key != std::numeric_limits<unsigned long>::max()) {
                 auto result = try_pop_from(idx, retval
 #ifdef MQ_COMPARE_STRICT
                                            ,
@@ -237,10 +214,6 @@ class MultiQueueImpl {
         return false;
     }
 
-    key_compare key_comp() const {
-        return comp_;
-    }
-
     value_compare value_comp() const {
         return value_compare{comp_};
     }
@@ -251,19 +224,14 @@ using DefaultPriorityQueue = BufferedPQ<Heap<T, Compare>>;
 
 }  // namespace detail
 
-template <typename Key, typename T, typename KeyCompare = std::less<Key>, StickPolicy Policy = StickPolicy::None,
+template <typename T, typename Compare = std::less<T>, StickPolicy Policy = StickPolicy::None,
           template <typename, typename> typename PriorityQueue = detail::DefaultPriorityQueue,
-          typename ValueTraits = value_traits<Key, T>, typename SentinelTraits = sentinel_traits<Key, KeyCompare>,
-          typename Allocator = std::allocator<Key>>
+          typename Allocator = std::allocator<T>>
 class MultiQueue {
-    using impl_type =
-        detail::MultiQueueImpl<Key, T, KeyCompare, Policy, PriorityQueue, ValueTraits, SentinelTraits, Allocator>;
+    using impl_type = detail::MultiQueueImpl<T, Compare, Policy, PriorityQueue, Allocator>;
 
    public:
-    using key_type = typename impl_type::key_type;
-    using mapped_type = typename impl_type::mapped_type;
     using value_type = typename impl_type::value_type;
-    using key_compare = typename impl_type::key_compare;
     using value_compare = typename impl_type::value_compare;
     using size_type = typename impl_type::size_type;
     using reference = typename impl_type::reference;
@@ -271,31 +239,14 @@ class MultiQueue {
     using pq_type = typename impl_type::pq_type;
     using allocator_type = typename impl_type::allocator_type;
 
-    class Handle {
-        friend MultiQueue;
-        typename impl_type::policy_impl_type policy_impl_;
-
-        explicit Handle(int id, impl_type &d) noexcept : policy_impl_(id, d) {
-        }
-
-       public:
-        void push(const_reference value) {
-            policy_impl_.push(value);
-        }
-
-        bool try_pop(reference retval) {
-            return policy_impl_.try_pop(retval);
-        }
-
-        Handle(Handle const &) = delete;
-        Handle &operator=(Handle const &) = delete;
-        Handle &operator=(Handle &&) noexcept = default;
-        Handle(Handle &&) noexcept = default;
-        ~Handle() = default;
-    };
-
    private:
     impl_type impl_;
+
+    auto &get_tld() noexcept {
+        static std::atomic_int id = 0;
+        static thread_local typename impl_type::policy_impl_type policy_impl(id.fetch_add(1), impl_);
+        return policy_impl;
+    }
 
     static constexpr unsigned int next_power_of_two(unsigned int n) {
         unsigned int r = 1;
@@ -306,18 +257,25 @@ class MultiQueue {
     }
 
    public:
-    explicit MultiQueue(int num_threads, Config const &cfg = Config{}, key_compare const &kc = key_compare(),
+    explicit MultiQueue()
+        : impl_(next_power_of_two(static_cast<unsigned int>(Galois::getActiveThreads() * 2)), 0U,
+                Config{}, value_compare{}, allocator_type{}) {
+    }
+    explicit MultiQueue(int num_threads, Config const &cfg = Config{}, value_compare const &comp = value_compare(),
                         allocator_type const &a = allocator_type())
-        : impl_(next_power_of_two(static_cast<unsigned int>(num_threads * cfg.pqs_per_thread)), 0U, cfg, kc, a) {
+        : impl_(next_power_of_two(static_cast<unsigned int>(num_threads * cfg.pqs_per_thread)), 0U, cfg, comp, a) {
     }
 
     explicit MultiQueue(int num_threads, std::size_t cap, Config const &cfg = Config{},
-                        key_compare const &kc = key_compare(), allocator_type const &a = allocator_type())
-        : impl_(next_power_of_two(static_cast<unsigned int>(num_threads * cfg.pqs_per_thread)), cap, cfg, kc, a) {
+                        value_compare const &comp = value_compare(), allocator_type const &a = allocator_type())
+        : impl_(next_power_of_two(static_cast<unsigned int>(num_threads * cfg.pqs_per_thread)), cap, cfg, comp, a) {
     }
 
-    Handle get_handle(int id) noexcept {
-        return Handle(id, impl_);
+    void push(const_reference value) {
+        get_tld().push(value);
+    }
+    bool try_pop(reference retval) {
+        return get_tld().try_pop(retval);
     }
 
     [[nodiscard]] Config const &config() const noexcept {
@@ -326,10 +284,6 @@ class MultiQueue {
 
     size_type num_pqs() const noexcept {
         return impl_.num_pqs();
-    }
-
-    key_compare key_comp() const {
-        return impl_.key_comp();
     }
 
     value_compare value_comp() const {
