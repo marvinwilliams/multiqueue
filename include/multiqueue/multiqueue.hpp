@@ -10,12 +10,14 @@
 #pragma once
 
 #include "multiqueue/buffered_pq.hpp"
-#include "multiqueue/config.hpp"
+#include "multiqueue/build_config.hpp"
 #include "multiqueue/guarded_pq.hpp"
+#include "multiqueue/handle.hpp"
 #include "multiqueue/heap.hpp"
-#include "multiqueue/sentinel_traits.hpp"
-#include "multiqueue/stick_policy.hpp"
-#include "multiqueue/value_traits.hpp"
+/* #include "multiqueue/operation_policy.hpp" */
+#include "multiqueue/queue_selection/stick_random.hpp"
+/* #include "multiqueue/sentinel.hpp" */
+/* #include "multiqueue/value_traits.hpp" */
 
 #include <array>
 #include <cassert>
@@ -29,311 +31,189 @@
 
 namespace multiqueue {
 
-namespace detail {
+namespace defaults {
 
-enum class PushResult { Success, Locked };
-enum class PopResult { Success, Locked, Invalid, Empty };
+template <typename Key, typename Value>
+struct KeyOfValue {
+    static_assert(std::is_same_v<Key, Value>, "KeyOfValue not specialized for this value type");
+};
 
-template <typename Key, typename T, typename KeyCompare, StickPolicy Policy,
-          template <typename, typename> typename PriorityQueue, typename ValueTraits, typename SentinelTraits,
-          typename Allocator>
-class MultiQueueImpl {
-    static_assert(std::is_same_v<Key, typename ValueTraits::key_type>,
-                  "MultiQueue must have the same key_type as its ValueTraits");
-    static_assert(std::is_same_v<T, typename ValueTraits::mapped_type>,
-                  "MultiQueue must have the same mapped_type as its ValueTraits");
+template <typename Key>
+struct KeyOfValue<Key, Key> {
+    static constexpr Key const &get(Key const &key) noexcept {
+        return key;
+    }
+};
 
+template <typename Key, typename T>
+struct KeyOfValue<Key, std::pair<Key, T>> {
+    static constexpr Key const &get(std::pair<Key, T> const &p) noexcept {
+        return p.first;
+    }
+};
+
+template <typename T, typename Compare>
+struct Sentinel {
+    using key_type = T;
+    using key_compare = Compare;
+    static constexpr key_type const &key_of_value(T const &v) noexcept {
+        return v;
+    }
+    static constexpr bool implicit_sentinel = false;
+    static constexpr key_type sentinel() noexcept {
+        static_assert(std::is_default_constructible_v<key_type>, "key_type must be default-constructible");
+        return key_type();
+    }
+};
+
+template <typename Key>
+struct Sentinel<Key, std::less<Key>> {
+    static constexpr bool is_implicit = std::numeric_limits<Key>::is_bounded;
+    static constexpr Key get() noexcept {
+        return std::numeric_limits<Key>::lowest();
+    }
+};
+
+template <typename Key>
+struct Sentinel<Key, std::less<>> : Sentinel<Key, std::less<Key>> {};
+
+template <typename Key>
+struct Sentinel<Key, std::greater<Key>> {
+    static constexpr bool is_implicit = std::numeric_limits<Key>::is_bounded;
+    static constexpr Key get() noexcept {
+        return std::numeric_limits<Key>::max();
+    }
+};
+
+template <typename Key>
+struct Sentinel<Key, std::greater<>> : Sentinel<Key, std::greater<Key>> {};
+
+template <typename Value, typename KeyOfValue, typename Compare>
+struct ValueCompare {
+    Compare comp;
+
+    bool operator()(Value const &lhs, Value const &rhs) const noexcept {
+        return comp(KeyOfValue::get(lhs), KeyOfValue::get(rhs));
+    }
+};
+
+struct MultiQueueTraits {
+    using queue_selection_policy_type = build_config::DefaultQueueSelectionPolicy;
+    static constexpr bool count_stats = build_config::DefaultCountStats;
+    static constexpr bool strict_comparison = build_config::DefaultStrictComparison;
+    static constexpr int num_pop_tries = build_config::DefaultNumPopTries;
+    static constexpr bool scan_on_failed_pop = build_config::DefaultScanOnFailedPop;
+};
+
+template <typename Value, typename KeyOfValue, typename Compare>
+using PriorityQueue = BufferedPQ<Heap<Value, ValueCompare<Value, KeyOfValue, Compare>>>;
+
+}  // namespace defaults
+
+template <typename Key, typename Value = Key, typename Compare = std::less<Key>,
+          typename Traits = defaults::MultiQueueTraits, typename KeyOfValue = defaults::KeyOfValue<Key, Value>,
+          typename PriorityQueue = defaults::PriorityQueue<Value, KeyOfValue, Compare>,
+          typename Sentinel = defaults::Sentinel<Key, Compare>, typename Allocator = std::allocator<PriorityQueue>>
+class MultiQueue {
    public:
     using key_type = Key;
-    using mapped_type = typename ValueTraits::mapped_type;
-    using value_type = typename ValueTraits::value_type;
-    using key_compare = KeyCompare;
-    using value_traits_type = ValueTraits;
-    using policy_impl_type = detail::stick_policy_impl_type<MultiQueueImpl, Policy>;
-    using sentinel_traits_type = SentinelTraits;
+    using value_type = Value;
+    using key_compare = Compare;
+    using value_compare = typename PriorityQueue::value_compare;
+    using priority_queue_type = PriorityQueue;
     using reference = value_type &;
     using const_reference = value_type const &;
     using size_type = std::size_t;
     using allocator_type = Allocator;
-    using push_result = PushResult;
-    using pop_result = PopResult;
-
-    class value_compare {
-        friend MultiQueueImpl;
-        [[no_unique_address]] key_compare comp;
-
-        explicit value_compare(key_compare const &compare = key_compare{}) : comp{compare} {
-        }
-
-       public:
-        constexpr bool operator()(value_type const &lhs, value_type const &rhs) const noexcept {
-            return comp(ValueTraits::key_of_value(lhs), ValueTraits::key_of_value(rhs));
-        }
-    };
-
-    using pq_type = GuardedPQ<PriorityQueue<value_type, value_compare>, ValueTraits, SentinelTraits>;
+    using sentinel_type = Sentinel;
+    using key_of_value_type = KeyOfValue;
+    using handle_type = Handle<MultiQueue>;
+    friend handle_type;
+    using traits_type = Traits;
+    using queue_selection_config_type = typename traits_type::queue_selection_policy_type::Config;
 
    private:
-    using shared_data_type = typename policy_impl_type::SharedData;
-    using pq_alloc_type = typename std::allocator_traits<allocator_type>::template rebind_alloc<pq_type>;
-    using pq_alloc_traits = std::allocator_traits<pq_alloc_type>;
+    using internal_priority_queue_type = GuardedPQ<key_type, value_type, KeyOfValue, priority_queue_type, Sentinel>;
+    using internal_allocator_type =
+        typename std::allocator_traits<allocator_type>::template rebind_alloc<internal_priority_queue_type>;
+    using queue_selection_shared_data_type = typename traits_type::queue_selection_policy_type::SharedData;
 
-    pq_type *pq_list_;
+    internal_priority_queue_type *pq_list_{};
     size_type num_pqs_;
-    Config config_;
+    [[no_unique_address]] queue_selection_config_type queue_selection_config_;
+    [[no_unique_address]] queue_selection_shared_data_type queue_selection_shared_data_;
     [[no_unique_address]] key_compare comp_;
-    [[no_unique_address]] pq_alloc_type alloc_;
-    [[no_unique_address]] shared_data_type shared_data_;
+    [[no_unique_address]] internal_allocator_type alloc_;
 
    public:
-    MultiQueueImpl(MultiQueueImpl const &) = delete;
-    MultiQueueImpl(MultiQueueImpl &&) = delete;
-    MultiQueueImpl &operator=(MultiQueueImpl const &) = delete;
-    MultiQueueImpl &operator=(MultiQueueImpl &&) = delete;
+    MultiQueue(const MultiQueue &) = delete;
+    MultiQueue(MultiQueue &&) = delete;
+    MultiQueue &operator=(const MultiQueue &) = delete;
+    MultiQueue &operator=(MultiQueue &&) = delete;
 
-    explicit MultiQueueImpl(size_type n, std::size_t cap, Config const &c, key_compare const &kc,
-                            allocator_type const &a)
-        : num_pqs_{n}, config_{c}, comp_{kc}, alloc_(a), shared_data_(n) {
-        assert(n > 0);
+    explicit MultiQueue(size_type num_pqs, queue_selection_config_type const &config = queue_selection_config_type{},
+                        priority_queue_type const &pq = priority_queue_type{}, key_compare const &comp = key_compare(),
+                        allocator_type const &alloc = allocator_type())
+        : num_pqs_{num_pqs},
+          queue_selection_config_{config},
+          queue_selection_shared_data_(num_pqs_),
+          comp_{comp},
+          alloc_(alloc) {
+        assert(num_pqs_ > 0);
 
-        auto cap_per_queue = (2 * cap) / n;
-        pq_list_ = pq_alloc_traits::allocate(alloc_, num_pqs_);
-        for (pq_type *pq = pq_list_; pq != pq_list_ + num_pqs_; ++pq) {
-            pq_alloc_traits::construct(alloc_, pq, cap_per_queue, value_comp());
+        pq_list_ = std::allocator_traits<internal_allocator_type>::allocate(alloc_, num_pqs_);
+        for (auto *it = pq_list_; it != pq_list_ + num_pqs_; ++it) {
+            std::allocator_traits<internal_allocator_type>::construct(alloc_, it, pq);
         }
     }
 
-    ~MultiQueueImpl() noexcept {
-        for (pq_type *pq = pq_list_; pq != pq_list_ + num_pqs_; ++pq) {
-            pq_alloc_traits::destroy(alloc_, pq);
+    explicit MultiQueue(size_type num_pqs, typename PriorityQueue::size_type initial_capacity,
+                        queue_selection_config_type const &config = queue_selection_config_type{},
+                        priority_queue_type const &pq = priority_queue_type{}, key_compare const &comp = key_compare(),
+                        allocator_type const &alloc = allocator_type())
+        : MultiQueue(num_pqs, config, pq, comp, alloc) {
+        auto cap_per_queue = (initial_capacity + num_pqs_ - 1) / num_pqs_;
+        for (auto *it = pq_list_; it != pq_list_ + num_pqs_; ++it) {
+            it->reserve(cap_per_queue);
         }
-        pq_alloc_traits::deallocate(alloc_, pq_list_, num_pqs_);
+    }
+
+    template <typename ForwardIt>
+    explicit MultiQueue(ForwardIt first, ForwardIt last,
+                        queue_selection_config_type const &config = queue_selection_config_type{},
+                        key_compare const &comp = key_compare(), allocator_type const &alloc = allocator_type())
+        : num_pqs_{std::distance(first, last)},
+          queue_selection_config_{config},
+          queue_selection_shared_data_(num_pqs_),
+          comp_{comp},
+          alloc_(alloc) {
+        pq_list_ = std::allocator_traits<internal_allocator_type>::allocate(alloc_, num_pqs_);
+        for (auto *it = pq_list_; it != pq_list_ + num_pqs_; ++it, ++first) {
+            std::allocator_traits<internal_allocator_type>::construct(alloc_, it, *first);
+        }
+    }
+
+    ~MultiQueue() noexcept {
+        for (auto *it = pq_list_; it != pq_list_ + num_pqs_; ++it) {
+            std::allocator_traits<internal_allocator_type>::destroy(alloc_, it);
+        }
+        std::allocator_traits<internal_allocator_type>::deallocate(alloc_, pq_list_, num_pqs_);
+    }
+
+    handle_type get_handle() noexcept {
+        return handle_type(*this);
+    }
+
+    [[nodiscard]] queue_selection_config_type const &get_queue_selection_config() const noexcept {
+        return queue_selection_config_;
     }
 
     [[nodiscard]] size_type num_pqs() const noexcept {
         return num_pqs_;
     }
 
-    [[nodiscard]] Config const &config() const noexcept {
-        return config_;
-    }
-
-    [[nodiscard]] shared_data_type &shared_data() noexcept {
-        return shared_data_;
-    }
-
-    PushResult try_push(size_type idx, const_reference value) {
-        if (!pq_list_[idx].try_lock()) {
-            return PushResult::Locked;
-        }
-        pq_list_[idx].unsafe_push(value);
-        pq_list_[idx].unlock();
-        return PushResult::Success;
-    }
-
-    PopResult try_pop_from(size_type idx, reference retval
-#ifdef MQ_COMPARE_STRICT
-                           ,
-                           key_type const &ref_key
-#endif
-    ) {
-        assert(idx < num_pqs_);
-        if (!pq_list_[idx].try_lock()) {
-            return PopResult::Locked;
-        }
-        if (pq_list_[idx].unsafe_empty()
-#ifdef MQ_COMPARE_STRICT
-            || ValueTraits::key_of_value(pq_list_[idx].unsafe_top()) != ref_key
-#endif
-        ) {
-            // Top got changed before locking
-            pq_list_[idx].unlock();
-            return PopResult::Invalid;
-        }
-        retval = pq_list_[idx].unsafe_top();
-        pq_list_[idx].unsafe_pop();
-        pq_list_[idx].unlock();
-        return PopResult::Success;
-    }
-
-    template <std::size_t N>
-    PopResult try_pop_compare(std::array<size_type, N> const &idx, reference retval) {
-        if constexpr (N == 1) {
-            auto key = pq_list_[idx[0]].concurrent_top_key();
-            return key == SentinelTraits::sentinel() ? PopResult::Empty
-                                                     : try_pop_from(idx[0], retval
-#ifdef MQ_COMPARE_STRICT
-                                                                    ,
-                                                                    key
-#endif
-                                                       );
-        } else if constexpr (N == 2) {
-            std::array<key_type, 2> key = {pq_list_[idx[0]].concurrent_top_key(),
-                                           pq_list_[idx[1]].concurrent_top_key()};
-            if constexpr (!SentinelTraits::is_implicit) {
-                if (key[0] == SentinelTraits::sentinel()) {
-                    return key[1] == SentinelTraits::sentinel() ? PopResult::Empty
-                                                                : try_pop_from(idx[1], retval
-#ifdef MQ_COMPARE_STRICT
-                                                                               ,
-                                                                               key[1]
-#endif
-                                                                  );
-                }
-                if (key[1] == SentinelTraits::sentinel()) {
-                    return try_pop_from(idx[0], retval
-#ifdef MQ_COMPARE_STRICT
-                                        ,
-                                        key[0]
-#endif
-                    );
-                }
-            }
-            size_type i = comp_(key[0], key[1]) ? 1 : 0;
-            return key[i] == SentinelTraits::sentinel() ? PopResult::Empty
-                                                        : try_pop_from(idx[i], retval
-#ifdef MQ_COMPARE_STRICT
-                                                                       ,
-                                                                       key[i]
-#endif
-                                                          );
-        } else {
-            size_type best = 0;
-            auto best_key = pq_list_[idx[best]].concurrent_top_key();
-            for (size_type i = 1; i < N; ++i) {
-                if (auto key = pq_list_[idx[i]].concurrent_top_key(); key != SentinelTraits::sentinel() &&
-                    (best_key == SentinelTraits::sentinel() || comp_(best_key, key))) {
-                    best = i;
-                    best_key = key;
-                }
-            }
-            return best_key == SentinelTraits::sentinel() ? PopResult::Empty
-                                                          : try_pop_from(idx[best], retval
-#ifdef MQ_COMPARE_STRICT
-                                                                         ,
-                                                                         best_key
-#endif
-                                                            );
-        }
-    }
-
-    bool try_pop_any(size_type start_idx, reference retval) {
-        assert(start_idx < num_pqs_);
-        for (size_type i = 0; i < num_pqs_; ++i) {
-            auto idx = (start_idx + i) % num_pqs_;
-            auto key = pq_list_[idx].concurrent_top_key();
-            if (key != SentinelTraits::sentinel()) {
-                auto result = try_pop_from(idx, retval
-#ifdef MQ_COMPARE_STRICT
-                                           ,
-                                           key
-#endif
-                );
-                if (result == PopResult::Success) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    key_compare key_comp() const {
+    [[nodiscard]] key_compare key_comp() const {
         return comp_;
-    }
-
-    value_compare value_comp() const {
-        return value_compare{comp_};
-    }
-};
-
-template <typename T, typename Compare>
-using DefaultPriorityQueue = BufferedPQ<Heap<T, Compare>>;
-
-}  // namespace detail
-
-template <typename Key, typename T, typename KeyCompare = std::less<Key>, StickPolicy Policy = StickPolicy::None,
-          template <typename, typename> typename PriorityQueue = detail::DefaultPriorityQueue,
-          typename ValueTraits = value_traits<Key, T>, typename SentinelTraits = sentinel_traits<Key, KeyCompare>,
-          typename Allocator = std::allocator<Key>>
-class MultiQueue {
-    using impl_type =
-        detail::MultiQueueImpl<Key, T, KeyCompare, Policy, PriorityQueue, ValueTraits, SentinelTraits, Allocator>;
-
-   public:
-    using key_type = typename impl_type::key_type;
-    using mapped_type = typename impl_type::mapped_type;
-    using value_type = typename impl_type::value_type;
-    using key_compare = typename impl_type::key_compare;
-    using value_compare = typename impl_type::value_compare;
-    using size_type = typename impl_type::size_type;
-    using reference = typename impl_type::reference;
-    using const_reference = typename impl_type::const_reference;
-    using pq_type = typename impl_type::pq_type;
-    using allocator_type = typename impl_type::allocator_type;
-
-    class Handle {
-        friend MultiQueue;
-        typename impl_type::policy_impl_type policy_impl_;
-
-        explicit Handle(int id, impl_type &d) noexcept : policy_impl_(id, d) {
-        }
-
-       public:
-        void push(const_reference value) {
-            policy_impl_.push(value);
-        }
-
-        bool try_pop(reference retval) {
-            return policy_impl_.try_pop(retval);
-        }
-
-        Handle(Handle const &) = delete;
-        Handle &operator=(Handle const &) = delete;
-        Handle &operator=(Handle &&) noexcept = default;
-        Handle(Handle &&) noexcept = default;
-        ~Handle() = default;
-    };
-
-   private:
-    impl_type impl_;
-
-    static constexpr unsigned int next_power_of_two(unsigned int n) {
-        unsigned int r = 1;
-        while (r < n) {
-            r <<= 1;
-        }
-        return r;
-    }
-
-   public:
-    explicit MultiQueue(int num_threads, Config const &cfg = Config{}, key_compare const &kc = key_compare(),
-                        allocator_type const &a = allocator_type())
-        : impl_(next_power_of_two(static_cast<unsigned int>(num_threads * cfg.pqs_per_thread)), 0U, cfg, kc, a) {
-    }
-
-    explicit MultiQueue(int num_threads, std::size_t cap, Config const &cfg = Config{},
-                        key_compare const &kc = key_compare(), allocator_type const &a = allocator_type())
-        : impl_(next_power_of_two(static_cast<unsigned int>(num_threads * cfg.pqs_per_thread)), cap, cfg, kc, a) {
-    }
-
-    Handle get_handle(int id) noexcept {
-        return Handle(id, impl_);
-    }
-
-    [[nodiscard]] Config const &config() const noexcept {
-        return impl_.config();
-    }
-
-    size_type num_pqs() const noexcept {
-        return impl_.num_pqs();
-    }
-
-    key_compare key_comp() const {
-        return impl_.key_comp();
-    }
-
-    value_compare value_comp() const {
-        return impl_.value_comp();
     }
 };
 

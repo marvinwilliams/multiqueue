@@ -9,6 +9,8 @@
 **/
 #pragma once
 
+#include "multiqueue/build_config.hpp"
+
 #include <cstddef>
 #include <functional>
 #include <utility>
@@ -36,9 +38,7 @@
 
 namespace multiqueue {
 
-static constexpr unsigned int DefaultHeapArity = 16;
-
-template <typename T, typename Compare = std::less<>, unsigned int Arity = DefaultHeapArity,
+template <typename T, typename Compare = std::less<>, unsigned int Arity = build_config::DefaultHeapArity,
           typename Container = std::vector<T>>
 class Heap {
     static_assert(Arity >= 2, "Arity must be at least two");

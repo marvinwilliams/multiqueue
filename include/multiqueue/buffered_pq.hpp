@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include "multiqueue/build_config.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -36,11 +38,8 @@
 
 namespace multiqueue {
 
-static constexpr std::size_t DefaultInsertionBuffersize = 64;
-static constexpr std::size_t DefaultDeletionBuffersize = 64;
-
-template <typename PriorityQueue, std::size_t InsertionBuffersize = DefaultInsertionBuffersize,
-          std::size_t DeletionBuffersize = DefaultDeletionBuffersize>
+template <typename PriorityQueue, std::size_t InsertionBuffersize = build_config::DefaultInsertionBuffersize,
+          std::size_t DeletionBuffersize = build_config::DefaultDeletionBuffersize>
 class BufferedPQ : private PriorityQueue {
     static_assert(InsertionBuffersize > 0 && DeletionBuffersize > 0, "Both bufferst must have nonzero capacity");
 
@@ -88,32 +87,8 @@ class BufferedPQ : private PriorityQueue {
     explicit BufferedPQ(value_compare compare = value_compare()) : base_type(compare) {
     }
 
-    explicit BufferedPQ(std::size_t cap, value_compare compare = value_compare()) : base_type(compare) {
-        if (cap > 0) {
-            base_type::c.reserve(cap);
-        }
-    }
-
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
     explicit BufferedPQ(value_compare const& compare, Alloc const& alloc) : base_type(compare, alloc) {
-    }
-
-    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
-    explicit BufferedPQ(Alloc const& alloc) : base_type(alloc) {
-    }
-
-    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
-    explicit BufferedPQ(std::size_t cap, value_compare const& compare, Alloc const& alloc) : base_type(compare, alloc) {
-        if (cap > 0) {
-            base_type::c.reserve(cap);
-        }
-    }
-
-    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
-    explicit BufferedPQ(std::size_t cap, Alloc const& alloc) : base_type(alloc) {
-        if (cap > 0) {
-            base_type::c.reserve(cap);
-        }
     }
 
     [[nodiscard]] constexpr bool empty() const {
@@ -173,6 +148,10 @@ class BufferedPQ : private PriorityQueue {
             flush_insertion_buffer();
         }
         insertion_buffer_[ins_buf_size_++] = std::move(value);
+    }
+
+    void reserve(size_type new_cap) {
+        base_type::c.reserve(new_cap);
     }
 };
 
