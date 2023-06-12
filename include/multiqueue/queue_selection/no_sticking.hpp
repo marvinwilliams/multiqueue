@@ -43,7 +43,7 @@ struct NoSticking {
     }
 
     template <std::size_t N>
-    bool try_pop(reference retval) {
+    bool try_pop_n(reference retval) {
         do {
             std::array<size_type, N> idx;
             std::generate(std::begin(idx), std::end(idx), [this]() { return random_pq_index(); });
@@ -68,7 +68,7 @@ struct NoSticking {
     }
 
     bool try_pop(reference retval) {
-        return try_pop<2>(retval);
+        return try_pop_n<2>(retval);
     }
 };
 
