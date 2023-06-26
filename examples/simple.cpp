@@ -15,10 +15,9 @@ static const std::size_t iterations_per_thread = 1'000;
 
 static void work(mq_type& pq) {
     auto handle = pq.get_handle();
-    mq_type::value_type ret;
-    for (unsigned int i = 1; i <= iterations_per_thread; ++i) {
+    for (unsigned i = 1; i <= iterations_per_thread; ++i) {
         handle.push({i, i});
-        handle.try_pop(ret);
+        handle.try_pop();
     }
 }
 

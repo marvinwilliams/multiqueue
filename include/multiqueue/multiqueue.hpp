@@ -111,8 +111,8 @@ using InnerPQ = BufferedPQ<Heap<Value, ValueCompare<Value, KeyOfValue, Compare>,
 }  // namespace defaults
 
 template <typename Key, typename Value = Key, typename Compare = std::less<Key>,
-          typename Traits = defaults::MultiQueueTraits, typename KeyOfValue = defaults::KeyOfValue<Key, Value>,
-          typename PriorityQueue = InnerPQ<Value, KeyOfValue, Compare, Traits>,
+          typename Traits = defaults::Traits, typename KeyOfValue = defaults::KeyOfValue<Key, Value>,
+          typename PriorityQueue = defaults::InnerPQ<Value, KeyOfValue, Compare, Traits>,
           typename Sentinel = defaults::Sentinel<Key, Compare>, typename Allocator = std::allocator<PriorityQueue>>
 class MultiQueue {
    public:

@@ -16,7 +16,7 @@ namespace multiqueue::queue_selection {
 // from [0,p-1] for i in [0,p-1]. For this to be a permutation, a and b needs to be coprime.Each handle has a unique id,
 // so that i in [NumPopPQs*id,NumPopPQs*(id+1)-1] identify the queues associated with this handle.
 
-template <unsigned NumPopPQs = build_config::DefaultNumPopPQs>
+template <unsigned NumPopPQs = 2>
 class GlobalPermutation {
     static constexpr int Shift = 32;
     static constexpr std::uint64_t Mask = (1ULL << Shift) - 1;

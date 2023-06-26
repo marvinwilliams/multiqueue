@@ -1,6 +1,5 @@
 #pragma once
 
-#include "multiqueue/build_config.hpp"
 #include "pcg_random.hpp"
 
 #include <array>
@@ -11,7 +10,7 @@
 
 namespace multiqueue::queue_selection {
 
-template <unsigned NumPopPQs = build_config::DefaultNumPopPQs>
+template <unsigned NumPopPQs = 2>
 class StickRandom {
     pcg32 rng{};
     std::uniform_int_distribution<std::size_t> pq_dist;

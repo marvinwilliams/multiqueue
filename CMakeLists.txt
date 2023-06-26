@@ -14,9 +14,6 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party")
 
 option(MULTIQUEUE_DOXYGEN "Generate Doxygen target" OFF)
-option(MULTIQUEUE_COMPARE_STRICT "Repeat comparison if key is stale" OFF)
-option(MULTIQUEUE_COUNT_STATS "Count various stats" OFF)
-option(MULTIQUEUE_NO_SCAN_ON_FAILED_POP "Don't scan queues for elements if popping failes" OFF)
 option(MULTIQUEUE_BUILD_EXAMPLES "Build examples" OFF)
 option(MULTIQUEUE_BUILD_TESTS "Build unit tests for multiqueue" ON)
 option(MULTIQUEUE_BUILD_BENCHMARKS "Build micro benchmarks for multiqueue internals" ON)
@@ -48,16 +45,6 @@ target_compile_features(
   INTERFACE
   cxx_std_17
 )
-
-if(MULTIQUEUE_COMPARE_STRICT)
-  target_compile_definitions(multiqueue INTERFACE MQ_COMPARE_STRICT)
-endif()
-if(MULTIQUEUE_COUNT_STATS)
-  target_compile_definitions(multiqueue INTERFACE MQ_COUNT_STATS)
-endif()
-if(MULTIQUEUE_NO_SCAN_ON_FAILED_POP)
-  target_compile_definitions(multiqueue INTERFACE MQ_NO_SCAN_ON_FAILED_POP)
-endif()
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads)

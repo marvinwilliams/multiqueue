@@ -12,7 +12,7 @@
 
 namespace multiqueue::queue_selection {
 
-template <unsigned NumPopPQs = build_config::DefaultNumPopPQs>
+template <unsigned NumPopPQs = 2>
 class SwapAssignment {
     struct alignas(build_config::L1CacheLinesize) AlignedIndex {
         std::atomic<std::size_t> value;

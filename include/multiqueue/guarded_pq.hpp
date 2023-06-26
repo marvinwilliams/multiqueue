@@ -42,7 +42,7 @@ class alignas(build_config::L1CacheLinesize) GuardedPQ {
     explicit GuardedPQ(priority_queue_type&& pq = priority_queue_type{}) : pq_(std::move(pq)) {
     }
 
-    [[nodiscard]] unsigned long concurrent_top_key() const noexcept {
+    [[nodiscard]] key_type concurrent_top_key() const noexcept {
         return top_key_.load(std::memory_order_relaxed);
     }
 

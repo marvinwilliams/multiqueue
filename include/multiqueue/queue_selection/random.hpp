@@ -1,6 +1,5 @@
 #pragma once
 
-#include "multiqueue/build_config.hpp"
 #include "pcg_random.hpp"
 
 #include <array>
@@ -11,7 +10,7 @@
 
 namespace multiqueue::queue_selection {
 
-template <unsigned NumPopPQs>
+template <unsigned NumPopPQs = 2>
 class Random {
     pcg32 rng{};
     std::vector<std::size_t> pqs{};

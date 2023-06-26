@@ -178,7 +178,7 @@ class Handle : public MQ::traits_type::queue_selection_policy_type,
     }
 
     std::optional<value_type> try_pop() {
-        for (int i = 0; i < MQ::traits_type::num_pop_tries; ++i) {
+        for (unsigned i = 0; i < MQ::traits_type::num_pop_tries; ++i) {
             auto retval = try_pop_best();
             if (retval) {
                 return *retval;
