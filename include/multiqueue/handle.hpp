@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <type_traits>
 
 namespace multiqueue {
@@ -18,6 +19,11 @@ struct Counters {
         lhs.empty_pop_pqs += rhs.empty_pop_pqs;
         lhs.locked_pop_pq += rhs.locked_pop_pq;
         lhs.stale_pop_pq += rhs.stale_pop_pq;
+        return lhs;
+    }
+
+    friend Counters operator+(Counters lhs, Counters const &rhs) noexcept {
+        lhs += rhs;
         return lhs;
     }
 };
@@ -40,6 +46,7 @@ class Handle : public MQ::traits_type::queue_selection_policy_type,
     friend MQ;
 
     using base_type = typename MQ::traits_type::queue_selection_policy_type;
+    using queue_selection_shared_data_type = typename base_type::SharedData;
 
    public:
     using key_type = typename MQ::key_type;
@@ -72,13 +79,13 @@ class Handle : public MQ::traits_type::queue_selection_policy_type,
         return comp_(lhs, rhs);
     };
 
-    bool try_pop_best(reference retval) {
+    std::optional<value_type> try_pop_best() {
         do {
             auto indices = this->get_pop_pqs();
             do {
                 auto best_pq = &mq_.pq_list_[indices[0]];
                 auto best_key = best_pq->concurrent_top_key();
-                for (auto it = indices.begin() + 1; it != indices.end(); ++it) {
+                for (auto it = std::begin(indices) + 1; it != std::end(indices); ++it) {
                     auto pq = &mq_.pq_list_[*it];
                     auto key = pq->concurrent_top_key();
                     if (sentinel_aware_compare(best_key, key)) {
@@ -90,7 +97,7 @@ class Handle : public MQ::traits_type::queue_selection_policy_type,
                     if constexpr (MQ::traits_type::count_stats) {
                         ++this->counters.empty_pop_pqs;
                     }
-                    return false;
+                    return std::nullopt;
                 }
                 if (!best_pq->try_lock()) {
                     if constexpr (MQ::traits_type::count_stats) {
@@ -108,17 +115,17 @@ class Handle : public MQ::traits_type::queue_selection_policy_type,
                     }
                     break;
                 }
-                retval = best_pq->unsafe_top();
+                auto retval = best_pq->unsafe_top();
                 best_pq->unsafe_pop();
                 best_pq->unlock();
                 this->use_pop_pqs();
-                return true;
+                return retval;
             } while (true);
             this->reset_pop_pqs();
         } while (true);
     }
 
-    bool try_pop_scan(reference retval) {
+    std::optional<value_type> try_pop_scan() {
         do {
             auto best_pq = mq_.pq_list_;
             auto best_key = best_pq->concurrent_top_key();
@@ -134,7 +141,7 @@ class Handle : public MQ::traits_type::queue_selection_policy_type,
                 if constexpr (MQ::traits_type::count_stats) {
                     ++this->counters.empty_pop_pqs;
                 }
-                return false;
+                return std::nullopt;
             }
             if (!best_pq->try_lock()) {
                 // Not lock-free, but we could also just return the first found element without loss of quality, as most
@@ -153,10 +160,10 @@ class Handle : public MQ::traits_type::queue_selection_policy_type,
                 }
                 continue;
             }
-            retval = best_pq->unsafe_top();
+            auto retval = best_pq->unsafe_top();
             best_pq->unsafe_pop();
             best_pq->unlock();
-            return true;
+            return retval;
         } while (true);
     }
 
@@ -168,29 +175,33 @@ class Handle : public MQ::traits_type::queue_selection_policy_type,
     ~Handle() = default;
 
     void push(value_type const &v) {
-        size_type index = this->get_push_pq();
-        auto pq = &mq_.pq_list_[index];
+        size_type i = this->get_push_pq();
+        auto pq = &mq_.pq_list_[i];
         while (!pq->try_lock()) {
             if constexpr (MQ::traits_type::count_stats) {
                 ++this->counters.locked_push_pq;
             }
             this->reset_push_pq();
-            index = this->get_push_pq();
-            pq = &mq_.pq_list_[index];
+            i = this->get_push_pq();
+            pq = &mq_.pq_list_[i];
         }
         pq->unsafe_push(v);
         pq->unlock();
         this->use_push_pq();
     }
 
-    bool try_pop(value_type &retval) {
+    std::optional<value_type> try_pop() {
         for (int i = 0; i < MQ::traits_type::num_pop_tries; ++i) {
-            if (try_pop_best(retval)) {
-                return true;
+            auto retval = try_pop_best();
+            if (retval) {
+                return *retval;
             }
             this->reset_pop_pqs();
         }
-        return MQ::traits_type::scan_on_failed_pop && try_pop_scan(retval);
+        if (!MQ::traits_type::scan_on_failed_pop) {
+            return std::nullopt;
+        }
+        return try_pop_scan();
     }
 
     [[nodiscard]] Counters const &get_counters() const noexcept {
@@ -198,7 +209,7 @@ class Handle : public MQ::traits_type::queue_selection_policy_type,
     }
 
     void reset_counters() noexcept {
-      this->counters = {};
+        this->counters = {};
     }
 };
 

@@ -42,8 +42,6 @@ template <typename PriorityQueue, std::size_t InsertionBuffersize = build_config
           std::size_t DeletionBuffersize = build_config::DefaultDeletionBuffersize>
 class BufferedPQ : private PriorityQueue {
     static_assert(InsertionBuffersize > 0 && DeletionBuffersize > 0, "Both bufferst must have nonzero capacity");
-
-   private:
     using base_type = PriorityQueue;
 
    public:
@@ -52,6 +50,7 @@ class BufferedPQ : private PriorityQueue {
     using reference = typename base_type::reference;
     using const_reference = typename base_type::const_reference;
     using size_type = std::size_t;
+    using priority_queue_type = base_type;
 
    private:
     using insertion_buffer_type = std::array<value_type, InsertionBuffersize>;

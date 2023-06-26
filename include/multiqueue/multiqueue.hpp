@@ -14,10 +14,7 @@
 #include "multiqueue/guarded_pq.hpp"
 #include "multiqueue/handle.hpp"
 #include "multiqueue/heap.hpp"
-/* #include "multiqueue/operation_policy.hpp" */
 #include "multiqueue/queue_selection/stick_random.hpp"
-/* #include "multiqueue/sentinel.hpp" */
-/* #include "multiqueue/value_traits.hpp" */
 
 #include <array>
 #include <cassert>
@@ -136,7 +133,7 @@ class MultiQueue {
     using internal_priority_queue_type = GuardedPQ<key_type, value_type, KeyOfValue, priority_queue_type, Sentinel>;
     using internal_allocator_type =
         typename std::allocator_traits<allocator_type>::template rebind_alloc<internal_priority_queue_type>;
-    using queue_selection_shared_data_type = typename traits_type::queue_selection_policy_type::SharedData;
+    using queue_selection_shared_data_type = typename handle_type::queue_selection_shared_data_type;
 
     internal_priority_queue_type *pq_list_{};
     size_type num_pqs_;

@@ -38,7 +38,7 @@
 
 namespace multiqueue {
 
-template <typename T, typename Compare = std::less<>, unsigned int Arity = build_config::DefaultHeapArity,
+template <typename T, typename Compare = std::less<>, int Arity = build_config::DefaultHeapArity,
           typename Container = std::vector<T>>
 class Heap {
     static_assert(Arity >= 2, "Arity must be at least two");
@@ -51,7 +51,7 @@ class Heap {
     using const_reference = typename container_type::const_reference;
 
     using size_type = typename container_type::size_type;
-
+    static constexpr int arity = Arity;
    protected:
     // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes): Compatibility to std::priority_queue
     container_type c;
@@ -63,11 +63,11 @@ class Heap {
 
     static constexpr size_type parent(size_type index) {
         HEAP_ASSERT(index != root);
-        return (index - size_type(1)) / Arity;
+        return (index - size_type(1)) / static_cast<size_type>(arity);
     }
 
     static constexpr size_type first_child(size_type index) noexcept {
-        return index * Arity + size_type(1);
+        return index * static_cast<size_type>(arity) + size_type(1);
     }
 
     // Find the index of the node that should become the parent of the others
@@ -111,7 +111,7 @@ class Heap {
         size_type index = 0;
         while (index < end_full) {
             auto const first = first_child(index);
-            auto const last = first + Arity;
+            auto const last = first + static_cast<size_type>(Arity);
             auto const next = new_parent(first, last);
             if (next == size() - 1) {
                 c[index] = std::move(c[size() - 1]);
@@ -219,7 +219,7 @@ class Heap {
 }  // namespace multiqueue
 
 namespace std {
-template <typename T, typename Compare, unsigned int Arity, typename Container, typename Alloc>
+template <typename T, typename Compare, int Arity, typename Container, typename Alloc>
 struct uses_allocator<multiqueue::Heap<T, Compare, Arity, Container>, Alloc> : uses_allocator<Container, Alloc>::type {
 };
 
