@@ -10,8 +10,6 @@
 
 #pragma once
 
-#include "multiqueue/build_config.hpp"
-
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -38,8 +36,8 @@
 
 namespace multiqueue {
 
-template <typename PriorityQueue, std::size_t InsertionBuffersize = build_config::DefaultInsertionBuffersize,
-          std::size_t DeletionBuffersize = build_config::DefaultDeletionBuffersize>
+template <typename PriorityQueue, std::size_t InsertionBuffersize = 64,
+          std::size_t DeletionBuffersize = 64>
 class BufferedPQ : private PriorityQueue {
     static_assert(InsertionBuffersize > 0 && DeletionBuffersize > 0, "Both bufferst must have nonzero capacity");
     using base_type = PriorityQueue;

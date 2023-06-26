@@ -94,22 +94,25 @@ struct ValueCompare {
     }
 };
 
-struct MultiQueueTraits {
-    using queue_selection_policy_type = build_config::DefaultQueueSelectionPolicy;
-    static constexpr bool count_stats = build_config::DefaultCountStats;
-    static constexpr bool strict_comparison = build_config::DefaultStrictComparison;
-    static constexpr int num_pop_tries = build_config::DefaultNumPopTries;
-    static constexpr bool scan_on_failed_pop = build_config::DefaultScanOnFailedPop;
+struct Traits {
+    using queue_selection_policy_type = queue_selection::StickRandom<2>;
+    static constexpr bool strict_comparison = true;
+    static constexpr bool count_stats = false;
+    static constexpr unsigned int num_pop_tries = 1;
+    static constexpr bool scan_on_failed_pop = true;
+    static constexpr unsigned int heap_arity = 8;
+    static constexpr std::size_t insertion_buffersize = 64;
+    static constexpr std::size_t deletion_buffersize = 64;
 };
 
-template <typename Value, typename KeyOfValue, typename Compare>
-using PriorityQueue = BufferedPQ<Heap<Value, ValueCompare<Value, KeyOfValue, Compare>>>;
+template <typename Value, typename KeyOfValue, typename Compare, typename Traits>
+using InnerPQ = BufferedPQ<Heap<Value, ValueCompare<Value, KeyOfValue, Compare>, Traits::heap_arity>, Traits::insertion_buffersize, Traits::deletion_buffersize>;
 
 }  // namespace defaults
 
 template <typename Key, typename Value = Key, typename Compare = std::less<Key>,
           typename Traits = defaults::MultiQueueTraits, typename KeyOfValue = defaults::KeyOfValue<Key, Value>,
-          typename PriorityQueue = defaults::PriorityQueue<Value, KeyOfValue, Compare>,
+          typename PriorityQueue = InnerPQ<Value, KeyOfValue, Compare, Traits>,
           typename Sentinel = defaults::Sentinel<Key, Compare>, typename Allocator = std::allocator<PriorityQueue>>
 class MultiQueue {
    public:

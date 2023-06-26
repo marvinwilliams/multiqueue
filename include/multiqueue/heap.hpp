@@ -9,8 +9,6 @@
 **/
 #pragma once
 
-#include "multiqueue/build_config.hpp"
-
 #include <cstddef>
 #include <functional>
 #include <utility>
@@ -38,8 +36,7 @@
 
 namespace multiqueue {
 
-template <typename T, typename Compare = std::less<>, int Arity = build_config::DefaultHeapArity,
-          typename Container = std::vector<T>>
+template <typename T, typename Compare = std::less<>, int Arity = 8, typename Container = std::vector<T>>
 class Heap {
     static_assert(Arity >= 2, "Arity must be at least two");
 
@@ -52,6 +49,7 @@ class Heap {
 
     using size_type = typename container_type::size_type;
     static constexpr int arity = Arity;
+
    protected:
     // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes): Compatibility to std::priority_queue
     container_type c;

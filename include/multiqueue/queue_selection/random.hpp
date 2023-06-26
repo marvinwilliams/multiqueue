@@ -11,7 +11,7 @@
 
 namespace multiqueue::queue_selection {
 
-template <unsigned NumPopPQs = build_config::DefaultNumPopPQs>
+template <unsigned NumPopPQs>
 class Random {
     pcg32 rng{};
     std::vector<std::size_t> pqs{};
