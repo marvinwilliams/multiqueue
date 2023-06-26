@@ -13,19 +13,6 @@ struct Counters {
     long long empty_pop_pqs = 0;
     long long locked_pop_pq = 0;
     long long stale_pop_pq = 0;
-
-    friend Counters &operator+=(Counters &lhs, Counters const &rhs) noexcept {
-        lhs.locked_push_pq += rhs.locked_push_pq;
-        lhs.empty_pop_pqs += rhs.empty_pop_pqs;
-        lhs.locked_pop_pq += rhs.locked_pop_pq;
-        lhs.stale_pop_pq += rhs.stale_pop_pq;
-        return lhs;
-    }
-
-    friend Counters operator+(Counters lhs, Counters const &rhs) noexcept {
-        lhs += rhs;
-        return lhs;
-    }
 };
 
 namespace detail {
