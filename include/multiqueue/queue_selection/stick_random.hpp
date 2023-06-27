@@ -57,7 +57,7 @@ class StickRandom {
     }
 
     void use_push_pq() noexcept {
-        if (use_count[push_pq] == 0) {
+        if (use_count[push_pq] <= 0) {
             reset_pq(push_pq);
         } else {
             --use_count[push_pq];
@@ -77,7 +77,7 @@ class StickRandom {
 
     void use_pop_pqs() noexcept {
         for (unsigned i = 0; i < NumPopPQs; ++i) {
-            if (use_count[i] == 0) {
+            if (use_count[i] <= 0) {
                 reset_pq(i);
             } else {
                 --use_count[i];
