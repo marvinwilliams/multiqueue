@@ -100,12 +100,11 @@ class Handle : public MQ::traits_type::queue_selection_policy_type,
                     if constexpr (MQ::traits_type::count_stats) {
                         ++this->counters.stale_pop_pq;
                     }
-                    break;
+                    continue;
                 }
                 auto retval = best_pq->unsafe_top();
                 best_pq->unsafe_pop();
                 best_pq->unlock();
-                this->use_pop_pqs();
                 return retval;
             } while (true);
             this->reset_pop_pqs();
@@ -181,6 +180,7 @@ class Handle : public MQ::traits_type::queue_selection_policy_type,
         for (unsigned i = 0; i < MQ::traits_type::num_pop_tries; ++i) {
             auto retval = try_pop_best();
             if (retval) {
+                this->use_pop_pqs();
                 return *retval;
             }
             this->reset_pop_pqs();
