@@ -100,18 +100,15 @@ struct Traits {
     static constexpr bool count_stats = false;
     static constexpr unsigned int num_pop_tries = 1;
     static constexpr bool scan_on_failed_pop = true;
-    static constexpr unsigned int heap_arity = 8;
-    static constexpr std::size_t insertion_buffersize = 64;
-    static constexpr std::size_t deletion_buffersize = 64;
 };
 
 template <typename Value, typename KeyOfValue, typename Compare, typename Traits>
-using InnerPQ = BufferedPQ<Heap<Value, ValueCompare<Value, KeyOfValue, Compare>, Traits::heap_arity>, Traits::insertion_buffersize, Traits::deletion_buffersize>;
+using InnerPQ = BufferedPQ<Heap<Value, ValueCompare<Value, KeyOfValue, Compare>>>;
 
 }  // namespace defaults
 
-template <typename Key, typename Value = Key, typename Compare = std::less<Key>,
-          typename Traits = defaults::Traits, typename KeyOfValue = defaults::KeyOfValue<Key, Value>,
+template <typename Key, typename Value = Key, typename Compare = std::less<Key>, typename Traits = defaults::Traits,
+          typename KeyOfValue = defaults::KeyOfValue<Key, Value>,
           typename PriorityQueue = defaults::InnerPQ<Value, KeyOfValue, Compare, Traits>,
           typename Sentinel = defaults::Sentinel<Key, Compare>, typename Allocator = std::allocator<PriorityQueue>>
 class MultiQueue {
