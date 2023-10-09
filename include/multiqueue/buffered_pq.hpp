@@ -36,8 +36,8 @@
 
 namespace multiqueue {
 
-template <typename PriorityQueue, std::size_t InsertionBuffersize = 64,
-          std::size_t DeletionBuffersize = 64>
+template <typename PriorityQueue, std::size_t InsertionBuffersize = 16,
+          std::size_t DeletionBuffersize = 16>
 class BufferedPQ : private PriorityQueue {
     static_assert(InsertionBuffersize > 0 && DeletionBuffersize > 0, "Both bufferst must have nonzero capacity");
     using base_type = PriorityQueue;
