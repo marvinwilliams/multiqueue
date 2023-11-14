@@ -109,7 +109,7 @@ class Parametric {
 
     auto get_pop_pqs() noexcept {
         if (use_random_pop_pqs) {
-            return std::array{rng() & pq_mask, rng() & pq_mask};
+            return std::array<std::size_t, 2>{rng() & pq_mask, rng() & pq_mask};
         }
         refresh_permutation();
         return std::array{get_index(0), get_index(1)};
