@@ -18,9 +18,22 @@ class Random {
     std::geometric_distribution<int> stick_dist;
     std::array<std::size_t, NumPopPQs> stick_index{};
     int use_count{};
-    unsigned push_pq{};
 
-    void reset_pqs() noexcept {
+    void replace_pq(int pq) noexcept {
+        if (NumPopPQs == 2) {
+            do {
+                stick_index[pq] = rng() & pq_mask;
+            } while (stick_index[pq] == stick_index[1 - pq]);
+        } else {
+            std::size_t index;
+            do {
+                index = rng() & pq_mask;
+            } while (std::find(stick_index.begin(), stick_index.end(), index) != stick_index.end());
+            stick_index[pq] = index;
+        }
+    }
+
+    void refresh_pqs() noexcept {
         for (auto it = stick_index.begin(); it != stick_index.end(); ++it) {
             do {
                 *it = rng() & pq_mask;
@@ -57,34 +70,22 @@ class Random {
         use_count = stick_dist(rng);
     }
 
-    std::size_t get_push_pq() noexcept {
+    auto const& get_pq_indices() noexcept {
         if (use_count <= 0) {
-            reset_pqs();
-        }
-        return stick_index[push_pq];
-    }
-
-    void reset_push_pq() noexcept {
-        use_count = 0;
-    }
-
-    void use_push_pq() noexcept {
-        --use_count;
-        push_pq = (push_pq + 1) % NumPopPQs;
-    }
-
-    auto const& get_pop_pqs() noexcept {
-        if (use_count <= 0) {
-            reset_pqs();
+            refresh_pqs();
         }
         return stick_index;
     }
 
-    void reset_pop_pqs() noexcept {
-        use_count = 0;
+    void reset_pq(std::size_t index) noexcept {
+        replace_pq(index);
     }
 
-    void use_pop_pqs() noexcept {
+    void reset_pqs() noexcept {
+        refresh_pqs();
+    }
+
+    void used_pqs() noexcept {
         --use_count;
     }
 };

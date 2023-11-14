@@ -28,8 +28,7 @@ struct HandleBase<true> {
 }  // namespace detail
 
 template <typename MQ>
-class Handle : public MQ::traits_type::stick_policy_type,
-               private detail::HandleBase<MQ::traits_type::count_stats> {
+class Handle : public MQ::traits_type::stick_policy_type, private detail::HandleBase<MQ::traits_type::count_stats> {
     friend MQ;
 
     using base_type = typename MQ::traits_type::stick_policy_type;
@@ -46,12 +45,11 @@ class Handle : public MQ::traits_type::stick_policy_type,
 
    private:
     MQ &mq_;
+    std::size_t push_index_{0};
     [[no_unique_address]] key_compare comp_;
 
     explicit Handle(MQ &mq) noexcept
-        : base_type{mq.num_pqs_, mq.stick_policy_config_, mq.stick_policy_shared_data_},
-          mq_{mq},
-          comp_{mq_.comp_} {
+        : base_type{mq.num_pqs_, mq.stick_policy_config_, mq.stick_policy_shared_data_}, mq_{mq}, comp_{mq_.comp_} {
     }
 
     bool sentinel_aware_compare(key_type const &lhs, key_type const &rhs) const {
@@ -67,58 +65,55 @@ class Handle : public MQ::traits_type::stick_policy_type,
     };
 
     std::optional<value_type> try_pop_best() {
-        do {
-            auto indices = this->get_pop_pqs();
-            do {
-                auto best_pq = &mq_.pq_list_[indices[0]];
-                auto best_key = best_pq->concurrent_top_key();
-                for (auto it = std::begin(indices) + 1; it != std::end(indices); ++it) {
-                    auto pq = &mq_.pq_list_[*it];
-                    auto key = pq->concurrent_top_key();
-                    if (sentinel_aware_compare(best_key, key)) {
-                        best_pq = pq;
-                        best_key = key;
-                    }
+        auto const &indices = this->get_pq_indices();
+        while (true) {
+            std::size_t best_pq = 0;
+            auto best_key = mq_.pq_list_[indices[0]].concurrent_top_key();
+            for (std::size_t i = 1; i < indices.size(); ++i) {
+                auto key = mq_.pq_list_[indices[i]].concurrent_top_key();
+                if (sentinel_aware_compare(best_key, key)) {
+                    best_pq = i;
+                    best_key = key;
                 }
-                if (best_key == MQ::sentinel_type::get()) {
-                    if constexpr (MQ::traits_type::count_stats) {
-                        ++this->counters.empty_pop_pqs;
-                    }
-                    return std::nullopt;
+            }
+            if (best_key == MQ::sentinel_type::get()) {
+                if constexpr (MQ::traits_type::count_stats) {
+                    ++this->counters.empty_pop_pqs;
                 }
-                if (!best_pq->try_lock()) {
-                    if constexpr (MQ::traits_type::count_stats) {
-                        ++this->counters.locked_pop_pq;
-                    }
-                    break;
+                return std::nullopt;
+            }
+            auto &pq = mq_.pq_list_[indices[best_pq]];
+            if (!pq.try_lock()) {
+                if constexpr (MQ::traits_type::count_stats) {
+                    ++this->counters.locked_pop_pq;
                 }
-                if (best_pq->unsafe_empty() ||
-                    (MQ::traits_type::strict_comparison &&
-                     MQ::key_of_value_type::get(best_pq->unsafe_top()) != best_key)) {
-                    // Top got empty (or changed) before locking
-                    best_pq->unlock();
-                    if constexpr (MQ::traits_type::count_stats) {
-                        ++this->counters.stale_pop_pq;
-                    }
-                    continue;
+                this->reset_pq(best_pq);
+                continue;
+            }
+            if (pq.unsafe_empty() ||
+                (MQ::traits_type::strict_comparison && MQ::key_of_value_type::get(pq.unsafe_top()) != best_key)) {
+                // Top got empty (or changed) before locking
+                pq.unlock();
+                if constexpr (MQ::traits_type::count_stats) {
+                    ++this->counters.stale_pop_pq;
                 }
-                auto retval = best_pq->unsafe_top();
-                best_pq->unsafe_pop();
-                best_pq->unlock();
-                return retval;
-            } while (true);
-            this->reset_pop_pqs();
-        } while (true);
+                continue;
+            }
+            auto retval = pq.unsafe_top();
+            pq.unsafe_pop();
+            pq.unlock();
+            return retval;
+        }
     }
 
     std::optional<value_type> try_pop_scan() {
-        do {
-            auto best_pq = mq_.pq_list_;
-            auto best_key = best_pq->concurrent_top_key();
-            for (auto pq = mq_.pq_list_ + 1, end = mq_.pq_list_ + mq_.num_pqs_; pq != end; ++pq) {
-                auto key = pq->concurrent_top_key();
+        while (true) {
+            std::size_t best_pq = 0;
+            auto best_key = mq_.pq_list_[0].concurrent_top_key();
+            for (std::size_t i = 1; i < mq_.num_pqs_; ++i) {
+                auto key = mq_.pq_list_[i].concurrent_top_key();
                 if (sentinel_aware_compare(best_key, key)) {
-                    best_pq = pq;
+                    best_pq = i;
                     best_key = key;
                 }
             }
@@ -129,28 +124,28 @@ class Handle : public MQ::traits_type::stick_policy_type,
                 }
                 return std::nullopt;
             }
-            if (!best_pq->try_lock()) {
-                // Not lock-free, but we could also just return the first found element without loss of quality, as most
-                // pqs are empty, anyways
+            auto &pq = mq_.pq_list_[best_pq];
+            if (!pq.try_lock()) {
                 if constexpr (MQ::traits_type::count_stats) {
                     ++this->counters.locked_pop_pq;
                 }
+                this->reset_pq(best_pq);
                 continue;
             }
-            if (best_pq->unsafe_empty() ||
-                (MQ::traits_type::strict_comparison && MQ::key_of_value_type::get(best_pq->unsafe_top()) != best_key)) {
+            if (pq.unsafe_empty() ||
+                (MQ::traits_type::strict_comparison && MQ::key_of_value_type::get(pq.unsafe_top()) != best_key)) {
                 // Top got empty (or changed) before locking
-                best_pq->unlock();
+                pq.unlock();
                 if constexpr (MQ::traits_type::count_stats) {
                     ++this->counters.stale_pop_pq;
                 }
                 continue;
             }
-            auto retval = best_pq->unsafe_top();
-            best_pq->unsafe_pop();
-            best_pq->unlock();
+            auto retval = pq.unsafe_top();
+            pq.unsafe_pop();
+            pq.unlock();
             return retval;
-        } while (true);
+        }
     }
 
    public:
@@ -161,29 +156,26 @@ class Handle : public MQ::traits_type::stick_policy_type,
     ~Handle() = default;
 
     void push(value_type const &v) {
-        size_type i = this->get_push_pq();
-        auto pq = &mq_.pq_list_[i];
-        while (!pq->try_lock()) {
+        auto const &indices = this->get_pq_indices();
+        while (!mq_.pq_list_[indices[push_index_]].try_lock()) {
             if constexpr (MQ::traits_type::count_stats) {
                 ++this->counters.locked_push_pq;
             }
-            this->reset_push_pq();
-            i = this->get_push_pq();
-            pq = &mq_.pq_list_[i];
+            this->reset_pq(push_index_);
         }
-        pq->unsafe_push(v);
-        pq->unlock();
-        this->use_push_pq();
+        mq_.pq_list_[indices[push_index_]].unsafe_push(v);
+        mq_.pq_list_[indices[push_index_]].unlock();
+        this->use_pqs();
     }
 
     std::optional<value_type> try_pop() {
         for (unsigned i = 0; i < MQ::traits_type::num_pop_tries; ++i) {
             auto retval = try_pop_best();
             if (retval) {
-                this->use_pop_pqs();
+                this->use_pqs();
                 return *retval;
             }
-            this->reset_pop_pqs();
+            this->reset_pqs();
         }
         if (!MQ::traits_type::scan_on_failed_pop) {
             return std::nullopt;
