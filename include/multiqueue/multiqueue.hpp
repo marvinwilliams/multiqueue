@@ -93,7 +93,7 @@ struct ValueCompare {
 };
 
 struct Traits {
-    using stick_policy_policy_type = stick_policy::Random<2>;
+    using stick_policy_type = stick_policy::Random<2>;
     static constexpr bool strict_comparison = true;
     static constexpr bool count_stats = false;
     static constexpr unsigned int num_pop_tries = 1;
@@ -125,7 +125,7 @@ class MultiQueue {
     using handle_type = Handle<MultiQueue>;
     friend handle_type;
     using traits_type = Traits;
-    using stick_policy_config_type = typename traits_type::stick_policy_policy_type::Config;
+    using stick_policy_config_type = typename traits_type::stick_policy_type::Config;
 
    private:
     using internal_priority_queue_type = GuardedPQ<key_type, value_type, KeyOfValue, priority_queue_type, Sentinel>;

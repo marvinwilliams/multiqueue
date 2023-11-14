@@ -28,12 +28,12 @@ struct HandleBase<true> {
 }  // namespace detail
 
 template <typename MQ>
-class Handle : public MQ::traits_type::queue_selection_policy_type,
+class Handle : public MQ::traits_type::stick_policy_type,
                private detail::HandleBase<MQ::traits_type::count_stats> {
     friend MQ;
 
-    using base_type = typename MQ::traits_type::queue_selection_policy_type;
-    using queue_selection_shared_data_type = typename base_type::SharedData;
+    using base_type = typename MQ::traits_type::stick_policy_type;
+    using stick_policy_shared_data_type = typename base_type::SharedData;
 
    public:
     using key_type = typename MQ::key_type;
@@ -49,7 +49,7 @@ class Handle : public MQ::traits_type::queue_selection_policy_type,
     [[no_unique_address]] key_compare comp_;
 
     explicit Handle(MQ &mq) noexcept
-        : base_type{mq.num_pqs_, mq.queue_selection_config_, mq.queue_selection_shared_data_},
+        : base_type{mq.num_pqs_, mq.stick_policy_config_, mq.stick_policy_shared_data_},
           mq_{mq},
           comp_{mq_.comp_} {
     }
