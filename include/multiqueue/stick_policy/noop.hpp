@@ -15,6 +15,7 @@ template <unsigned NumPopPQs = 2>
 class Noop {
     pcg32 rng{};
     std::int32_t pq_mask{0};
+    std::array<std::size_t, NumPopPQs> stick_index{};
 
     std::size_t get_random_pq() noexcept {
         return rng() & pq_mask;
@@ -40,39 +41,33 @@ class Noop {
         rng.seed(seq);
     }
 
-    std::size_t get_push_pq() noexcept {
-        return get_random_pq();
-    }
-
-    void reset_push_pq() noexcept {
-    }
-
-    void use_push_pq() noexcept {
-    }
-
-    auto get_pop_pqs() noexcept {
-        if constexpr (NumPopPQs == 1) {
-            return std::array<std::size_t, 1>{get_random_pq()};
-        } else if constexpr (NumPopPQs == 2) {
-            std::array<std::size_t, NumPopPQs> ret{get_random_pq(), get_random_pq()};
-            while (ret[0] == ret[1]) {
-                ret[1] = get_random_pq();
-            }
-            return ret;
-        }
-        std::array<std::size_t, NumPopPQs> ret{};
-        for (auto it = ret.begin(); it != ret.end(); std::advance(it)) {
+    auto const& get_pq_indices() noexcept {
+        for (auto it = stick_index.begin(); it != stick_index.end(); ++it) {
             do {
                 *it = rng() & pq_mask;
-            } while (std::find(ret.begin(), it, *it) != it);
+            } while (std::find(stick_index.begin(), it, *it) != it);
         }
-        return ret;
+        return stick_index;
     }
 
-    void reset_pop_pqs() noexcept {
+    void replace_pq(std::size_t index) noexcept {
+        if (NumPopPQs == 2) {
+            do {
+                stick_index[index] = rng() & pq_mask;
+            } while (stick_index[index] == stick_index[1 - index]);
+        } else {
+            std::size_t i;
+            do {
+                i = rng() & pq_mask;
+            } while (std::find(stick_index.begin(), stick_index.end(), i) != stick_index.end());
+            stick_index[index] = i;
+        }
     }
 
-    void use_pop_pqs() noexcept {
+    void reset_pqs() noexcept {
+    }
+
+    void used_pqs() noexcept {
     }
 };
 

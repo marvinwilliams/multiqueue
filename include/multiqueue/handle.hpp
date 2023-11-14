@@ -87,7 +87,7 @@ class Handle : public MQ::traits_type::stick_policy_type, private detail::Handle
                 if constexpr (MQ::traits_type::count_stats) {
                     ++this->counters.locked_pop_pq;
                 }
-                this->reset_pq(best_pq);
+                this->replace_pq(best_pq);
                 continue;
             }
             if (pq.unsafe_empty() ||

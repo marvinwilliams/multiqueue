@@ -19,20 +19,6 @@ class Random {
     std::array<std::size_t, NumPopPQs> stick_index{};
     int use_count{};
 
-    void replace_pq(int pq) noexcept {
-        if (NumPopPQs == 2) {
-            do {
-                stick_index[pq] = rng() & pq_mask;
-            } while (stick_index[pq] == stick_index[1 - pq]);
-        } else {
-            std::size_t index;
-            do {
-                index = rng() & pq_mask;
-            } while (std::find(stick_index.begin(), stick_index.end(), index) != stick_index.end());
-            stick_index[pq] = index;
-        }
-    }
-
     void refresh_pqs() noexcept {
         for (auto it = stick_index.begin(); it != stick_index.end(); ++it) {
             do {
@@ -72,8 +58,18 @@ class Random {
         return stick_index;
     }
 
-    void reset_pq(std::size_t index) noexcept {
-        replace_pq(index);
+    void replace_pq(std::size_t index) noexcept {
+        if (NumPopPQs == 2) {
+            do {
+                stick_index[index] = rng() & pq_mask;
+            } while (stick_index[index] == stick_index[1 - index]);
+        } else {
+            std::size_t i;
+            do {
+                i = rng() & pq_mask;
+            } while (std::find(stick_index.begin(), stick_index.end(), i) != stick_index.end());
+            stick_index[index] = i;
+        }
     }
 
     void reset_pqs() noexcept {
