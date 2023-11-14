@@ -9,10 +9,10 @@
 namespace multiqueue {
 
 struct Counters {
-    long long locked_push_pq = 0;
+    long long locked_pq = 0;
     long long empty_pop_pqs = 0;
-    long long locked_pop_pq = 0;
     long long stale_pop_pq = 0;
+    long long scanned = 0;
 };
 
 namespace detail {
@@ -107,38 +107,13 @@ class Handle : public MQ::traits_type::stick_policy_type, private detail::Handle
     }
 
     std::optional<value_type> try_pop_scan() {
-        while (true) {
-            std::size_t best_pq = 0;
-            auto best_key = mq_.pq_list_[0].concurrent_top_key();
-            for (std::size_t i = 1; i < mq_.num_pqs_; ++i) {
-                auto key = mq_.pq_list_[i].concurrent_top_key();
-                if (sentinel_aware_compare(best_key, key)) {
-                    best_pq = i;
-                    best_key = key;
-                }
-            }
-            if (best_key == MQ::sentinel_type::get()) {
-                // All pqs appear to be empty (not necessarily true in concurrent setting)
-                if constexpr (MQ::traits_type::count_stats) {
-                    ++this->counters.empty_pop_pqs;
-                }
-                return std::nullopt;
-            }
-            auto &pq = mq_.pq_list_[best_pq];
+        for (std::size_t i = 0; i < mq_.num_pqs_; ++i) {
+            auto &pq = mq_.pq_list_[i];
             if (!pq.try_lock()) {
-                if constexpr (MQ::traits_type::count_stats) {
-                    ++this->counters.locked_pop_pq;
-                }
-                this->reset_pq(best_pq);
                 continue;
             }
-            if (pq.unsafe_empty() ||
-                (MQ::traits_type::strict_comparison && MQ::key_of_value_type::get(pq.unsafe_top()) != best_key)) {
-                // Top got empty (or changed) before locking
+            if (pq.unsafe_empty()) {
                 pq.unlock();
-                if constexpr (MQ::traits_type::count_stats) {
-                    ++this->counters.stale_pop_pq;
-                }
                 continue;
             }
             auto retval = pq.unsafe_top();
@@ -146,6 +121,7 @@ class Handle : public MQ::traits_type::stick_policy_type, private detail::Handle
             pq.unlock();
             return retval;
         }
+        return std::nullopt;
     }
 
    public:
@@ -180,6 +156,9 @@ class Handle : public MQ::traits_type::stick_policy_type, private detail::Handle
         }
         if (!MQ::traits_type::scan_on_failed_pop) {
             return std::nullopt;
+        }
+        if constexpr (MQ::traits_type::count_stats) {
+            ++this->counters.scanned;
         }
         return try_pop_scan();
     }

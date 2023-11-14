@@ -77,7 +77,7 @@ class Random {
     }
 
     void reset_pqs() noexcept {
-        refresh_pqs();
+        use_count = 0;
     }
 
     void used_pqs() noexcept {
