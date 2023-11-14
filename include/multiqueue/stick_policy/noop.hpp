@@ -61,11 +61,10 @@ class Noop {
             return ret;
         }
         std::array<std::size_t, NumPopPQs> ret{};
-        ret[0] = get_random_pq();
-        for (unsigned i = 1; i < NumPopPQs; ++i) {
+        for (auto it = ret.begin(); it != ret.end(); std::advance(it)) {
             do {
-                ret[i] = get_random_pq();
-            } while (std::find(ret.begin(), ret.begin() + i, ret[i]) != ret.begin() + i);
+                *it = rng() & pq_mask;
+            } while (std::find(ret.begin(), it, *it) != it);
         }
         return ret;
     }
