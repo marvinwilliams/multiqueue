@@ -62,12 +62,7 @@ class Random {
         auto id = sd.id_count.fetch_add(1, std::memory_order_relaxed);
         auto seq = std::seed_seq{c.seed, id};
         rng.seed(seq);
-        for (auto it = stick_index.begin(); it != stick_index.end(); ++it) {
-            do {
-                *it = rng() & pq_mask;
-            } while (std::find(stick_index.begin(), it, *it) != it);
-        }
-        use_count = stick_dist(rng);
+        refresh_pqs();
     }
 
     auto const& get_pq_indices() noexcept {

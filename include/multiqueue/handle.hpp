@@ -166,6 +166,7 @@ class Handle : public MQ::traits_type::stick_policy_type, private detail::Handle
         mq_.pq_list_[indices[push_index_]].unsafe_push(v);
         mq_.pq_list_[indices[push_index_]].unlock();
         this->used_pqs();
+        push_index_ = (push_index_ + 1) % indices.size();
     }
 
     std::optional<value_type> try_pop() {
