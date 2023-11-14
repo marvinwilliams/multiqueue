@@ -137,7 +137,7 @@ class Handle : public MQ::traits_type::stick_policy_type, private detail::Handle
             if constexpr (MQ::traits_type::count_stats) {
                 ++this->counters.locked_push_pq;
             }
-            this->reset_pq(push_index_);
+            this->replace_pq(push_index_);
         }
         mq_.pq_list_[indices[push_index_]].unsafe_push(v);
         mq_.pq_list_[indices[push_index_]].unlock();
