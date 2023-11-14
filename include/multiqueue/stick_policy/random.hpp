@@ -8,19 +8,19 @@
 #include <cstddef>
 #include <random>
 
-namespace multiqueue::queue_selection {
+namespace multiqueue::stick_policy {
 
 template <unsigned NumPopPQs = 2>
-class StickRandom {
+class Random {
     pcg32 rng{};
-    std::uniform_int_distribution<std::size_t> pq_dist;
+    std::int32_t pq_mask{0};
     std::geometric_distribution<int> stick_dist;
     std::array<std::size_t, NumPopPQs> stick_index{};
     std::array<int, NumPopPQs> use_count{};
     unsigned push_pq{};
 
     void reset_pq(unsigned pq) noexcept {
-        stick_index[pq] = pq_dist(rng);
+        stick_index[pq] = rng() & pq_mask;
         use_count[pq] = stick_dist(rng);
     }
 
@@ -38,8 +38,8 @@ class StickRandom {
         }
     };
 
-    explicit StickRandom(std::size_t num_pqs, Config const& c, SharedData& sd) noexcept
-        : pq_dist(0, num_pqs - 1), stick_dist(1.0 / c.stickiness) {
+    explicit Random(std::size_t num_pqs, Config const& c, SharedData& sd) noexcept
+        : pq_mask((assert(num_pqs > 0 && (num_pqs & (num_pqs - 1)) == 0), static_cast<std::int32_t>(num_pqs) - 1)), stick_dist(1.0 / c.stickiness) {
         auto id = sd.id_count.fetch_add(1, std::memory_order_relaxed);
         auto seq = std::seed_seq{c.seed, id};
         rng.seed(seq);
@@ -86,4 +86,4 @@ class StickRandom {
     }
 };
 
-}  // namespace multiqueue::queue_selection
+}  // namespace multiqueue::stick_policy

@@ -10,19 +10,19 @@
 #include <cstddef>
 #include <random>
 
-namespace multiqueue::queue_selection {
+namespace multiqueue::stick_policy {
 
 // This variant uses a global permutation defined by the parameters a and b, such that i*a + b mod p yields a number
 // from [0,p-1] for i in [0,p-1]. For this to be a permutation, a and b needs to be coprime.Each handle has a unique id,
 // so that i in [NumPopPQs*id,NumPopPQs*(id+1)-1] identify the queues associated with this handle.
 
 template <unsigned NumPopPQs = 2>
-class GlobalPermutation {
+class Parametric {
     static constexpr int Shift = 32;
     static constexpr std::uint64_t Mask = (1ULL << Shift) - 1;
 
     pcg32 rng{};
-    std::uniform_int_distribution<std::size_t> pq_dist;
+    std::int32_t pq_mask{0};
     std::geometric_distribution<int> stick_dist;
     int use_count{};
     unsigned push_pq{};
@@ -46,7 +46,7 @@ class GlobalPermutation {
         std::uint64_t a = local_permutation & Mask;
         std::uint64_t b = (local_permutation >> Shift) & Mask;
         assert((a & 1) == 1);
-        return ((index + pq) * a + b) & (pq_dist.max());
+        return ((index + pq) * a + b) & pq_mask;
     }
 
     void refresh_permutation() noexcept {
@@ -74,13 +74,12 @@ class GlobalPermutation {
         }
     };
 
-    explicit GlobalPermutation(std::size_t num_pqs, Config const& c, SharedData& sd) noexcept
-        : pq_dist(0, num_pqs - 1),
+    explicit Parametric(std::size_t num_pqs, Config const& c, SharedData& sd) noexcept
+        : pq_mask((assert(num_pqs > 0 && (num_pqs & (num_pqs - 1)) == 0), static_cast<std::int32_t>(num_pqs) - 1)),
           stick_dist(1.0 / (static_cast<unsigned>(c.stickiness) * NumPopPQs)),
           permutation{sd.permutation},
           local_permutation{sd.permutation.load(std::memory_order_relaxed)},
           index(sd.id_count.fetch_add(1, std::memory_order_relaxed)) {
-        assert((num_pqs & num_pqs - 1) == 0);
         auto seq = std::seed_seq{c.seed, static_cast<int>(index)};
         rng.seed(seq);
         use_count = stick_dist(rng);
@@ -88,7 +87,7 @@ class GlobalPermutation {
 
     std::size_t get_push_pq() noexcept {
         if (use_random_push_pq) {
-            return pq_dist(rng);
+            return rng() & pq_mask;
         }
         refresh_permutation();
         return get_index(push_pq);
@@ -110,7 +109,7 @@ class GlobalPermutation {
 
     auto get_pop_pqs() noexcept {
         if (use_random_pop_pqs) {
-            return std::array{pq_dist(rng), pq_dist(rng)};
+            return std::array{rng() & pq_mask, rng() & pq_mask};
         }
         refresh_permutation();
         return std::array{get_index(0), get_index(1)};
@@ -130,4 +129,4 @@ class GlobalPermutation {
     }
 };
 
-}  // namespace multiqueue::queue_selection
+}  // namespace multiqueue::stick_policy

@@ -35,8 +35,8 @@ target_include_directories(
 target_include_directories(
   multiqueue
   SYSTEM INTERFACE
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/multiqueue/third_party>
-  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/multiqueue/third_party>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/multiqueue/third_party/pcg>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/multiqueue/third_party/pcg>
 )
 
 # We require c++17 or above

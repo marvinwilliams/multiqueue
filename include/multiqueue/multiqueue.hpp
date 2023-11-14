@@ -13,7 +13,7 @@
 #include "multiqueue/guarded_pq.hpp"
 #include "multiqueue/handle.hpp"
 #include "multiqueue/heap.hpp"
-#include "multiqueue/queue_selection/stick_random.hpp"
+#include "multiqueue/stick_policy/random.hpp"
 
 #include <array>
 #include <cassert>
@@ -21,7 +21,6 @@
 #include <cstdlib>
 #include <memory>
 #include <mutex>
-#include <random>
 #include <stdexcept>
 #include <type_traits>
 
@@ -94,7 +93,7 @@ struct ValueCompare {
 };
 
 struct Traits {
-    using queue_selection_policy_type = queue_selection::StickRandom<2>;
+    using stick_policy_policy_type = stick_policy::Random<2>;
     static constexpr bool strict_comparison = true;
     static constexpr bool count_stats = false;
     static constexpr unsigned int num_pop_tries = 1;
@@ -106,8 +105,8 @@ using InnerPQ = BufferedPQ<Heap<Value, ValueCompare<Value, KeyOfValue, Compare>>
 
 }  // namespace defaults
 
-template <typename Key, typename Value = Key, typename Compare = std::less<Key>, typename Traits = defaults::Traits,
-          typename KeyOfValue = defaults::KeyOfValue<Key, Value>,
+template <typename Key, typename Compare = std::less<>, typename Value = Key,
+          typename KeyOfValue = defaults::KeyOfValue<Key, Value>, typename Traits = defaults::Traits,
           typename PriorityQueue = defaults::InnerPQ<Value, KeyOfValue, Compare, Traits>,
           typename Sentinel = defaults::Sentinel<Key, Compare>, typename Allocator = std::allocator<PriorityQueue>>
 class MultiQueue {
@@ -126,18 +125,18 @@ class MultiQueue {
     using handle_type = Handle<MultiQueue>;
     friend handle_type;
     using traits_type = Traits;
-    using queue_selection_config_type = typename traits_type::queue_selection_policy_type::Config;
+    using stick_policy_config_type = typename traits_type::stick_policy_policy_type::Config;
 
    private:
     using internal_priority_queue_type = GuardedPQ<key_type, value_type, KeyOfValue, priority_queue_type, Sentinel>;
     using internal_allocator_type =
         typename std::allocator_traits<allocator_type>::template rebind_alloc<internal_priority_queue_type>;
-    using queue_selection_shared_data_type = typename handle_type::queue_selection_shared_data_type;
+    using stick_policy_shared_data_type = typename handle_type::stick_policy_shared_data_type;
 
     internal_priority_queue_type *pq_list_{};
     size_type num_pqs_;
-    [[no_unique_address]] queue_selection_config_type queue_selection_config_;
-    [[no_unique_address]] queue_selection_shared_data_type queue_selection_shared_data_;
+    [[no_unique_address]] stick_policy_config_type stick_policy_config_;
+    [[no_unique_address]] stick_policy_shared_data_type stick_policy_shared_data_;
     [[no_unique_address]] key_compare comp_;
     [[no_unique_address]] internal_allocator_type alloc_;
 
@@ -147,12 +146,12 @@ class MultiQueue {
     MultiQueue &operator=(const MultiQueue &) = delete;
     MultiQueue &operator=(MultiQueue &&) = delete;
 
-    explicit MultiQueue(size_type num_pqs, queue_selection_config_type const &config = queue_selection_config_type{},
-                        priority_queue_type const &pq = priority_queue_type{}, key_compare const &comp = key_compare(),
-                        allocator_type const &alloc = allocator_type())
+    explicit MultiQueue(size_type num_pqs, stick_policy_config_type const &config = {},
+                        priority_queue_type const &pq = {}, key_compare const &comp = {},
+                        allocator_type const &alloc = {})
         : num_pqs_{num_pqs},
-          queue_selection_config_{config},
-          queue_selection_shared_data_(num_pqs_),
+          stick_policy_config_{config},
+          stick_policy_shared_data_(num_pqs_),
           comp_{comp},
           alloc_(alloc) {
         assert(num_pqs_ > 0);
@@ -164,9 +163,9 @@ class MultiQueue {
     }
 
     explicit MultiQueue(size_type num_pqs, typename PriorityQueue::size_type initial_capacity,
-                        queue_selection_config_type const &config = queue_selection_config_type{},
-                        priority_queue_type const &pq = priority_queue_type{}, key_compare const &comp = key_compare(),
-                        allocator_type const &alloc = allocator_type())
+                        stick_policy_config_type const &config = {},
+                        priority_queue_type const &pq = {}, key_compare const &comp = {},
+                        allocator_type const &alloc = {})
         : MultiQueue(num_pqs, config, pq, comp, alloc) {
         auto cap_per_queue = (initial_capacity + num_pqs_ - 1) / num_pqs_;
         for (auto *it = pq_list_; it != pq_list_ + num_pqs_; ++it) {
@@ -176,11 +175,11 @@ class MultiQueue {
 
     template <typename ForwardIt>
     explicit MultiQueue(ForwardIt first, ForwardIt last,
-                        queue_selection_config_type const &config = queue_selection_config_type{},
-                        key_compare const &comp = key_compare(), allocator_type const &alloc = allocator_type())
+                        stick_policy_config_type const &config = {},
+                        key_compare const &comp = {}, allocator_type const &alloc = {})
         : num_pqs_{std::distance(first, last)},
-          queue_selection_config_{config},
-          queue_selection_shared_data_(num_pqs_),
+          stick_policy_config_{config},
+          stick_policy_shared_data_(num_pqs_),
           comp_{comp},
           alloc_(alloc) {
         pq_list_ = std::allocator_traits<internal_allocator_type>::allocate(alloc_, num_pqs_);
@@ -200,8 +199,8 @@ class MultiQueue {
         return handle_type(*this);
     }
 
-    [[nodiscard]] queue_selection_config_type const &get_queue_selection_config() const noexcept {
-        return queue_selection_config_;
+    [[nodiscard]] stick_policy_config_type const &get_stick_policy_config() const noexcept {
+        return stick_policy_config_;
     }
 
     [[nodiscard]] size_type num_pqs() const noexcept {

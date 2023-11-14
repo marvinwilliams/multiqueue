@@ -10,17 +10,17 @@
 #include <cstddef>
 #include <random>
 
-namespace multiqueue::queue_selection {
+namespace multiqueue::stick_policy {
 
 template <unsigned NumPopPQs = 2>
-class SwapAssignment {
+class Swap {
     struct alignas(build_config::L1CacheLinesize) AlignedIndex {
         std::atomic<std::size_t> value;
     };
     using Permutation = std::vector<AlignedIndex>;
 
     pcg32 rng{};
-    std::uniform_int_distribution<std::size_t> pq_dist;
+    std::int32_t pq_mask{0};
     std::geometric_distribution<int> stick_dist;
     std::array<std::size_t, NumPopPQs> stick_index{};
     std::array<int, NumPopPQs> use_count{};
@@ -41,7 +41,7 @@ class SwapAssignment {
         std::size_t target_index;     // NOLINT(cppcoreguidelines-init-variables)
         std::size_t target_assigned;  // NOLINT(cppcoreguidelines-init-variables)
         do {
-            target_index = pq_dist(rng);
+            target_index = rng() & pq_mask;
             target_assigned = permutation[target_index].value.load(std::memory_order_relaxed);
         } while (target_assigned == swapping ||
                  !permutation[target_index].value.compare_exchange_weak(target_assigned, stick_index[pq],
@@ -76,8 +76,11 @@ class SwapAssignment {
             }
         }
     };
-    explicit SwapAssignment(std::size_t num_pqs, Config const& c, SharedData& sd) noexcept
-        : pq_dist(0, num_pqs - 1), stick_dist(1.0 / c.stickiness), permutation{sd.permutation} {
+
+    explicit Swap(std::size_t num_pqs, Config const& c, SharedData& sd) noexcept
+        : pq_mask((assert(num_pqs > 0 && (num_pqs & (num_pqs - 1)) == 0), static_cast<std::int32_t>(num_pqs) - 1)),
+          stick_dist(1.0 / c.stickiness),
+          permutation{sd.permutation} {
         auto id = sd.id_count.fetch_add(1, std::memory_order_relaxed);
         auto seq = std::seed_seq{c.seed, id};
         rng.seed(seq);
@@ -130,4 +133,4 @@ class SwapAssignment {
     }
 };
 
-}  // namespace multiqueue::queue_selection
+}  // namespace multiqueue::stick_policy
