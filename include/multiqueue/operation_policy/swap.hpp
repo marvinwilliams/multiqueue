@@ -1,6 +1,6 @@
 #pragma once
 
-#include "multiqueue/build_config.hpp"
+#include "build_config.hpp"
 
 #include "pcg_random.hpp"
 

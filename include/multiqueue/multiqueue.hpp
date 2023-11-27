@@ -9,11 +9,9 @@
 **/
 #pragma once
 
-#include "multiqueue/buffered_pq.hpp"
-#include "multiqueue/guarded_pq.hpp"
-#include "multiqueue/handle.hpp"
-#include "multiqueue/heap.hpp"
-#include "multiqueue/stick_policy/random.hpp"
+#include "defaults.hpp"
+#include "handle.hpp"
+#include "lockable_pq.hpp"
 
 #include <array>
 #include <cassert>
@@ -26,190 +24,176 @@
 
 namespace multiqueue {
 
-namespace defaults {
-
-template <typename Key, typename Value>
-struct KeyOfValue {
-    static_assert(std::is_same_v<Key, Value>, "KeyOfValue not specialized for this value type");
-};
-
-template <typename Key>
-struct KeyOfValue<Key, Key> {
-    static constexpr Key const &get(Key const &key) noexcept {
-        return key;
-    }
-};
-
-template <typename Key, typename T>
-struct KeyOfValue<Key, std::pair<Key, T>> {
-    static constexpr Key const &get(std::pair<Key, T> const &p) noexcept {
-        return p.first;
-    }
-};
-
-template <typename T, typename Compare>
-struct Sentinel {
-    using key_type = T;
-    using key_compare = Compare;
-    static constexpr key_type const &key_of_value(T const &v) noexcept {
-        return v;
-    }
-    static constexpr bool implicit_sentinel = false;
-    static constexpr key_type sentinel() noexcept {
-        static_assert(std::is_default_constructible_v<key_type>, "key_type must be default-constructible");
-        return key_type();
-    }
-};
-
-template <typename Key>
-struct Sentinel<Key, std::less<Key>> {
-    static constexpr bool is_implicit = std::numeric_limits<Key>::is_bounded;
-    static constexpr Key get() noexcept {
-        return std::numeric_limits<Key>::lowest();
-    }
-};
-
-template <typename Key>
-struct Sentinel<Key, std::less<>> : Sentinel<Key, std::less<Key>> {};
-
-template <typename Key>
-struct Sentinel<Key, std::greater<Key>> {
-    static constexpr bool is_implicit = std::numeric_limits<Key>::is_bounded;
-    static constexpr Key get() noexcept {
-        return std::numeric_limits<Key>::max();
-    }
-};
-
-template <typename Key>
-struct Sentinel<Key, std::greater<>> : Sentinel<Key, std::greater<Key>> {};
-
-template <typename Value, typename KeyOfValue, typename Compare>
-struct ValueCompare {
-    Compare comp;
-
-    bool operator()(Value const &lhs, Value const &rhs) const noexcept {
-        return comp(KeyOfValue::get(lhs), KeyOfValue::get(rhs));
-    }
-};
-
-struct Traits {
-    using stick_policy_type = stick_policy::Random<2>;
-    static constexpr bool strict_comparison = true;
-    static constexpr bool count_stats = false;
-    static constexpr unsigned int num_pop_tries = 1;
-    static constexpr bool scan_on_failed_pop = true;
-};
-
-template <typename Value, typename KeyOfValue, typename Compare, typename Traits>
-using InnerPQ = BufferedPQ<Heap<Value, ValueCompare<Value, KeyOfValue, Compare>>>;
-
-}  // namespace defaults
-
-template <typename Key, typename Compare = std::less<>, typename Value = Key,
-          typename KeyOfValue = defaults::KeyOfValue<Key, Value>, typename Traits = defaults::Traits,
-          typename PriorityQueue = defaults::InnerPQ<Value, KeyOfValue, Compare, Traits>,
-          typename Sentinel = defaults::Sentinel<Key, Compare>, typename Allocator = std::allocator<PriorityQueue>>
+template <typename Key, typename Value, typename KeyOfValue, typename Compare = std::less<>,
+          typename Traits = defaults::Traits, typename Sentinel = defaults::ImplicitSentinel<Key, Compare>,
+          typename PriorityQueue = defaults::PriorityQueue<Value, KeyOfValue, Compare>,
+          typename Allocator = std::allocator<PriorityQueue>>
 class MultiQueue {
    public:
     using key_type = Key;
     using value_type = Value;
     using key_compare = Compare;
-    using value_compare = typename PriorityQueue::value_compare;
+    using key_of_value_type = KeyOfValue;
+    using traits_type = Traits;
     using priority_queue_type = PriorityQueue;
+    using value_compare = typename priority_queue_type::value_compare;
     using reference = value_type &;
     using const_reference = value_type const &;
     using size_type = std::size_t;
     using allocator_type = Allocator;
     using sentinel_type = Sentinel;
-    using key_of_value_type = KeyOfValue;
-    using handle_type = Handle<MultiQueue>;
-    friend handle_type;
-    using traits_type = Traits;
-    using stick_policy_config_type = typename traits_type::stick_policy_type::Config;
+    using operation_policy_config_type = typename traits_type::operation_policy_type::Config;
 
    private:
-    using internal_priority_queue_type = GuardedPQ<key_type, value_type, KeyOfValue, priority_queue_type, Sentinel>;
+    using lockable_pq_type = LockablePQ<key_type, value_type, KeyOfValue, priority_queue_type, sentinel_type>;
     using internal_allocator_type =
-        typename std::allocator_traits<allocator_type>::template rebind_alloc<internal_priority_queue_type>;
-    using stick_policy_shared_data_type = typename handle_type::stick_policy_shared_data_type;
+        typename std::allocator_traits<allocator_type>::template rebind_alloc<lockable_pq_type>;
+    using operation_policy_data_type = typename traits_type::operation_policy_type::SharedData;
 
-    internal_priority_queue_type *pq_list_{};
-    size_type num_pqs_;
-    [[no_unique_address]] stick_policy_config_type stick_policy_config_;
-    [[no_unique_address]] stick_policy_shared_data_type stick_policy_shared_data_;
-    [[no_unique_address]] key_compare comp_;
-    [[no_unique_address]] internal_allocator_type alloc_;
+    class Context {
+       public:
+        using key_type = key_type;
+        using value_type = value_type;
+        using pq_type = lockable_pq_type;
+        using operation_policy_data_type = operation_policy_data_type;
+
+       private:
+        lockable_pq_type *pq_list_{nullptr};
+        size_type num_pqs_{};
+        [[no_unique_address]] operation_policy_data_type data_;
+        [[no_unique_address]] key_compare comp_;
+        [[no_unique_address]] internal_allocator_type alloc_;
+
+        explicit Context(size_type num_pqs, operation_policy_config_type const &config, priority_queue_type const &pq,
+                         key_compare const &comp, allocator_type const &alloc)
+            : num_pqs_{num_pqs},
+              pq_list_{std::allocator_traits<internal_allocator_type>::allocate(alloc_, num_pqs)},
+              data_{config, num_pqs},
+              comp_{comp},
+              alloc_{alloc} {
+            assert(num_pqs_ > 0);
+
+            for (auto *it = pq_list_; it != std::next(pq_list_, num_pqs_); ++it) {
+                std::allocator_traits<internal_allocator_type>::construct(alloc_, it, pq);
+            }
+        }
+
+        explicit Context(size_type num_pqs, typename priority_queue_type::size_type initial_capacity,
+                         operation_policy_config_type const &config, priority_queue_type const &pq,
+                         key_compare const &comp, allocator_type const &alloc)
+            : Context(num_pqs, config, pq, comp, alloc) {
+            auto cap_per_queue = (initial_capacity + num_pqs - 1) / num_pqs;
+            for (auto *it = pq_list_; it != std::next(pq_list_, num_pqs_); ++it) {
+                it->get_pq().reserve(cap_per_queue);
+            }
+        }
+
+        template <typename ForwardIt>
+        explicit Context(ForwardIt first, ForwardIt last, operation_policy_config_type const &config,
+                         key_compare const &comp, allocator_type const &alloc)
+            : num_pqs_{std::distance(first, last)},
+              pq_list_{std::allocator_traits<internal_allocator_type>::allocate(alloc_, num_pqs_)},
+              data_{config, std::distance(first, last)},
+              comp_{comp},
+              alloc_(alloc) {
+            for (auto *it = pq_list_; it != std::next(pq_list_, num_pqs_); ++it, ++first) {
+                std::allocator_traits<internal_allocator_type>::construct(alloc_, it, *first);
+            }
+        }
+
+        ~Context() noexcept {
+            for (auto *it = pq_list_; it != std::next(pq_list_, num_pqs_); ++it) {
+                std::allocator_traits<internal_allocator_type>::destroy(alloc_, it);
+            }
+            std::allocator_traits<internal_allocator_type>::deallocate(alloc_, pq_list_, num_pqs_);
+        }
+
+       public:
+        Context(const Context &) = delete;
+        Context(Context &&) = delete;
+        Context &operator=(const Context &) = delete;
+        Context &operator=(Context &&) = delete;
+
+        [[nodiscard]] lockable_pq_type *pq_list() const noexcept {
+            return pq_list_;
+        }
+
+        [[nodiscard]] constexpr size_type num_pqs() const noexcept {
+            return num_pqs_;
+        }
+
+        [[nodiscard]] operation_policy_data_type &operation_policy_data() noexcept {
+            return data_;
+        }
+
+        [[nodiscard]] bool compare(key_type const &lhs, key_type const &rhs) const noexcept {
+            return Sentinel::compare(comp_, lhs, rhs);
+        }
+
+        [[nodiscard]] static constexpr key_type sentinel() noexcept {
+            return Sentinel::sentinel();
+        }
+
+        [[nodiscard]] static constexpr bool is_sentinel(key_type const &key) noexcept {
+            return Sentinel::is_sentinel(key);
+        }
+
+        [[nodiscard]] static constexpr key_type get_key(value_type const &value) noexcept {
+            return KeyOfValue::get(value);
+        }
+    };
+
+    using handle_type = Handle<Context, typename traits_type::policy_type, traits_type::ScanIfEmpty>;
+
+    Context context_;
 
    public:
-    MultiQueue(const MultiQueue &) = delete;
-    MultiQueue(MultiQueue &&) = delete;
-    MultiQueue &operator=(const MultiQueue &) = delete;
-    MultiQueue &operator=(MultiQueue &&) = delete;
-
-    explicit MultiQueue(size_type num_pqs, stick_policy_config_type const &config = {},
-                        priority_queue_type const &pq = {}, key_compare const &comp = {},
+    explicit MultiQueue(size_type num_pqs, policy_config_type const &policy_config = {},
+                        priority_queue_type const &pq = priority_queue_type(), key_compare const &comp = {},
                         allocator_type const &alloc = {})
-        : num_pqs_{num_pqs},
-          stick_policy_config_{config},
-          stick_policy_shared_data_(num_pqs_),
-          comp_{comp},
-          alloc_(alloc) {
-        assert(num_pqs_ > 0);
-
-        pq_list_ = std::allocator_traits<internal_allocator_type>::allocate(alloc_, num_pqs_);
-        for (auto *it = pq_list_; it != pq_list_ + num_pqs_; ++it) {
-            std::allocator_traits<internal_allocator_type>::construct(alloc_, it, pq);
-        }
+        : Context{num_pqs, config, pq, comp, alloc} {
     }
 
-    explicit MultiQueue(size_type num_pqs, typename PriorityQueue::size_type initial_capacity,
-                        stick_policy_config_type const &config = {},
-                        priority_queue_type const &pq = {}, key_compare const &comp = {},
+    explicit MultiQueue(size_type num_pqs, typename priority_queue_type::size_type initial_capacity,
+                        policy_config_type const &policy_config = {},
+                        priority_queue_type const &pq = priority_queue_type(), key_compare const &comp = {},
                         allocator_type const &alloc = {})
-        : MultiQueue(num_pqs, config, pq, comp, alloc) {
-        auto cap_per_queue = (initial_capacity + num_pqs_ - 1) / num_pqs_;
-        for (auto *it = pq_list_; it != pq_list_ + num_pqs_; ++it) {
-            it->reserve(cap_per_queue);
-        }
+        : Context{num_pqs, initial_capacity, config, pq, comp, alloc} {
     }
 
     template <typename ForwardIt>
-    explicit MultiQueue(ForwardIt first, ForwardIt last,
-                        stick_policy_config_type const &config = {},
+    explicit MultiQueue(ForwardIt first, ForwardIt last, policy_config_type const &policy_config = {},
                         key_compare const &comp = {}, allocator_type const &alloc = {})
-        : num_pqs_{std::distance(first, last)},
-          stick_policy_config_{config},
-          stick_policy_shared_data_(num_pqs_),
-          comp_{comp},
-          alloc_(alloc) {
-        pq_list_ = std::allocator_traits<internal_allocator_type>::allocate(alloc_, num_pqs_);
-        for (auto *it = pq_list_; it != pq_list_ + num_pqs_; ++it, ++first) {
-            std::allocator_traits<internal_allocator_type>::construct(alloc_, it, *first);
-        }
-    }
-
-    ~MultiQueue() noexcept {
-        for (auto *it = pq_list_; it != pq_list_ + num_pqs_; ++it) {
-            std::allocator_traits<internal_allocator_type>::destroy(alloc_, it);
-        }
-        std::allocator_traits<internal_allocator_type>::deallocate(alloc_, pq_list_, num_pqs_);
+        : Context{first, last, config, comp, alloc} {
     }
 
     handle_type get_handle() noexcept {
-        return handle_type(*this);
-    }
-
-    [[nodiscard]] stick_policy_config_type const &get_stick_policy_config() const noexcept {
-        return stick_policy_config_;
+        return handle_type(context_);
     }
 
     [[nodiscard]] size_type num_pqs() const noexcept {
-        return num_pqs_;
+        return context_.num_pqs_;
     }
 
     [[nodiscard]] key_compare key_comp() const {
-        return comp_;
+        return context_.comp_;
+    }
+
+    [[nodiscard]] allocator_type get_allocator() const {
+        return allocator_type_(context_.alloc_);
     }
 };
 
+template <typename T, typename Compare = std::less<>, typename Traits = defaults::Traits,
+          typename Sentinel = defaults::ImplicitSentinel<T, Compare>,
+          typename PriorityQueue = defaults::PriorityQueue<T, utils::Identity, Compare>,
+          typename Allocator = std::allocator<PriorityQueue>>
+using ValueMultiQueue = MultiQueue<T, T, utils::Identity, Compare, Traits, Sentinel, PriorityQueue, Allocator>;
+
+template <typename Key, typename T, typename Compare = std::less<>, typename Traits = defaults::Traits,
+          typename Sentinel = defaults::ImplicitSentinel<T, Compare>,
+          typename PriorityQueue = defaults::PriorityQueue<std::pair<Key, T>, utils::PairFirst, Compare>,
+          typename Allocator = std::allocator<PriorityQueue>>
+using KeyValueMultiQueue =
+    MultiQueue<Key, std::pair<Key, T>, utils::PairFirst, Compare, Traits, Sentinel, PriorityQueue, Allocator>;
 }  // namespace multiqueue
