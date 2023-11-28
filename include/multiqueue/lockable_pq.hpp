@@ -10,7 +10,7 @@
 
 #pragma once
 
-#include "build_config.hpp"
+#include "multiqueue/build_config.hpp"
 
 #include <atomic>
 #include <cassert>

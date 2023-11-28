@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(multiqueue VERSION 2.0.0 LANGUAGES CXX)
+project(multiqueue VERSION 3.0.0 LANGUAGES CXX)
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
@@ -48,6 +48,8 @@ target_compile_features(
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads)
+find_package(Boost)
+find_package(Doxygen)
 
 # The namespace alias can be used as link target if this project is a
 # subproject.
@@ -73,18 +75,17 @@ if(MULTIQUEUE_BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()
 
-find_package(Doxygen)
 if (MULTIQUEUE_DOXYGEN)
-if(Doxygen_FOUND)
-  doxygen_add_docs(
+  if(Doxygen_FOUND)
+    doxygen_add_docs(
     doxygen
     "${CMAKE_CURRENT_LIST_DIR}/include/multiqueue"
     COMMENT
     "Generate documentation"
-  )
-else()
-  message(WARNING "Doxygen not found, skipping documentation generation")
-endif()
+    )
+  else()
+    message(WARNING "Doxygen not found, skipping documentation generation")
+  endif()
 endif()
 
 include(InstallRequiredSystemLibraries)

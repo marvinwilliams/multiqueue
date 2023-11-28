@@ -9,9 +9,9 @@
 **/
 #pragma once
 
-#include "defaults.hpp"
-#include "handle.hpp"
-#include "lockable_pq.hpp"
+#include "multiqueue/defaults.hpp"
+#include "multiqueue/handle.hpp"
+#include "multiqueue/lockable_pq.hpp"
 
 #include <array>
 #include <cassert>
@@ -143,26 +143,26 @@ class MultiQueue {
         }
     };
 
-    using handle_type = Handle<Context, typename traits_type::policy_type, traits_type::ScanIfEmpty>;
+    using handle_type = Handle<Context, typename traits_type::operation_policy_type, traits_type::ScanIfEmpty>;
 
     Context context_;
 
    public:
-    explicit MultiQueue(size_type num_pqs, policy_config_type const &policy_config = {},
+    explicit MultiQueue(size_type num_pqs, operation_policy_config_type const &config = {},
                         priority_queue_type const &pq = priority_queue_type(), key_compare const &comp = {},
                         allocator_type const &alloc = {})
         : Context{num_pqs, config, pq, comp, alloc} {
     }
 
     explicit MultiQueue(size_type num_pqs, typename priority_queue_type::size_type initial_capacity,
-                        policy_config_type const &policy_config = {},
+                        operation_policy_config_type const &config = {},
                         priority_queue_type const &pq = priority_queue_type(), key_compare const &comp = {},
                         allocator_type const &alloc = {})
         : Context{num_pqs, initial_capacity, config, pq, comp, alloc} {
     }
 
     template <typename ForwardIt>
-    explicit MultiQueue(ForwardIt first, ForwardIt last, policy_config_type const &policy_config = {},
+    explicit MultiQueue(ForwardIt first, ForwardIt last, operation_policy_config_type const &config = {},
                         key_compare const &comp = {}, allocator_type const &alloc = {})
         : Context{first, last, config, comp, alloc} {
     }

@@ -81,7 +81,7 @@ class BufferedPQ : private PriorityQueue {
     }
 
    public:
-    explicit BufferedPQ(value_compare compare = value_compare()) : base_type(compare) {
+    explicit BufferedPQ(value_compare const& compare = value_compare()) : base_type(compare) {
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
@@ -155,7 +155,6 @@ class BufferedPQ : private PriorityQueue {
 template <typename PriorityQueue>
 class BufferedPQ<PriorityQueue, 0, 0> : private PriorityQueue {
    private:
-    static constexpr std::size_t ReservePerPQ = std::size_t{1} << 20;
     using base_type = PriorityQueue;
 
    public:
@@ -165,7 +164,7 @@ class BufferedPQ<PriorityQueue, 0, 0> : private PriorityQueue {
     using const_reference = typename base_type::const_reference;
     using size_type = std::size_t;
 
-    explicit BufferedPQ(value_compare compare = value_compare()) : base_type(compare) {
+    explicit BufferedPQ(value_compare const& compare = value_compare()) : base_type(compare) {
     }
 
     template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>

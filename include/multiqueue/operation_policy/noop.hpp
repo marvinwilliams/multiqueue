@@ -1,6 +1,6 @@
 #pragma once
 
-#include "third_party/pcg/pcg_random.hpp"
+#include "multiqueue/third_party/pcg/pcg_random.hpp"
 
 #include <algorithm>
 #include <array>
@@ -25,10 +25,6 @@ class Random {
             } while (std::find(indices.begin(), it, *it) != it);
         }
         return indices;
-    }
-
-    template <typename Context>
-    auto* lock_pop_pq(Context& ctx) {
     }
 
    public:

@@ -1,9 +1,9 @@
 #pragma once
 
-#include "buffered_pq.hpp"
-#include "heap.hpp"
-#include "operation_policy/random.hpp"
-#include "utils.hpp"
+#include "multiqueue/buffered_pq.hpp"
+#include "multiqueue/heap.hpp"
+#include "multiqueue/operation_policy/noop.hpp"
+#include "multiqueue/utils.hpp"
 
 #include <functional>
 #include <limits>
@@ -59,9 +59,6 @@ struct ImplicitSentinel {
 
 struct Traits {
     using operation_policy_type = operation_policy::Random<>;
-    static constexpr bool CompareStrict = true;
-    static constexpr bool EnableStatCounter = false;
-    static constexpr unsigned int NumPopTries = 1;
     static constexpr bool ScanIfEmpty = true;
 };
 
