@@ -16,8 +16,8 @@ template <int NumPopCandidates = 2, int NumPopTries = 1, bool PopStale = true>
 class Random {
     pcg32 rng{};
 
-    std::array<std::size_t, NumPopCandidates> generate_indices(std::size_t num_pqs) noexcept {
-        std::array<std::size_t, NumPopCandidates> indices{};
+    std::array<std::size_t, static_cast<std::size_t>(NumPopCandidates)> generate_indices(std::size_t num_pqs) noexcept {
+        std::array<std::size_t, static_cast<std::size_t>(NumPopCandidates)> indices{};
         indices[0] = rng() & (num_pqs - 1);
         for (auto it = std::next(indices.begin()); it != indices.end(); ++it) {
             do {
@@ -32,17 +32,17 @@ class Random {
         int seed{1};
     };
 
-   protected:
     struct SharedData {
         Config config;
         std::atomic_int id_count{0};
 
-        explicit SharedData(Config const& config, std::size_t /*num_pqs*/) noexcept : config(config) {
+        explicit SharedData(Config const& c, std::size_t /*num_pqs*/) noexcept : config(c) {
         }
     };
 
+   protected:
     template <typename Context>
-    explicit Random(Context const& ctx) noexcept {
+    explicit Random(Context& ctx) noexcept {
         auto id = ctx.operation_policy_data().id_count.fetch_add(1, std::memory_order_relaxed);
         auto seq = std::seed_seq{ctx.operation_policy_data().config.seed, id};
         rng.seed(seq);
@@ -54,7 +54,7 @@ class Random {
         while (tries < NumPopTries) {
             auto indices = generate_indices(ctx.num_pqs());
             auto best_pq = indices[0];
-            auto best_key = ctx.pq_list()[best_pq]->top_key();
+            auto best_key = ctx.pq_list()[best_pq].top_key();
             if constexpr (NumPopCandidates == 2) {
                 auto key = ctx.pq_list()[indices[1]].top_key();
                 if (ctx.compare(best_key, key)) {
@@ -77,16 +77,19 @@ class Random {
                     continue;
                 }
             }
-            auto& pq = ctx.pq_list()[indices[best_pq]];
+            auto& pq = ctx.pq_list()[best_pq];
             if (!pq.try_lock()) {
                 continue;
             }
             auto current_top_key = pq.top_key();
+            assert((Context::is_sentinel(current_top_key && pq.get_pq().empty())) ||
+                   (current_top_key == pq.get_pq().top()));
             if ((!PopStale && current_top_key != best_key) || Context::is_sentinel(current_top_key)) {
                 // Top got empty (or changed) before locking
                 pq.unlock();
                 continue;
             }
+            assert((current_top_key == pq.get_pq().top()));
             auto retval = pq.get_pq().top();
             pq.get_pq().pop();
             pq.update_top_key();

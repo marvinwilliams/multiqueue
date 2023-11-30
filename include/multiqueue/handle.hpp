@@ -16,17 +16,18 @@ class Handle : public OperationPolicy {
     using value_type = typename Context::value_type;
 
    public:
-    explicit Handle(Context &ctx) noexcept : policy_type{ctx.num_pqs(), ctx.policy_data()}, context_{ctx} {
+    explicit Handle(Context &ctx) noexcept : policy_type{ctx}, context_{ctx} {
     }
 
    private:
     std::optional<value_type> scan() {
-        for (auto *it = context_.get_pq_list(); it != std::next(context_.get_pq_list() + context_.num_pqs()); ++it) {
+        for (auto *it = context_.pq_list(); it != context_.pq_list() + context_.num_pqs(); ++it) {
             if (it->try_lock()) {
                 auto &pq = it->get_pq();
                 if (!pq.empty()) {
                     auto retval = pq.top();
                     pq.pop();
+                    it->update_top_key();
                     it->unlock();
                     return retval;
                 }

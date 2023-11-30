@@ -51,15 +51,17 @@ class MultiQueue {
     using operation_policy_data_type = typename traits_type::operation_policy_type::SharedData;
 
     class Context {
+        friend MultiQueue;
+
        public:
-        using key_type = key_type;
-        using value_type = value_type;
-        using pq_type = lockable_pq_type;
-        using operation_policy_data_type = operation_policy_data_type;
+        using key_type = MultiQueue::key_type;
+        using value_type = MultiQueue::value_type;
+        using pq_type = MultiQueue::lockable_pq_type;
+        using operation_policy_data_type = MultiQueue::operation_policy_data_type;
 
        private:
-        lockable_pq_type *pq_list_{nullptr};
         size_type num_pqs_{};
+        lockable_pq_type *pq_list_{nullptr};
         [[no_unique_address]] operation_policy_data_type data_;
         [[no_unique_address]] key_compare comp_;
         [[no_unique_address]] internal_allocator_type alloc_;
@@ -73,7 +75,7 @@ class MultiQueue {
               alloc_{alloc} {
             assert(num_pqs_ > 0);
 
-            for (auto *it = pq_list_; it != std::next(pq_list_, num_pqs_); ++it) {
+            for (auto *it = pq_list_; it != pq_list_ + num_pqs_; ++it) {
                 std::allocator_traits<internal_allocator_type>::construct(alloc_, it, pq);
             }
         }
@@ -83,7 +85,7 @@ class MultiQueue {
                          key_compare const &comp, allocator_type const &alloc)
             : Context(num_pqs, config, pq, comp, alloc) {
             auto cap_per_queue = (initial_capacity + num_pqs - 1) / num_pqs;
-            for (auto *it = pq_list_; it != std::next(pq_list_, num_pqs_); ++it) {
+            for (auto *it = pq_list_; it != pq_list_ + num_pqs_; ++it) {
                 it->get_pq().reserve(cap_per_queue);
             }
         }
@@ -96,13 +98,13 @@ class MultiQueue {
               data_{config, std::distance(first, last)},
               comp_{comp},
               alloc_(alloc) {
-            for (auto *it = pq_list_; it != std::next(pq_list_, num_pqs_); ++it, ++first) {
+            for (auto *it = pq_list_; it != pq_list_ + num_pqs_; ++it, ++first) {
                 std::allocator_traits<internal_allocator_type>::construct(alloc_, it, *first);
             }
         }
 
         ~Context() noexcept {
-            for (auto *it = pq_list_; it != std::next(pq_list_, num_pqs_); ++it) {
+            for (auto *it = pq_list_; it != pq_list_ + num_pqs_; ++it) {
                 std::allocator_traits<internal_allocator_type>::destroy(alloc_, it);
             }
             std::allocator_traits<internal_allocator_type>::deallocate(alloc_, pq_list_, num_pqs_);
@@ -151,20 +153,20 @@ class MultiQueue {
     explicit MultiQueue(size_type num_pqs, operation_policy_config_type const &config = {},
                         priority_queue_type const &pq = priority_queue_type(), key_compare const &comp = {},
                         allocator_type const &alloc = {})
-        : Context{num_pqs, config, pq, comp, alloc} {
+        : context_{num_pqs, config, pq, comp, internal_allocator_type(alloc)} {
     }
 
     explicit MultiQueue(size_type num_pqs, typename priority_queue_type::size_type initial_capacity,
                         operation_policy_config_type const &config = {},
                         priority_queue_type const &pq = priority_queue_type(), key_compare const &comp = {},
                         allocator_type const &alloc = {})
-        : Context{num_pqs, initial_capacity, config, pq, comp, alloc} {
+        : context_{num_pqs, initial_capacity, config, pq, comp, internal_allocator_type(alloc)} {
     }
 
     template <typename ForwardIt>
     explicit MultiQueue(ForwardIt first, ForwardIt last, operation_policy_config_type const &config = {},
                         key_compare const &comp = {}, allocator_type const &alloc = {})
-        : Context{first, last, config, comp, alloc} {
+        : context_{first, last, config, comp, internal_allocator_type(alloc)} {
     }
 
     handle_type get_handle() noexcept {

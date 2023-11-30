@@ -52,13 +52,11 @@ class alignas(build_config::L1CacheLinesize) LockablePQ {
         return !(lock_.load(std::memory_order_relaxed) || lock_.exchange(true, std::memory_order_acquire));
     }
 
-    bool update_top_key() {
-        auto key = pq_.empty() ? Sentinel::sentinel() : KeyOfValue::get(pq_.top());
-        if (top_key_.load() == key) {
-            return false;
+    void update_top_key() {
+        auto key = (pq_.empty() ? Sentinel::sentinel() : KeyOfValue::get(pq_.top()));
+        if (top_key_.load() != key) {
+            top_key_.store(key, std::memory_order_relaxed);
         }
-        top_key_.store(key, std::memory_order_relaxed);
-        return true;
     }
 
     void unlock() {
