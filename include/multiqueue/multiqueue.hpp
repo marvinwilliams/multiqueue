@@ -9,9 +9,13 @@
 **/
 #pragma once
 
+#include "multiqueue/buffered_pq.hpp"
 #include "multiqueue/handle.hpp"
+#include "multiqueue/heap.hpp"
 #include "multiqueue/lockable_pq.hpp"
+#include "multiqueue/operation_policy/noop.hpp"
 #include "multiqueue/sentinel.hpp"
+#include "multiqueue/utils.hpp"
 
 #include <array>
 #include <cassert>
@@ -33,8 +37,7 @@ struct DefaultOperationTraits {
 };
 
 template <typename Key, typename Value, typename KeyOfValue, typename Compare = std::less<>,
-          typename Sentinel = sentinel::Implicit<Key, Compare>,
-          typename OperationTraits = DefaultOperationTraits,
+          typename OperationTraits = DefaultOperationTraits, typename Sentinel = sentinel::Implicit<Key, Compare>,
           typename PriorityQueue = DefaultPriorityQueue<Value, KeyOfValue, Compare>,
           typename Allocator = std::allocator<PriorityQueue>>
 class MultiQueue {
@@ -90,8 +93,8 @@ class MultiQueue {
         }
 
         explicit Context(size_type num_pqs, typename priority_queue_type::size_type initial_capacity,
-                         operation_config_type const &config, priority_queue_type const &pq,
-                         key_compare const &comp, allocator_type const &alloc)
+                         operation_config_type const &config, priority_queue_type const &pq, key_compare const &comp,
+                         allocator_type const &alloc)
             : Context(num_pqs, config, pq, comp, alloc) {
             auto cap_per_queue = (initial_capacity + num_pqs - 1) / num_pqs;
             for (auto *it = pq_list_; it != pq_list_ + num_pqs_; ++it) {
@@ -100,8 +103,8 @@ class MultiQueue {
         }
 
         template <typename ForwardIt>
-        explicit Context(ForwardIt first, ForwardIt last, operation_config_type const &config,
-                         key_compare const &comp, allocator_type const &alloc)
+        explicit Context(ForwardIt first, ForwardIt last, operation_config_type const &config, key_compare const &comp,
+                         allocator_type const &alloc)
             : num_pqs_{std::distance(first, last)},
               pq_list_{std::allocator_traits<internal_allocator_type>::allocate(alloc_, num_pqs_)},
               data_{config, std::distance(first, last)},
@@ -154,11 +157,12 @@ class MultiQueue {
         }
     };
 
-    using handle_type = Handle<Context, typename operation_traits_type::operation_policy_type, operation_traits_type::scan_if_empty>;
-
     Context context_;
 
    public:
+    using handle_type =
+        Handle<Context, typename operation_traits_type::policy_type, operation_traits_type::scan_if_empty>;
+
     explicit MultiQueue(size_type num_pqs, operation_config_type const &config = {},
                         priority_queue_type const &pq = priority_queue_type(), key_compare const &comp = {},
                         allocator_type const &alloc = {})
@@ -166,9 +170,8 @@ class MultiQueue {
     }
 
     explicit MultiQueue(size_type num_pqs, typename priority_queue_type::size_type initial_capacity,
-                        operation_config_type const &config = {},
-                        priority_queue_type const &pq = priority_queue_type(), key_compare const &comp = {},
-                        allocator_type const &alloc = {})
+                        operation_config_type const &config = {}, priority_queue_type const &pq = priority_queue_type(),
+                        key_compare const &comp = {}, allocator_type const &alloc = {})
         : context_{num_pqs, initial_capacity, config, pq, comp, internal_allocator_type(alloc)} {
     }
 
@@ -195,16 +198,16 @@ class MultiQueue {
     }
 };
 
-template <typename T, typename Compare = std::less<>, typename Traits = defaults::Traits,
+template <typename T, typename Compare = std::less<>, typename OperationTraits = DefaultOperationTraits,
           typename Sentinel = sentinel::Implicit<T, Compare>,
           typename PriorityQueue = DefaultPriorityQueue<T, utils::Identity, Compare>,
           typename Allocator = std::allocator<PriorityQueue>>
-using ValueMultiQueue = MultiQueue<T, T, utils::Identity, Compare, Traits, Sentinel, PriorityQueue, Allocator>;
+using ValueMultiQueue = MultiQueue<T, T, utils::Identity, Compare, OperationTraits, Sentinel, PriorityQueue, Allocator>;
 
-template <typename Key, typename T, typename Compare = std::less<>, typename Traits = defaults::Traits,
+template <typename Key, typename T, typename Compare = std::less<>, typename OperationTraits = DefaultOperationTraits,
           typename Sentinel = sentinel::Implicit<T, Compare>,
           typename PriorityQueue = DefaultPriorityQueue<std::pair<Key, T>, utils::PairFirst, Compare>,
           typename Allocator = std::allocator<PriorityQueue>>
 using KeyValueMultiQueue =
-    MultiQueue<Key, std::pair<Key, T>, utils::PairFirst, Compare, Traits, Sentinel, PriorityQueue, Allocator>;
+    MultiQueue<Key, std::pair<Key, T>, utils::PairFirst, Compare, OperationTraits, Sentinel, PriorityQueue, Allocator>;
 }  // namespace multiqueue
