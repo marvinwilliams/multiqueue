@@ -8,7 +8,7 @@
 
 namespace multiqueue {
 
-template <typename Context, typename OperationPolicy, bool ScanIfEmpty>
+template <typename Context, typename OperationPolicy, bool scan_if_empty>
 class Handle : public OperationPolicy {
     using policy_type = OperationPolicy;
 
@@ -50,7 +50,7 @@ class Handle : public OperationPolicy {
 
     std::optional<value_type> try_pop() {
         std::optional<value_type> retval = policy_type::try_pop(context_);
-        if (!retval && ScanIfEmpty) {
+        if (!retval && scan_if_empty) {
             retval = scan();
         }
         return retval;

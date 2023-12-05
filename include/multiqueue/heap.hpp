@@ -36,9 +36,9 @@
 
 namespace multiqueue {
 
-template <typename T, typename Compare = std::less<>, unsigned int Arity = 8, typename Container = std::vector<T>>
+template <typename T, typename Compare = std::less<>, unsigned int arity = 8, typename Container = std::vector<T>>
 class Heap {
-    static_assert(Arity >= 2, "Arity must be at least two");
+    static_assert(arity >= 2, "Arity must be at least two");
 
    public:
     using value_type = T;
@@ -60,11 +60,11 @@ class Heap {
 
     static constexpr size_type parent(size_type index) {
         HEAP_ASSERT(index != root);
-        return (index - size_type(1)) / Arity;
+        return (index - size_type(1)) / arity;
     }
 
     static constexpr size_type first_child(size_type index) noexcept {
-        return index * Arity + size_type(1);
+        return index * arity + size_type(1);
     }
 
     // Find the index of the node that should become the parent of the others
@@ -108,7 +108,7 @@ class Heap {
         size_type index = 0;
         while (index < end_full) {
             auto const first = first_child(index);
-            auto const last = first + Arity;
+            auto const last = first + arity;
             auto const next = new_parent(first, last);
             if (next == size() - 1) {
                 c[index] = std::move(c[size() - 1]);
@@ -216,8 +216,8 @@ class Heap {
 }  // namespace multiqueue
 
 namespace std {
-template <typename T, typename Compare, unsigned int Arity, typename Container, typename Alloc>
-struct uses_allocator<multiqueue::Heap<T, Compare, Arity, Container>, Alloc> : uses_allocator<Container, Alloc>::type {
+template <typename T, typename Compare, unsigned int arity, typename Container, typename Alloc>
+struct uses_allocator<multiqueue::Heap<T, Compare, arity, Container>, Alloc> : uses_allocator<Container, Alloc>::type {
 };
 
 }  // namespace std

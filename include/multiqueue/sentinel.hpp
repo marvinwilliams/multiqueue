@@ -1,19 +1,13 @@
 #pragma once
 
-#include "multiqueue/buffered_pq.hpp"
-#include "multiqueue/heap.hpp"
-#include "multiqueue/operation_policy/noop.hpp"
-#include "multiqueue/utils.hpp"
-
 #include <functional>
 #include <limits>
 #include <type_traits>
-#include <utility>
 
-namespace multiqueue::defaults {
+namespace multiqueue::sentinel {
 
 template <typename T, typename Compare>
-struct DefaultConstructSentinel {
+struct DefaultConstruct {
     static_assert(std::is_default_constructible_v<T>, "T must be default-constructible");
     static constexpr T sentinel() noexcept {
         return T();
@@ -35,7 +29,7 @@ struct DefaultConstructSentinel {
 };
 
 template <typename T, typename Compare>
-struct ImplicitSentinel {
+struct Implicit {
     static_assert(std::numeric_limits<T>::is_bounded, "T must be bounded");
     static_assert(std::is_same_v<Compare, std::less<T>> || std::is_same_v<Compare, std::less<>> ||
                       std::is_same_v<Compare, std::greater<T>> || std::is_same_v<Compare, std::greater<>>,
@@ -57,12 +51,4 @@ struct ImplicitSentinel {
     }
 };
 
-struct Traits {
-    using operation_policy_type = operation_policy::Random<>;
-    static constexpr bool ScanIfEmpty = true;
-};
-
-template <typename Value, typename KeyOfValue, typename Compare>
-using PriorityQueue = BufferedPQ<Heap<Value, utils::ValueCompare<Value, KeyOfValue, Compare>>>;
-
-}  // namespace multiqueue::defaults
+}  // namespace multiqueue::sentinel
