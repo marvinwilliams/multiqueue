@@ -37,9 +37,9 @@ struct DefaultOperationTraits {
 };
 
 template <typename Key, typename Value, typename KeyOfValue, typename Compare = std::less<>,
-          typename OperationTraits = DefaultOperationTraits, typename Sentinel = sentinel::Implicit<Key, Compare>,
+          typename OperationTraits = DefaultOperationTraits,
           typename PriorityQueue = DefaultPriorityQueue<Value, KeyOfValue, Compare>,
-          typename Allocator = std::allocator<PriorityQueue>>
+          typename Sentinel = sentinel::Implicit<Key, Compare>, typename Allocator = std::allocator<PriorityQueue>>
 class MultiQueue {
    public:
     using key_type = Key;
@@ -199,15 +199,13 @@ class MultiQueue {
 };
 
 template <typename T, typename Compare = std::less<>, typename OperationTraits = DefaultOperationTraits,
-          typename Sentinel = sentinel::Implicit<T, Compare>,
           typename PriorityQueue = DefaultPriorityQueue<T, utils::Identity, Compare>,
-          typename Allocator = std::allocator<PriorityQueue>>
-using ValueMultiQueue = MultiQueue<T, T, utils::Identity, Compare, OperationTraits, Sentinel, PriorityQueue, Allocator>;
+          typename Sentinel = sentinel::Implicit<T, Compare>, typename Allocator = std::allocator<PriorityQueue>>
+using ValueMultiQueue = MultiQueue<T, T, utils::Identity, Compare, OperationTraits, PriorityQueue, Sentinel, Allocator>;
 
 template <typename Key, typename T, typename Compare = std::less<>, typename OperationTraits = DefaultOperationTraits,
-          typename Sentinel = sentinel::Implicit<T, Compare>,
           typename PriorityQueue = DefaultPriorityQueue<std::pair<Key, T>, utils::PairFirst, Compare>,
-          typename Allocator = std::allocator<PriorityQueue>>
+          typename Sentinel = sentinel::Implicit<T, Compare>, typename Allocator = std::allocator<PriorityQueue>>
 using KeyValueMultiQueue =
-    MultiQueue<Key, std::pair<Key, T>, utils::PairFirst, Compare, OperationTraits, Sentinel, PriorityQueue, Allocator>;
+    MultiQueue<Key, std::pair<Key, T>, utils::PairFirst, Compare, OperationTraits, PriorityQueue, Sentinel, Allocator>;
 }  // namespace multiqueue

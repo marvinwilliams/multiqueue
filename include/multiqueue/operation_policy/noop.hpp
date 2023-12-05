@@ -54,7 +54,7 @@ class Random {
     template <typename Context>
     std::optional<typename Context::value_type> try_pop(Context& ctx) {
         int tries = 0;
-        while (tries < ctx.config.pop_tries) {
+        while (tries < ctx.operation_policy_data().config.pop_tries) {
             auto indices = generate_indices(ctx.num_pqs());
             auto best_pq = indices[0];
             auto best_key = ctx.pq_list()[best_pq].top_key();
