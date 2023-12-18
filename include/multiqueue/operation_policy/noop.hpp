@@ -1,6 +1,6 @@
 #pragma once
 
-#include "multiqueue/third_party/pcg/pcg_random.hpp"
+#include "pcg_random.hpp"
 
 #include <algorithm>
 #include <array>
