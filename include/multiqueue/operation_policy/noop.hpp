@@ -105,9 +105,7 @@ class Random {
             auto& pq = ctx.pq_list()[rng() & (ctx.num_pqs() - 1)];
             if (pq.try_lock()) {
                 pq.get_pq().push(v);
-                if (ctx.compare(pq.top_key(), Context::get_key(v))) {
-                    pq.update_top_key();
-                }
+                pq.update_top_key();
                 pq.unlock();
                 return;
             }

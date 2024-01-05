@@ -50,7 +50,7 @@ class Handle : public OperationPolicy {
 
     std::optional<value_type> try_pop() {
         std::optional<value_type> retval = policy_type::try_pop(context_);
-        if (!retval && scan_if_empty) {
+        if (scan_if_empty && !retval) {
             retval = scan();
         }
         return retval;

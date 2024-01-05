@@ -96,7 +96,7 @@ class MultiQueue {
                          operation_config_type const &config, priority_queue_type const &pq, key_compare const &comp,
                          allocator_type const &alloc)
             : Context(num_pqs, config, pq, comp, alloc) {
-            auto cap_per_queue = (initial_capacity + num_pqs - 1) / num_pqs;
+            auto cap_per_queue = 2 * (initial_capacity + num_pqs - 1) / num_pqs;
             for (auto *it = pq_list_; it != pq_list_ + num_pqs_; ++it) {
                 it->get_pq().reserve(cap_per_queue);
             }
