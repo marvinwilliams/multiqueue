@@ -1,6 +1,6 @@
 /**
 ******************************************************************************
-* @file:   lockable_pq.hpp
+* @file:   pq_guard.hpp
 *
 * @author: Marvin Williams
 * @date:   2021/11/09 18:05
@@ -22,7 +22,7 @@
 namespace multiqueue {
 
 template <typename Key, typename Value, typename KeyOfValue, typename PriorityQueue, typename Sentinel>
-class alignas(build_config::L1CacheLinesize) LockablePQ {
+class alignas(build_config::L1CacheLinesize) PQGuard {
     using key_type = Key;
     using value_type = Value;
     using priority_queue_type = PriorityQueue;
@@ -34,9 +34,9 @@ class alignas(build_config::L1CacheLinesize) LockablePQ {
     alignas(build_config::L1CacheLinesize) priority_queue_type pq_;
 
    public:
-    explicit LockablePQ() = default;
+    explicit PQGuard() = default;
 
-    explicit LockablePQ(priority_queue_type pq) : pq_(std::move(pq)) {
+    explicit PQGuard(priority_queue_type pq) : pq_(std::move(pq)) {
     }
 
     [[nodiscard]] key_type top_key() const noexcept {
@@ -52,9 +52,14 @@ class alignas(build_config::L1CacheLinesize) LockablePQ {
         return !(lock_.load(std::memory_order_relaxed) || lock_.exchange(true, std::memory_order_acquire));
     }
 
-    void update_top_key() {
+    void popped() {
         auto key = (pq_.empty() ? Sentinel::sentinel() : KeyOfValue::get(pq_.top()));
-        if (top_key_.load() != key) {
+        top_key_.store(key, std::memory_order_relaxed);
+    }
+
+    void pushed() {
+        auto key = KeyOfValue::get(pq_.top());
+        if (key != top_key()) {
             top_key_.store(key, std::memory_order_relaxed);
         }
     }

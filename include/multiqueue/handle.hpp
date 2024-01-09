@@ -8,52 +8,56 @@
 
 namespace multiqueue {
 
-template <typename Context, typename OperationPolicy, bool scan_if_empty>
-class Handle : public OperationPolicy {
-    using policy_type = OperationPolicy;
+template <typename Context>
+class Handle : public Context::policy_type::mode_type {
+    using mode_type = typename Context::policy_type::mode_type;
 
-    Context &context_;
+    Context *context_;
     using value_type = typename Context::value_type;
 
    public:
-    explicit Handle(Context &ctx) noexcept : policy_type{ctx}, context_{ctx} {
+    explicit Handle(Context &ctx) noexcept : mode_type{ctx.config(), ctx.shared_data()}, context_{&ctx} {
     }
 
-   private:
+    Handle(Handle const &) = delete;
+    Handle(Handle &&) noexcept = default;
+    Handle &operator=(Handle const &) = delete;
+    Handle &operator=(Handle &&) noexcept = default;
+    ~Handle() = default;
+
+    void push(value_type const &v) {
+        mode_type::push(*context_, v);
+    }
+
     std::optional<value_type> scan() {
-        for (auto *it = context_.pq_list(); it != context_.pq_list() + context_.num_pqs(); ++it) {
-            if (it->try_lock()) {
-                auto &pq = it->get_pq();
-                if (!pq.empty()) {
-                    auto retval = pq.top();
-                    pq.pop();
-                    it->update_top_key();
-                    it->unlock();
-                    return retval;
-                }
-                it->unlock();
+        for (auto *it = context_->pq_guards(); it != context_->pq_guards() + context_->num_pqs(); ++it) {
+            if (!it->try_lock()) {
+                continue;
             }
+            if (it->get_pq().empty()) {
+                it->unlock();
+                continue;
+            }
+            auto retval = it->get_pq().top();
+            it->get_pq().pop();
+            it->popped();
+            it->unlock();
+            return retval;
         }
         return std::nullopt;
     }
 
-   public:
-    Handle(Handle const &) = delete;
-    Handle &operator=(Handle const &) = delete;
-    Handle &operator=(Handle &&) noexcept = default;
-    Handle(Handle &&) noexcept = default;
-    ~Handle() = default;
-
-    void push(value_type const &v) {
-        policy_type::push(context_, v);
-    }
-
     std::optional<value_type> try_pop() {
-        std::optional<value_type> retval = policy_type::try_pop(context_);
-        if (scan_if_empty && !retval) {
-            retval = scan();
+        for (int i = 0; i < Context::policy_type::pop_tries; ++i) {
+            std::optional<value_type> retval = mode_type::try_pop(*context_);
+            if (retval) {
+                return retval;
+            }
         }
-        return retval;
+        if (Context::policy_type::scan) {
+            return scan();
+        }
+        return std::nullopt;
     }
 };
 

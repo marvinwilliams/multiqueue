@@ -8,12 +8,7 @@
 #include <utility>
 #include <vector>
 
-struct Traits : multiqueue::defaults::Traits {
-    using operation_policy_type = multiqueue::operation_policy::Random<2, 1, false>;
-    /* static constexpr bool ScanIfEmpty = true; */
-};
-
-using mq_type = multiqueue::ValueMultiQueue<unsigned, std::less<>, Traits>;
+using mq_type = multiqueue::ValueMultiQueue<unsigned, std::less<>>;
 
 static const unsigned int n_threads = 4;
 static const std::size_t iterations_per_thread = 1'000;
