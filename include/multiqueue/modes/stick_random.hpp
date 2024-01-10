@@ -39,7 +39,7 @@ class StickRandom {
         auto candidates = generate_pop_candidates(ctx.num_pqs());
         pop_index = candidates[0];
         auto best_key = ctx.pq_guards()[pop_index].top_key();
-        for (int i = 1; i < num_pop_candidates; ++i) {
+        for (std::size_t i = 1; i < static_cast<std::size_t>(num_pop_candidates); ++i) {
             auto key = ctx.pq_guards()[candidates[i]].top_key();
             if (ctx.compare(best_key, key)) {
                 pop_index = candidates[i];
