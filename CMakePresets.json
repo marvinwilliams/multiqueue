@@ -1,0 +1,141 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 16
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wduplicated-branches -Wduplicated-cond -Wlogical-op -Wnull-dereference -Wuseless-cast -Wdouble-promotion -Wold-style-cast -Wformat=2 -Wundef -Wcast-align -Wcast-qual -Wdisabled-optimization -Wredundant-decls -Wunsafe-loop-optimizations -Wnoexcept -Wsuggest-final-types -Wsuggest-final-methods -Wsuggest-override"
+      }
+    },
+    {
+      "name": "multi",
+      "displayName": "Multi-Configuration Preset",
+      "binaryDir": "build-multi",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_CONFIGURATION_TYPES": "Development;Release;Debug;TSan;UBSan;ASan",
+        "CMAKE_CXX_FLAGS_DEVELOPMENT": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto",
+        "CMAKE_CXX_FLAGS_RELEASE": "-O3 -DNDEBUG -march=native -flto=auto",
+        "CMAKE_CXX_FLAGS_DEBUG": "-Og -ggdb",
+        "CMAKE_CXX_FLAGS_ASAN": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto -fsanitize=address",
+        "CMAKE_CXX_FLAGS_UBSAN": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto -fsanitize=undefined",
+        "CMAKE_CXX_FLAGS_TSAN": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto -fsanitize=thread"
+      }
+    },
+    {
+      "name": "development",
+      "displayName": "Development Preset",
+      "inherits": "base",
+      "binaryDir": "build-development",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Development",
+        "CMAKE_CXX_FLAGS_DEVELOPMENT": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto"
+      },
+      "warnings": {
+        "dev": true,
+        "uninitialized": true
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release Preset",
+      "inherits": "base",
+      "binaryDir": "build-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_FLAGS_RELEASE": "-O3 -DNDEBUG -march=native -flto=auto"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug Preset",
+      "inherits": "base",
+      "binaryDir": "build-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS_DEBUG": "-Og -ggdb"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "ASAN Preset",
+      "inherits": "base",
+      "binaryDir": "build-asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "ASan",
+        "CMAKE_CXX_FLAGS_ASAN": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto -fsanitize=address"
+      }
+    },
+    {
+      "name": "ubsan",
+      "displayName": "UBSAN Preset",
+      "inherits": "base",
+      "binaryDir": "build-ubsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "UBSan",
+        "CMAKE_CXX_FLAGS_UBSAN": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto -fsanitize=undefined"
+      }
+    },
+    {
+      "name": "tsan",
+      "displayName": "TSAN Preset",
+      "inherits": "base",
+      "binaryDir": "build-tsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "TSan",
+        "CMAKE_CXX_FLAGS_TSAN": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto -fsanitize=thread"
+      }
+    },
+    {
+      "name": "clangd",
+      "displayName": "Clangd Preset",
+      "binaryDir": "build-clangd",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "multi",
+      "displayName": "Multi-Configuration Preset",
+      "configurePreset": "multi"
+    },
+    {
+      "name": "development",
+      "displayName": "Development Preset",
+      "configurePreset": "development"
+    },
+    {
+      "name": "release",
+      "displayName": "Release Preset",
+      "configurePreset": "release"
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug preset",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "asan",
+      "displayName": "ASAN Preset",
+      "configurePreset": "asan"
+    },
+    {
+      "name": "ubsan",
+      "displayName": "UBSAN Preset",
+      "configurePreset": "ubsan"
+    },
+    {
+      "name": "tsan",
+      "displayName": "TSAN Preset",
+      "configurePreset": "tsan"
+    }
+  ]
+}
