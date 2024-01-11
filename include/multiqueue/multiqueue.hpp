@@ -146,6 +146,10 @@ class MultiQueue {
             return data_;
         }
 
+        [[nodiscard]] shared_data_type const &shared_data() const noexcept {
+            return data_;
+        }
+
         [[nodiscard]] key_compare const &comp() const noexcept {
             return comp_;
         }

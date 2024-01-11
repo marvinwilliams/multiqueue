@@ -15,19 +15,6 @@ namespace multiqueue::mode {
 template <int num_pop_candidates = 2, bool pop_stale = true>
 class Random {
     static_assert(num_pop_candidates > 0);
-    pcg32 rng{};
-
-    std::array<std::size_t, static_cast<std::size_t>(num_pop_candidates)> generate_indices(
-        std::size_t num_pqs) noexcept {
-        std::array<std::size_t, static_cast<std::size_t>(num_pop_candidates)> indices{};
-        indices[0] = rng() & (num_pqs - 1);
-        for (auto it = std::next(indices.begin()); it != indices.end(); ++it) {
-            do {
-                *it = rng() & (num_pqs - 1);
-            } while (std::find(indices.begin(), it, *it) != it);
-        }
-        return indices;
-    }
 
    public:
     struct Config {
@@ -41,11 +28,26 @@ class Random {
         }
     };
 
+   private:
+    pcg32 rng_{};
+
+    std::array<std::size_t, static_cast<std::size_t>(num_pop_candidates)> generate_indices(
+        std::size_t num_pqs) noexcept {
+        std::array<std::size_t, static_cast<std::size_t>(num_pop_candidates)> indices{};
+        indices[0] = rng_() & (num_pqs - 1);
+        for (auto it = std::next(indices.begin()); it != indices.end(); ++it) {
+            do {
+                *it = rng_() & (num_pqs - 1);
+            } while (std::find(indices.begin(), it, *it) != it);
+        }
+        return indices;
+    }
+
    protected:
     explicit Random(Config const& config, SharedData& shared_data) noexcept {
         auto id = shared_data.id_count.fetch_add(1, std::memory_order_relaxed);
         auto seq = std::seed_seq{config.seed, id};
-        rng.seed(seq);
+        rng_.seed(seq);
     }
 
     template <typename Context>
@@ -69,15 +71,15 @@ class Random {
                 guard.unlock();
                 return std::nullopt;
             }
-            if (!pop_stale && ctx.compare(Context::get_key(guard.get_pq().top()), best_key)) {
+            if (!pop_stale && Context::get_key(guard.get_pq().top()) != best_key) {
                 guard.unlock();
                 continue;
             }
-            auto retval = guard.get_pq().top();
+            auto v = guard.get_pq().top();
             guard.get_pq().pop();
             guard.popped();
             guard.unlock();
-            return retval;
+            return v;
         }
     }
 
@@ -85,7 +87,7 @@ class Random {
     void push(Context& ctx, typename Context::value_type const& v) {
         std::size_t i{};
         do {
-            i = rng() & (ctx.num_pqs() - 1);
+            i = rng_() & (ctx.num_pqs() - 1);
         } while (!ctx.pq_guards()[i].try_lock());
         ctx.pq_guards()[i].get_pq().push(v);
         ctx.pq_guards()[i].pushed();

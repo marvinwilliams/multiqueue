@@ -22,7 +22,7 @@
 namespace multiqueue {
 
 template <typename Key, typename Value, typename KeyOfValue, typename PriorityQueue, typename Sentinel>
-class alignas(build_config::L1CacheLinesize) PQGuard {
+class alignas(build_config::l1_cache_line_size) PQGuard {
     using key_type = Key;
     using value_type = Value;
     using priority_queue_type = PriorityQueue;
@@ -30,8 +30,8 @@ class alignas(build_config::L1CacheLinesize) PQGuard {
                   "PriorityQueue::value_type must be the same as Value");
     static_assert(std::atomic<key_type>::is_always_lock_free, "std::atomic<key_type> must be lock-free");
     std::atomic<key_type> top_key_ = Sentinel::sentinel();
-    std::atomic_bool lock_ = false;
-    alignas(build_config::L1CacheLinesize) priority_queue_type pq_;
+    alignas(build_config::l1_cache_line_size) std::atomic_bool lock_ = false;
+    priority_queue_type pq_;
 
    public:
     explicit PQGuard() = default;

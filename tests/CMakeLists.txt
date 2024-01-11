@@ -1,13 +1,13 @@
 add_executable(heap_test heap.cpp)
-target_link_libraries(heap_test PRIVATE multiqueue_internal Threads::Threads Catch2::Catch2WithMain)
+target_link_libraries(heap_test PRIVATE multiqueue Threads::Threads Catch2::Catch2WithMain)
 
 add_executable(buffered_pq_test buffered_pq.cpp)
-target_link_libraries(buffered_pq_test PRIVATE multiqueue_internal Threads::Threads Catch2::Catch2WithMain)
+target_link_libraries(buffered_pq_test PRIVATE multiqueue Threads::Threads Catch2::Catch2WithMain)
 
 add_executable(multiqueue_test multiqueue.cpp)
-target_link_libraries(multiqueue_test PRIVATE multiqueue_internal Threads::Threads Catch2::Catch2WithMain)
+target_link_libraries(multiqueue_test PRIVATE multiqueue Threads::Threads Catch2::Catch2WithMain)
 
-list(APPEND CMAKE_MODULE_PATH "${EXTERNAL_DIR}/Catch2/extras")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/third_party/Catch2/extras")
 include(Catch)
 
 if(BUILD_TESTING)

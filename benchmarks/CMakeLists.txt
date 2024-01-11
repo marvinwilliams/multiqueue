@@ -1,5 +1,5 @@
 add_executable(benchmarks heap.cpp)
-target_link_libraries(benchmarks PRIVATE multiqueue_internal Threads::Threads Catch2::Catch2WithMain)
+target_link_libraries(benchmarks PRIVATE multiqueue Threads::Threads Catch2::Catch2WithMain)
 target_compile_definitions(benchmarks PRIVATE CATCH_CONFIG_ENABLE_BENCHMARKING)
 if (Boost_FOUND)
 target_link_libraries(benchmarks PRIVATE Boost::boost)

@@ -15,44 +15,10 @@ namespace multiqueue::mode {
 template <int num_pop_candidates = 2>
 class StickRandom {
     static_assert(num_pop_candidates > 0);
-    pcg32 rng{};
-    std::size_t pop_index{};
-    std::size_t push_index{};
-    int pop_count{};
-    int push_count{};
-    std::geometric_distribution<int> stick_dist;
-
-    std::array<std::size_t, static_cast<std::size_t>(num_pop_candidates)> generate_pop_candidates(
-        std::size_t num_pqs) noexcept {
-        std::array<std::size_t, static_cast<std::size_t>(num_pop_candidates)> indices{};
-        indices[0] = rng() & (num_pqs - 1);
-        for (auto it = std::next(indices.begin()); it != indices.end(); ++it) {
-            do {
-                *it = rng() & (num_pqs - 1);
-            } while (std::find(indices.begin(), it, *it) != it);
-        }
-        return indices;
-    }
-
-    template <typename Context>
-    void reset_pop_index(Context const& ctx) noexcept {
-        auto candidates = generate_pop_candidates(ctx.num_pqs());
-        pop_index = candidates[0];
-        auto best_key = ctx.pq_guards()[pop_index].top_key();
-        for (std::size_t i = 1; i < static_cast<std::size_t>(num_pop_candidates); ++i) {
-            auto key = ctx.pq_guards()[candidates[i]].top_key();
-            if (ctx.compare(best_key, key)) {
-                pop_index = candidates[i];
-                best_key = key;
-            }
-        }
-        pop_count = stick_dist(rng);
-    }
 
    public:
     struct Config {
         int seed{1};
-        int pop_tries{1};
         int stickiness{16};
     };
 
@@ -63,8 +29,22 @@ class StickRandom {
         }
     };
 
+   private:
+    pcg32 rng{};
+    std::array<std::size_t, static_cast<std::size_t>(num_pop_candidates)> pop_index{};
+    int count{};
+
+    void refresh_pop_index(std::size_t num_pqs) noexcept {
+        pop_index[0] = rng() & (num_pqs - 1);
+        for (auto it = std::next(pop_index.begin()); it != pop_index.end(); ++it) {
+            do {
+                *it = rng() & (num_pqs - 1);
+            } while (std::find(pop_index.begin(), it, *it) != it);
+        }
+    }
+
    protected:
-    explicit StickRandom(Config const& config, SharedData& shared_data) noexcept : stick_dist(1.0 / config.stickiness) {
+    explicit StickRandom(Config const& config, SharedData& shared_data) noexcept {
         auto id = shared_data.id_count.fetch_add(1, std::memory_order_relaxed);
         auto seq = std::seed_seq{config.seed, id};
         rng.seed(seq);
@@ -72,38 +52,58 @@ class StickRandom {
 
     template <typename Context>
     std::optional<typename Context::value_type> try_pop(Context& ctx) {
-        if (pop_count <= 0 || !ctx.pq_guards()[pop_index].try_lock()) {
-            do {
-                reset_pop_index(ctx);
-            } while (!ctx.pq_guards()[pop_index].try_lock());
-            pop_count = stick_dist(rng);
+        if (count == 0) {
+            refresh_pop_index(ctx.num_pqs());
+            count = ctx.config().stickiness;
         }
-        auto& guard = ctx.pq_guards()[pop_index];
-        if (guard.get_pq().empty()) {
-            guard.unlock();
-            pop_count = 0;
-            return std::nullopt;
+        while (true) {
+            std::size_t best = pop_index[0];
+            auto best_key = ctx.pq_guards()[best].top_key();
+            for (std::size_t i = 1; i < static_cast<std::size_t>(num_pop_candidates); ++i) {
+                auto key = ctx.pq_guards()[pop_index[i]].top_key();
+                if (ctx.compare(best_key, key)) {
+                    best = pop_index[i];
+                    best_key = key;
+                }
+            }
+            auto& guard = ctx.pq_guards()[best];
+            if (guard.try_lock()) {
+                if (guard.get_pq().empty()) {
+                    guard.unlock();
+                    count = 0;
+                    return std::nullopt;
+                }
+                auto v = guard.get_pq().top();
+                guard.get_pq().pop();
+                guard.popped();
+                guard.unlock();
+                --count;
+                return v;
+            }
+            refresh_pop_index(ctx.num_pqs());
+            count = ctx.config().stickiness;
         }
-        auto retval = guard.get_pq().top();
-        guard.get_pq().pop();
-        guard.popped();
-        guard.unlock();
-        --pop_count;
-        return retval;
     }
 
     template <typename Context>
     void push(Context& ctx, typename Context::value_type const& v) {
-        if (push_count <= 0 || !ctx.pq_guards()[push_index].try_lock()) {
-            do {
-                push_index = rng() & (ctx.num_pqs() - 1);
-            } while (!ctx.pq_guards()[push_index].try_lock());
-            push_count = stick_dist(rng);
+        if (count == 0) {
+            refresh_pop_index(ctx.num_pqs());
+            count = ctx.config().stickiness;
         }
-        ctx.pq_guards()[push_index].get_pq().push(v);
-        ctx.pq_guards()[push_index].pushed();
-        ctx.pq_guards()[push_index].unlock();
-        --push_count;
+        std::size_t push_index = rng() % num_pop_candidates;
+        while (true) {
+            auto& guard = ctx.pq_guards()[pop_index[push_index]];
+            if (guard.try_lock()) {
+                guard.get_pq().push(v);
+                guard.pushed();
+                guard.unlock();
+                --count;
+                return;
+            }
+            refresh_pop_index(ctx.num_pqs());
+            count = ctx.config().stickiness;
+        }
     }
 };
 

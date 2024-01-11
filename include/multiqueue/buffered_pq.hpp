@@ -12,34 +12,18 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <utility>
 
-#ifdef MQ_NDEBUG_BUFFERED_PQ
-
-#define BUFFERED_PQ_ASSERT(x) \
-    do {                      \
-    } while (false)
-
-#else
-
-#include <cassert>
-#define BUFFERED_PQ_ASSERT(x) \
-    do {                      \
-        assert(x);            \
-    } while (false)
-
-#endif
-
 namespace multiqueue {
 
-template <typename PriorityQueue, std::size_t insertion_buffer_size = 16,
-          std::size_t deletion_buffer_size = 16>
+template <typename PriorityQueue, std::size_t insertion_buffer_size = 16, std::size_t deletion_buffer_size = 16>
 class BufferedPQ : private PriorityQueue {
-    static_assert(insertion_buffer_size > 0 && deletion_buffer_size > 0, "Both buffers must have nonzero capacity");
+    static_assert(insertion_buffer_size > 0 && deletion_buffer_size > 0, "Both buffers must have nonzero size");
     using base_type = PriorityQueue;
 
    public:
@@ -54,28 +38,27 @@ class BufferedPQ : private PriorityQueue {
     using insertion_buffer_type = std::array<value_type, insertion_buffer_size>;
     using deletion_buffer_type = std::array<value_type, deletion_buffer_size>;
 
-    size_type ins_buf_size_ = 0;
+    size_type insertion_end_ = 0;
     insertion_buffer_type insertion_buffer_;
-    size_type del_buf_size_ = 0;
+    size_type deletion_end_ = 0;
     deletion_buffer_type deletion_buffer_;
 
     void flush_insertion_buffer() {
-        for (size_type i = 0; i != ins_buf_size_; ++i) {
-            base_type::push(std::move(insertion_buffer_[i]));
+        for (; insertion_end_ != 0; --insertion_end_) {
+            base_type::push(std::move(insertion_buffer_[insertion_end_ - 1]));
         }
-        ins_buf_size_ = 0;
     }
 
     void refill_deletion_buffer() {
-        BUFFERED_PQ_ASSERT(del_buf_size_ == 0);
+        assert(deletion_end_ == 0);
         // We flush the insertion buffer into the heap, then refill the
         // deletion buffer from the heap. We could also merge the insertion
         // buffer and heap into the deletion buffer
         flush_insertion_buffer();
-        size_type num_refill = std::min(deletion_buffer_size, base_type::size());
-        del_buf_size_ = num_refill;
-        while (num_refill != 0) {
-            deletion_buffer_[--num_refill] = std::move(base_type::c.front());
+        size_type front_slot = std::min(deletion_buffer_size, base_type::size());
+        deletion_end_ = front_slot;
+        while (front_slot != 0) {
+            deletion_buffer_[--front_slot] = std::move(base_type::c.front());
             base_type::pop();
         }
     }
@@ -88,63 +71,68 @@ class BufferedPQ : private PriorityQueue {
     explicit BufferedPQ(value_compare const& compare, Alloc const& alloc) : base_type(compare, alloc) {
     }
 
+    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
+    explicit BufferedPQ(Alloc const& alloc) : base_type(alloc) {
+    }
+
     [[nodiscard]] constexpr bool empty() const {
-        BUFFERED_PQ_ASSERT(del_buf_size_ != 0 || (ins_buf_size_ == 0 && base_type::empty()));
-        return del_buf_size_ == 0;
+        assert(deletion_end_ != 0 || (insertion_end_ == 0 && base_type::empty()));
+        return deletion_end_ == 0;
     }
 
     [[nodiscard]] constexpr size_type size() const noexcept {
-        return ins_buf_size_ + del_buf_size_ + base_type::size();
+        return insertion_end_ + deletion_end_ + base_type::size();
     }
 
     constexpr const_reference top() const {
-        BUFFERED_PQ_ASSERT(!empty());
-        return deletion_buffer_[del_buf_size_ - 1];
+        assert(!empty());
+        return deletion_buffer_[deletion_end_ - 1];
     }
 
     void pop() {
-        BUFFERED_PQ_ASSERT(!empty());
-        if (--del_buf_size_ == 0) {
+        assert(!empty());
+        --deletion_end_;
+        if (deletion_end_ == 0) {
             refill_deletion_buffer();
         }
     }
 
-    void push(value_type value) {
-        if (empty()) {
-            deletion_buffer_.front() = std::move(value);
-            ++del_buf_size_;
+    void push(const_reference value) {
+        if (deletion_end_ > 0 && !base_type::comp(value, deletion_buffer_[0])) {
+            size_type slot = deletion_end_ - 1;
+            while (base_type::comp(value, deletion_buffer_[slot])) {
+                --slot;
+            }
+            if (deletion_end_ == deletion_buffer_size) {
+                if (insertion_end_ == insertion_buffer_size) {
+                    flush_insertion_buffer();
+                    base_type::push(std::move(deletion_buffer_[0]));
+                } else {
+                    insertion_buffer_[insertion_end_++] = std::move(deletion_buffer_[0]);
+                }
+                std::move(deletion_buffer_.begin() + 1, deletion_buffer_.begin() + slot + 1, deletion_buffer_.begin());
+                deletion_buffer_[slot] = value;
+            } else {
+                std::move_backward(deletion_buffer_.begin() + slot + 1, deletion_buffer_.begin() + deletion_end_,
+                                   deletion_buffer_.begin() + deletion_end_ + 1);
+                deletion_buffer_[slot + 1] = value;
+                ++deletion_end_;
+            }
             return;
         }
-        if (base_type::comp(deletion_buffer_[0], value)) {
-            // value has to go into the deletion buffer
-            if (del_buf_size_ != deletion_buffer_size) {
-                size_type in_pos = del_buf_size_;
-                while (!base_type::comp(deletion_buffer_[in_pos - 1], value)) {
-                    deletion_buffer_[in_pos] = std::move(deletion_buffer_[in_pos - 1]);
-                    // No need to check for underflow
-                    --in_pos;
-                    BUFFERED_PQ_ASSERT(in_pos >= 1);
-                }
-                deletion_buffer_[in_pos] = std::move(value);
-                ++del_buf_size_;
-                return;
-            }
-            auto tmp = std::move(deletion_buffer_[0]);
-            size_type in_pos = 0;
-            while (in_pos + 1 != deletion_buffer_size && base_type::comp(deletion_buffer_[in_pos + 1], value)) {
-                deletion_buffer_[in_pos] = std::move(deletion_buffer_[in_pos + 1]);
-                ++in_pos;
-            }
-            BUFFERED_PQ_ASSERT(in_pos < deletion_buffer_size);
-            deletion_buffer_[in_pos] = std::move(value);
-            // Fallthrough, the last element needs to be inserted into the insertion buffer
-            value = std::move(tmp);
+        if (deletion_end_ < deletion_buffer_size && base_type::size() == 0 && insertion_end_ == 0) {
+            std::move_backward(deletion_buffer_.begin(), deletion_buffer_.begin() + deletion_end_,
+                               deletion_buffer_.begin() + deletion_end_ + 1);
+            deletion_buffer_[0] = value;
+            ++deletion_end_;
+            return;
         }
-        // Insert `value` into insertion buffer
-        if (ins_buf_size_ == insertion_buffer_size) {
+        if (insertion_end_ == insertion_buffer_size) {
             flush_insertion_buffer();
+            base_type::push(value);
+        } else {
+            insertion_buffer_[insertion_end_++] = value;
         }
-        insertion_buffer_[ins_buf_size_++] = std::move(value);
     }
 
     void reserve(size_type new_cap) {
@@ -180,17 +168,17 @@ class BufferedPQ<PriorityQueue, 0, 0> : private PriorityQueue {
     }
 
     constexpr const_reference top() const {
-        BUFFERED_PQ_ASSERT(!empty());
+        assert(!empty());
         return base_type::top();
     }
 
     void pop() {
-        BUFFERED_PQ_ASSERT(!empty());
+        assert(!empty());
         base_type::pop();
     }
 
-    void push(value_type value) {
-        base_type::push(std::move(value));
+    void push(const_reference value) {
+        base_type::push(value);
     }
 
     void reserve(size_type new_cap) {
@@ -206,5 +194,3 @@ struct uses_allocator<multiqueue::BufferedPQ<PriorityQueue, insertion_buffer_siz
     : uses_allocator<PriorityQueue, Alloc>::type {};
 
 }  // namespace std
-
-#undef BUFFERED_PQ_ASSERT

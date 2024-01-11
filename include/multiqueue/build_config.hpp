@@ -12,14 +12,14 @@
 #include <cstddef>
 
 namespace multiqueue::build_config {
-#ifdef L1_CACHE_LINESIZE
-static constexpr std::size_t L1CacheLinesize = L1_CACHE_LINESIZE;
+#ifdef L1_CACHE_LINE_SIZE
+static constexpr std::size_t l1_cache_line_size = L1_CACHE_LINE_SIZE;
 #else
-static constexpr std::size_t L1CacheLinesize = 64;
+static constexpr std::size_t l1_cache_line_size = 64;
 #endif
-#ifdef PAGESIZE
-static constexpr std::size_t Pagesize = PAGESIZE;
+#ifdef PAGE_SIZE
+static constexpr std::size_t page_size = PAGE_SIZE;
 #else
-static constexpr std::size_t Pagesize = 4096;
+static constexpr std::size_t page_size = 4096;
 #endif
 }  // namespace multiqueue::build_config

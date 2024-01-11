@@ -9,30 +9,11 @@
 **/
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <functional>
 #include <utility>
 #include <vector>
-
-#ifdef MQ_HEAP_SELF_VERIFY
-#include <cstdlib>
-#endif
-
-#ifdef MQ_NDEBUG_HEAP
-
-#define HEAP_ASSERT(x) \
-    do {               \
-    } while (false)
-
-#else
-
-#include <cassert>
-#define HEAP_ASSERT(x) \
-    do {               \
-        assert(x);     \
-    } while (false)
-
-#endif
 
 namespace multiqueue {
 
@@ -59,7 +40,7 @@ class Heap {
     static constexpr size_type root = size_type{0};
 
     static constexpr size_type parent(size_type index) {
-        HEAP_ASSERT(index != root);
+        assert(index != root);
         return (index - size_type(1)) / arity;
     }
 
@@ -70,8 +51,8 @@ class Heap {
     // Find the index of the node that should become the parent of the others
     // If no index is better than the last element, return last
     size_type new_parent(size_type first, size_type last) const {
-        HEAP_ASSERT(first <= last);
-        HEAP_ASSERT(last <= size());
+        assert(first <= last);
+        assert(last <= size());
         auto best = size() - 1;
         for (; first != last; ++first) {
             if (comp(c[best], c[first])) {
@@ -100,7 +81,7 @@ class Heap {
     }
 
     void sift_down() {
-        HEAP_ASSERT(!empty());
+        assert(!empty());
         if (size() == 1) {
             return;
         }
@@ -131,23 +112,16 @@ class Heap {
         c[index] = std::move(c[size() - 1]);
     }
 
-#ifndef MQ_HEAP_SELF_VERIFY
-    [[nodiscard]] bool verify() const {
-        for (std::size_t i = 1; i < c.size(); ++i) {
-            if (comp(c[parent(i)], c[i])) {
-                return false;
-            }
-        }
-        return true;
-    }
-#endif
-
    public:
     explicit Heap(value_compare const &compare = value_compare()) noexcept(noexcept(Container())) : c(), comp{compare} {
     }
 
-    template <typename Alloc>
+    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<Container, Alloc>>>
     explicit Heap(value_compare const &compare, Alloc const &alloc) noexcept : c(alloc), comp{compare} {
+    }
+
+    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<Container, Alloc>>>
+    explicit Heap(Alloc const &alloc) noexcept : c(alloc), comp() {
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept {
@@ -163,45 +137,25 @@ class Heap {
     }
 
     void pop() {
-        HEAP_ASSERT(!empty());
+        assert(!empty());
         sift_down();
         c.pop_back();
-#ifdef MQ_HEAP_SELF_VERIFY
-        if (!verify()) {
-            std::abort();
-        }
-#endif
     }
 
     void push(const_reference value) {
         c.push_back(value);
         sift_up();
-#ifdef MQ_HEAP_SELF_VERIFY
-        if (!verify()) {
-            std::abort();
-        }
-#endif
     }
 
     void push(value_type &&value) {
         c.push_back(std::move(value));
         sift_up();
-#ifdef MQ_HEAP_SELF_VERIFY
-        if (!verify()) {
-            std::abort();
-        }
-#endif
     }
 
     template <typename... Args>
     void emplace(Args &&...args) {
         c.emplace_back(std::forward<Args>(args)...);
         sift_up();
-#ifdef MQ_HEAP_SELF_VERIFY
-        if (!verify()) {
-            std::abort();
-        }
-#endif
     }
 
     constexpr void clear() noexcept {
@@ -221,5 +175,3 @@ struct uses_allocator<multiqueue::Heap<T, Compare, arity, Container>, Alloc> : u
 };
 
 }  // namespace std
-
-#undef HEAP_ASSERT

@@ -38,26 +38,26 @@ class Handle : public Context::policy_type::mode_type {
                 it->unlock();
                 continue;
             }
-            auto retval = it->get_pq().top();
+            auto v = it->get_pq().top();
             it->get_pq().pop();
             it->popped();
             it->unlock();
-            return retval;
+            return v;
         }
         return std::nullopt;
     }
 
     std::optional<value_type> try_pop() {
         for (int i = 0; i < Context::policy_type::pop_tries; ++i) {
-            std::optional<value_type> retval = mode_type::try_pop(*context_);
-            if (retval) {
-                return retval;
+            std::optional<value_type> v = mode_type::try_pop(*context_);
+            if (v) {
+                return v;
             }
         }
-        if (Context::policy_type::scan) {
-            return scan();
+        if (!Context::policy_type::scan) {
+            return std::nullopt;
         }
-        return std::nullopt;
+        return scan();
     }
 };
 

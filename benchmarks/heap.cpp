@@ -11,7 +11,7 @@
 #include <iterator>
 #include <queue>
 #include <vector>
-uiaeuiae
+
 static constexpr int reps = 500'000;
 
 TEST_CASE("std::priority_queue", "[benchmark][std]") {
