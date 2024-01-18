@@ -22,30 +22,42 @@
 namespace multiqueue {
 
 template <typename PriorityQueue, std::size_t insertion_buffer_size = 16, std::size_t deletion_buffer_size = 16>
-class BufferedPQ : private PriorityQueue {
+class BufferedPQ {
     static_assert(insertion_buffer_size > 0 && deletion_buffer_size > 0, "Both buffers must have nonzero size");
-    using base_type = PriorityQueue;
 
    public:
-    using value_type = typename base_type::value_type;
-    using value_compare = typename base_type::value_compare;
-    using reference = typename base_type::reference;
-    using const_reference = typename base_type::const_reference;
+    using priority_queue_type = PriorityQueue;
+    using value_type = typename priority_queue_type::value_type;
+    using value_compare = typename priority_queue_type::value_compare;
+    using reference = typename priority_queue_type::reference;
+    using const_reference = typename priority_queue_type::const_reference;
     using size_type = std::size_t;
-    using priority_queue_type = base_type;
 
    private:
     using insertion_buffer_type = std::array<value_type, insertion_buffer_size>;
     using deletion_buffer_type = std::array<value_type, deletion_buffer_size>;
 
-    size_type insertion_end_ = 0;
-    insertion_buffer_type insertion_buffer_;
+    struct PriorityQueueWrapper : priority_queue_type {
+        using priority_queue_type::priority_queue_type;
+
+        bool compare(value_type const& lhs, value_type const& rhs) const {
+            return priority_queue_type::comp(lhs, rhs);
+        }
+
+        void reserve(size_type new_cap) {
+            priority_queue_type::c.reserve(new_cap);
+        }
+    };
+
     size_type deletion_end_ = 0;
+    size_type insertion_end_ = 0;
     deletion_buffer_type deletion_buffer_;
+    insertion_buffer_type insertion_buffer_;
+    PriorityQueueWrapper pq_;
 
     void flush_insertion_buffer() {
         for (; insertion_end_ != 0; --insertion_end_) {
-            base_type::push(std::move(insertion_buffer_[insertion_end_ - 1]));
+            pq_.push(std::move(insertion_buffer_[insertion_end_ - 1]));
         }
     }
 
@@ -55,33 +67,33 @@ class BufferedPQ : private PriorityQueue {
         // deletion buffer from the heap. We could also merge the insertion
         // buffer and heap into the deletion buffer
         flush_insertion_buffer();
-        size_type front_slot = std::min(deletion_buffer_size, base_type::size());
+        size_type front_slot = std::min(deletion_buffer_size, pq_.size());
         deletion_end_ = front_slot;
         while (front_slot != 0) {
-            deletion_buffer_[--front_slot] = std::move(base_type::c.front());
-            base_type::pop();
+            deletion_buffer_[--front_slot] = pq_.top();
+            pq_.pop();
         }
     }
 
    public:
-    explicit BufferedPQ(value_compare const& compare = value_compare()) : base_type(compare) {
+    explicit BufferedPQ(value_compare const& compare = value_compare()) : pq_(compare) {
     }
 
-    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
-    explicit BufferedPQ(value_compare const& compare, Alloc const& alloc) : base_type(compare, alloc) {
+    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<priority_queue_type, Alloc>>>
+    explicit BufferedPQ(value_compare const& compare, Alloc const& alloc) : pq_(compare, alloc) {
     }
 
-    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
-    explicit BufferedPQ(Alloc const& alloc) : base_type(alloc) {
+    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<priority_queue_type, Alloc>>>
+    explicit BufferedPQ(Alloc const& alloc) : pq_(alloc) {
     }
 
     [[nodiscard]] constexpr bool empty() const {
-        assert(deletion_end_ != 0 || (insertion_end_ == 0 && base_type::empty()));
+        assert(deletion_end_ != 0 || (insertion_end_ == 0 && pq_.empty()));
         return deletion_end_ == 0;
     }
 
     [[nodiscard]] constexpr size_type size() const noexcept {
-        return insertion_end_ + deletion_end_ + base_type::size();
+        return insertion_end_ + deletion_end_ + pq_.size();
     }
 
     constexpr const_reference top() const {
@@ -98,15 +110,15 @@ class BufferedPQ : private PriorityQueue {
     }
 
     void push(const_reference value) {
-        if (deletion_end_ > 0 && !base_type::comp(value, deletion_buffer_[0])) {
+        if (deletion_end_ > 0 && !pq_.compare(value, deletion_buffer_[0])) {
             size_type slot = deletion_end_ - 1;
-            while (base_type::comp(value, deletion_buffer_[slot])) {
+            while (pq_.compare(value, deletion_buffer_[slot])) {
                 --slot;
             }
             if (deletion_end_ == deletion_buffer_size) {
                 if (insertion_end_ == insertion_buffer_size) {
                     flush_insertion_buffer();
-                    base_type::push(std::move(deletion_buffer_[0]));
+                    pq_.push(std::move(deletion_buffer_[0]));
                 } else {
                     insertion_buffer_[insertion_end_++] = std::move(deletion_buffer_[0]);
                 }
@@ -120,7 +132,7 @@ class BufferedPQ : private PriorityQueue {
             }
             return;
         }
-        if (deletion_end_ < deletion_buffer_size && base_type::size() == 0 && insertion_end_ == 0) {
+        if (deletion_end_ < deletion_buffer_size && pq_.size() == 0 && insertion_end_ == 0) {
             std::move_backward(deletion_buffer_.begin(), deletion_buffer_.begin() + deletion_end_,
                                deletion_buffer_.begin() + deletion_end_ + 1);
             deletion_buffer_[0] = value;
@@ -129,60 +141,26 @@ class BufferedPQ : private PriorityQueue {
         }
         if (insertion_end_ == insertion_buffer_size) {
             flush_insertion_buffer();
-            base_type::push(value);
+            pq_.push(value);
         } else {
             insertion_buffer_[insertion_end_++] = value;
         }
     }
 
     void reserve(size_type new_cap) {
-        base_type::c.reserve(new_cap);
+        pq_.reserve(new_cap);
     }
 };
 
 template <typename PriorityQueue>
-class BufferedPQ<PriorityQueue, 0, 0> : private PriorityQueue {
-   private:
-    using base_type = PriorityQueue;
+class BufferedPQ<PriorityQueue, 0, 0> : public PriorityQueue {
+    using priority_queue_type = PriorityQueue;
 
    public:
-    using value_type = typename base_type::value_type;
-    using value_compare = typename base_type::value_compare;
-    using reference = typename base_type::reference;
-    using const_reference = typename base_type::const_reference;
-    using size_type = std::size_t;
+    using priority_queue_type::priority_queue_type;
 
-    explicit BufferedPQ(value_compare const& compare = value_compare()) : base_type(compare) {
-    }
-
-    template <typename Alloc, typename = std::enable_if_t<std::uses_allocator_v<base_type, Alloc>>>
-    explicit BufferedPQ(value_compare const& compare, Alloc const& alloc) : base_type(compare, alloc) {
-    }
-
-    [[nodiscard]] constexpr bool empty() const {
-        return base_type::empty();
-    }
-
-    [[nodiscard]] constexpr size_type size() const noexcept {
-        return base_type::size();
-    }
-
-    constexpr const_reference top() const {
-        assert(!empty());
-        return base_type::top();
-    }
-
-    void pop() {
-        assert(!empty());
-        base_type::pop();
-    }
-
-    void push(const_reference value) {
-        base_type::push(value);
-    }
-
-    void reserve(size_type new_cap) {
-        base_type::c.reserve(new_cap);
+    void reserve(typename priority_queue_type::size_type new_cap) {
+        priority_queue_type::c.reserve(new_cap);
     }
 };
 

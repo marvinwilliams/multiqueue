@@ -30,7 +30,7 @@ class alignas(build_config::l1_cache_line_size) PQGuard {
                   "PriorityQueue::value_type must be the same as Value");
     static_assert(std::atomic<key_type>::is_always_lock_free, "std::atomic<key_type> must be lock-free");
     std::atomic<key_type> top_key_ = Sentinel::sentinel();
-    alignas(build_config::l1_cache_line_size) std::atomic_bool lock_ = false;
+    std::atomic_bool lock_ = false;
     priority_queue_type pq_;
 
    public:
@@ -48,7 +48,7 @@ class alignas(build_config::l1_cache_line_size) PQGuard {
     }
 
     bool try_lock() noexcept {
-        // Test first but expect success
+        // Test first to not invalidate the cache line
         return !(lock_.load(std::memory_order_relaxed) || lock_.exchange(true, std::memory_order_acquire));
     }
 
