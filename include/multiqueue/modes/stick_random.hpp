@@ -101,8 +101,11 @@ class StickRandom {
                 --count;
                 return;
             }
-            refresh_pop_index(ctx.num_pqs());
-            count = ctx.config().stickiness;
+            std::size_t new_index{};
+            do {
+                new_index = rng() & (ctx.num_pqs() - 1);
+            } while (std::find(pop_index.begin(), pop_index.end(), new_index) != pop_index.end());
+            pop_index[push_index] = new_index;
         }
     }
 };

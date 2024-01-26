@@ -132,10 +132,7 @@ class StickSwap {
                 --stick_count_;
                 return;
             }
-            for (std::size_t i = 0; i < static_cast<std::size_t>(num_pop_candidates); ++i) {
-                swap_assignment(ctx.shared_data().permutation, i);
-            }
-            stick_count_ = ctx.config().stickiness;
+            swap_assignment(ctx.shared_data().permutation, push_index);
         }
     }
 };
