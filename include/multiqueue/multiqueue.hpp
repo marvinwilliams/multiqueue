@@ -28,8 +28,8 @@
 
 namespace multiqueue {
 
-template <typename Value, typename KeyOfValue, typename Compare>
-using DefaultPriorityQueue = BufferedPQ<Heap<Value, utils::ValueCompare<Value, KeyOfValue, Compare>>>;
+template <typename Value, typename Compare>
+using DefaultPriorityQueue = BufferedPQ<Heap<Value, Compare>>;
 
 struct DefaultPolicy {
     using mode_type = mode::Random<>;
@@ -38,7 +38,8 @@ struct DefaultPolicy {
 };
 
 template <typename Key, typename Value, typename KeyOfValue, typename Compare = std::less<>,
-          typename Policy = DefaultPolicy, typename PriorityQueue = DefaultPriorityQueue<Value, KeyOfValue, Compare>,
+          typename Policy = DefaultPolicy,
+          typename PriorityQueue = DefaultPriorityQueue<Value, utils::ValueCompare<Value, KeyOfValue, Compare>>,
           typename Sentinel = sentinel::Implicit<Key, Compare>, typename Allocator = std::allocator<PriorityQueue>>
 class MultiQueue {
    public:
@@ -220,13 +221,14 @@ class MultiQueue {
 };
 
 template <typename T, typename Compare = std::less<>, typename Policy = DefaultPolicy,
-          typename PriorityQueue = DefaultPriorityQueue<T, utils::Identity, Compare>,
-          typename Sentinel = sentinel::Implicit<T, Compare>, typename Allocator = std::allocator<PriorityQueue>>
+          typename PriorityQueue = DefaultPriorityQueue<T, Compare>, typename Sentinel = sentinel::Implicit<T, Compare>,
+          typename Allocator = std::allocator<PriorityQueue>>
 using ValueMultiQueue = MultiQueue<T, T, utils::Identity, Compare, Policy, PriorityQueue, Sentinel, Allocator>;
 
 template <typename Key, typename T, typename Compare = std::less<>, typename Policy = DefaultPolicy,
-          typename PriorityQueue = DefaultPriorityQueue<std::pair<Key, T>, utils::PairFirst, Compare>,
-          typename Sentinel = sentinel::Implicit<T, Compare>, typename Allocator = std::allocator<PriorityQueue>>
+          typename PriorityQueue = DefaultPriorityQueue<
+              std::pair<Key, T>, utils::ValueCompare<std::pair<Key, T>, utils::PairFirst, Compare>>,
+          typename Sentinel = sentinel::Implicit<Key, Compare>, typename Allocator = std::allocator<PriorityQueue>>
 using KeyValueMultiQueue =
     MultiQueue<Key, std::pair<Key, T>, utils::PairFirst, Compare, Policy, PriorityQueue, Sentinel, Allocator>;
 }  // namespace multiqueue
