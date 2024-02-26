@@ -34,10 +34,10 @@ class Random {
     std::array<std::size_t, static_cast<std::size_t>(num_pop_candidates)> generate_indices(
         std::size_t num_pqs) noexcept {
         std::array<std::size_t, static_cast<std::size_t>(num_pop_candidates)> indices{};
-        indices[0] = rng_() & (num_pqs - 1);
+        indices[0] = std::uniform_int_distribution<std::size_t>{0, num_pqs - 1}(rng_);
         for (auto it = std::next(indices.begin()); it != indices.end(); ++it) {
             do {
-                *it = rng_() & (num_pqs - 1);
+                *it = std::uniform_int_distribution<std::size_t>{0, num_pqs - 1}(rng_);
             } while (std::find(indices.begin(), it, *it) != it);
         }
         return indices;
@@ -87,7 +87,7 @@ class Random {
     void push(Context& ctx, typename Context::value_type const& v) {
         std::size_t i{};
         do {
-            i = rng_() & (ctx.num_pqs() - 1);
+            i = std::uniform_int_distribution<std::size_t>{0, ctx.num_pqs() - 1}(rng_);
         } while (!ctx.pq_guards()[i].try_lock());
         ctx.pq_guards()[i].get_pq().push(v);
         ctx.pq_guards()[i].pushed();

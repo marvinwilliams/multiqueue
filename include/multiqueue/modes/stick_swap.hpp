@@ -53,7 +53,7 @@ class StickSwap {
         std::size_t perm_index{};
         std::size_t new_target{};
         do {
-            perm_index = rng_() & (perm.size() - 1);
+            perm_index = std::uniform_int_distribution<std::size_t>{0, perm.size() - 1}(rng_);
             new_target = perm[perm_index].value.load(std::memory_order_relaxed);
         } while (new_target == swapping ||
                  !perm[perm_index].value.compare_exchange_weak(new_target, old_target, std::memory_order_relaxed));

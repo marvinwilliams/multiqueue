@@ -30,16 +30,16 @@ class StickRandom {
     };
 
    private:
-    pcg32 rng{};
-    std::array<std::size_t, static_cast<std::size_t>(num_pop_candidates)> pop_index{};
-    int count{};
+    pcg32 rng_{};
+    std::array<std::size_t, static_cast<std::size_t>(num_pop_candidates)> pop_index_{};
+    int count_{};
 
     void refresh_pop_index(std::size_t num_pqs) noexcept {
-        pop_index[0] = rng() & (num_pqs - 1);
-        for (auto it = std::next(pop_index.begin()); it != pop_index.end(); ++it) {
+        pop_index_[0] = std::uniform_int_distribution<std::size_t>{0, num_pqs - 1}(rng_);
+        for (auto it = std::next(pop_index_.begin()); it != pop_index_.end(); ++it) {
             do {
-                *it = rng() & (num_pqs - 1);
-            } while (std::find(pop_index.begin(), it, *it) != it);
+                *it = std::uniform_int_distribution<std::size_t>{0, num_pqs - 1}(rng_);
+            } while (std::find(pop_index_.begin(), it, *it) != it);
         }
     }
 
@@ -47,22 +47,22 @@ class StickRandom {
     explicit StickRandom(Config const& config, SharedData& shared_data) noexcept {
         auto id = shared_data.id_count.fetch_add(1, std::memory_order_relaxed);
         auto seq = std::seed_seq{config.seed, id};
-        rng.seed(seq);
+        rng_.seed(seq);
     }
 
     template <typename Context>
     std::optional<typename Context::value_type> try_pop(Context& ctx) {
-        if (count == 0) {
+        if (count_ == 0) {
             refresh_pop_index(ctx.num_pqs());
-            count = ctx.config().stickiness;
+            count_ = ctx.config().stickiness;
         }
         while (true) {
-            std::size_t best = pop_index[0];
+            std::size_t best = pop_index_[0];
             auto best_key = ctx.pq_guards()[best].top_key();
             for (std::size_t i = 1; i < static_cast<std::size_t>(num_pop_candidates); ++i) {
-                auto key = ctx.pq_guards()[pop_index[i]].top_key();
+                auto key = ctx.pq_guards()[pop_index_[i]].top_key();
                 if (ctx.compare(best_key, key)) {
-                    best = pop_index[i];
+                    best = pop_index_[i];
                     best_key = key;
                 }
             }
@@ -70,42 +70,42 @@ class StickRandom {
             if (guard.try_lock()) {
                 if (guard.get_pq().empty()) {
                     guard.unlock();
-                    count = 0;
+                    count_ = 0;
                     return std::nullopt;
                 }
                 auto v = guard.get_pq().top();
                 guard.get_pq().pop();
                 guard.popped();
                 guard.unlock();
-                --count;
+                --count_;
                 return v;
             }
             refresh_pop_index(ctx.num_pqs());
-            count = ctx.config().stickiness;
+            count_ = ctx.config().stickiness;
         }
     }
 
     template <typename Context>
     void push(Context& ctx, typename Context::value_type const& v) {
-        if (count == 0) {
+        if (count_ == 0) {
             refresh_pop_index(ctx.num_pqs());
-            count = ctx.config().stickiness;
+            count_ = ctx.config().stickiness;
         }
-        std::size_t push_index = rng() % num_pop_candidates;
+        std::size_t push_index = rng_() % num_pop_candidates;
         while (true) {
-            auto& guard = ctx.pq_guards()[pop_index[push_index]];
+            auto& guard = ctx.pq_guards()[pop_index_[push_index]];
             if (guard.try_lock()) {
                 guard.get_pq().push(v);
                 guard.pushed();
                 guard.unlock();
-                --count;
+                --count_;
                 return;
             }
             std::size_t new_index{};
             do {
-                new_index = rng() & (ctx.num_pqs() - 1);
-            } while (std::find(pop_index.begin(), pop_index.end(), new_index) != pop_index.end());
-            pop_index[push_index] = new_index;
+                new_index = std::uniform_int_distribution<std::size_t>{0, ctx.num_pqs() - 1}(rng_);
+            } while (std::find(pop_index_.begin(), pop_index_.end(), new_index) != pop_index_.end());
+            pop_index_[push_index] = new_index;
         }
     }
 };
