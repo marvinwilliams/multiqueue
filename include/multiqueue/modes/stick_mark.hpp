@@ -22,14 +22,14 @@ class StickMark {
     };
 
     struct SharedData {
-        std::atomic_int id_count{0};
+        std::atomic_uint id_count{0};
 
         explicit SharedData(std::size_t /*num_pqs*/) noexcept {
         }
     };
 
    private:
-    int id_{};
+    std::uint32_t id_{};
     pcg32 rng_{};
     std::array<std::size_t, static_cast<std::size_t>(num_pop_candidates)> pop_index_{};
     int count_{};
