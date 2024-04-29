@@ -45,7 +45,7 @@ class StickMark {
    protected:
     explicit StickMark(Config const& config, SharedData& shared_data) noexcept
         : id_(shared_data.id_count.fetch_add(1, std::memory_order_relaxed)) {
-        auto seq = std::seed_seq{config.seed, id_};
+        auto seq = std::seed_seq{config.seed, static_cast<int>(id_)};
         rng_.seed(seq);
     }
 
