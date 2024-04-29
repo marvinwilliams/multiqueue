@@ -1,10 +1,6 @@
 #pragma once
 
-#include <array>
-#include <cstddef>
-#include <memory>
 #include <optional>
-#include <type_traits>
 
 namespace multiqueue {
 

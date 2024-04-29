@@ -13,7 +13,6 @@
 #include "multiqueue/build_config.hpp"
 
 #include <atomic>
-#include <cassert>
 #include <type_traits>
 
 namespace multiqueue {
@@ -46,7 +45,7 @@ class alignas(build_config::l1_cache_line_size) PQGuard {
 
     bool try_lock() noexcept {
         // Test first to not invalidate the cache line
-        return lock_.load(std::memory_order_relaxed) == 0U && lock_.exchange(1U, std::memory_order_acquire) == 0U;
+        return (lock_.load(std::memory_order_relaxed) & 1U) == 0U && (lock_.exchange(1U, std::memory_order_acquire) & 1) == 0U;
     }
 
     bool try_lock(bool force, uint32_t mark) noexcept {
