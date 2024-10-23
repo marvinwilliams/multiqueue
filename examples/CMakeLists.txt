@@ -1,5 +1,5 @@
 if (${Threads_FOUND})
   add_executable(example example.cpp)
-  target_link_libraries(example PRIVATE multiqueue)
+  target_link_libraries(example PRIVATE multififo)
   target_link_libraries(example PRIVATE Threads::Threads)
 endif()

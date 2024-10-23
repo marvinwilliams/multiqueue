@@ -1,6 +1,0 @@
-@PACKAGE_INIT@
-
-include(${CMAKE_CURRENT_LIST_DIR}/multiqueueTargets.cmake)
-list(APPEND CMAKE_MODULE_PATH "@PACKAGE_multiqueue_INSTALL_MODULEDIR@")
-
-check_required_components(multiqueue)

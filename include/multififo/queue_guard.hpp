@@ -1,6 +1,6 @@
 /**
 ******************************************************************************
-* @file:   pq_guard.hpp
+* @file:   queue_guard.hpp
 *
 * @author: Marvin Williams
 * @date:   2021/11/09 18:05
@@ -10,37 +10,33 @@
 
 #pragma once
 
-#include "multiqueue/build_config.hpp"
+#include "multififo/build_config.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <type_traits>
 
-namespace multiqueue {
+namespace multififo {
 
-template <typename Key, typename Value, typename KeyOfValue, typename PriorityQueue, typename Sentinel>
-class alignas(build_config::l1_cache_line_size) PQGuard {
-    using key_type = Key;
-    using value_type = Value;
-    using priority_queue_type = PriorityQueue;
-    static_assert(std::is_same_v<value_type, typename priority_queue_type::value_type>,
-                  "PriorityQueue::value_type must be the same as Value");
-    static_assert(std::atomic<key_type>::is_always_lock_free, "std::atomic<key_type> must be lock-free");
-    std::atomic<key_type> top_key_ = Sentinel::sentinel();
+template <typename Queue>
+class alignas(build_config::l1_cache_line_size) QueueGuard {
+    using queue_type = Queue;
+    std::atomic<std::uint64_t> top_tick_ = std::numeric_limits<std::uint64_t>::max();
     std::atomic_uint32_t lock_ = 0;
-    priority_queue_type pq_;
+    queue_type queue_;
 
    public:
-    explicit PQGuard() = default;
+    explicit QueueGuard() = default;
 
-    explicit PQGuard(priority_queue_type pq) : pq_(std::move(pq)) {
+    explicit QueueGuard(queue_type queue) : queue_(std::move(queue)) {
     }
 
-    [[nodiscard]] key_type top_key() const noexcept {
-        return top_key_.load(std::memory_order_relaxed);
+    [[nodiscard]] std::uint64_t top_tick() const noexcept {
+        return top_tick_.load(std::memory_order_relaxed);
     }
 
     [[nodiscard]] bool empty() const noexcept {
-        return Sentinel::is_sentinel(top_key());
+        return top_tick() == std::numeric_limits<std::uint64_t>::max();
     }
 
     bool try_lock() noexcept {
@@ -65,14 +61,14 @@ class alignas(build_config::l1_cache_line_size) PQGuard {
     }
 
     void popped() {
-        auto key = (pq_.empty() ? Sentinel::sentinel() : KeyOfValue::get(pq_.top()));
-        top_key_.store(key, std::memory_order_relaxed);
+        auto tick = (queue_.empty() ? std::numeric_limits<std::uint64_t>::max() : queue_.top().tick);
+        top_tick_.store(tick, std::memory_order_relaxed);
     }
 
     void pushed() {
-        auto key = KeyOfValue::get(pq_.top());
-        if (key != top_key()) {
-            top_key_.store(key, std::memory_order_relaxed);
+        auto tick = queue_.top().tick;
+        if (tick != top_tick()) {
+            top_tick_.store(tick, std::memory_order_relaxed);
         }
     }
 
@@ -84,9 +80,9 @@ class alignas(build_config::l1_cache_line_size) PQGuard {
         lock_.store((mark + 1) << 1, std::memory_order_release);
     }
 
-    priority_queue_type& get_pq() noexcept {
-        return pq_;
+    queue_type& get_queue() noexcept {
+        return queue_;
     }
 };
 
-}  // namespace multiqueue
+}  // namespace multififo

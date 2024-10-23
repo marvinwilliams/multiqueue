@@ -1,7 +1,7 @@
-# Multiqueue
+# Multififo
 
-The multiqueue is a concurrent, relaxed priority queue.
-The idea is that internally there are `c*p` priority queues, where `p` is the
+The multififo is a concurrent, relaxed FIFO queue based on the MultiQueue.
+The idea is that internally there are `c*p` FIFO queues, where `p` is the
 number of threads and `c` is a tuning parameter. Elements are inserted into a
 random queue while deletions delete the minimum of two random queues.
 
@@ -10,6 +10,7 @@ random queue while deletions delete the minimum of two random queues.
 Clone the repository with
 ```bash
 git clone https://github.com/marvinwilliams/multiqueue
+git switch multififo
 ```
 
 You have two options on how to use this library
@@ -23,15 +24,15 @@ cmake --install build --prefix <prefix>
 
 and include it in your cmake project with
 ```cmake
-find_package(multiqueue)
-target_link_libaries(target PRIVATE multiqueue::multiqueue)
+find_package(multififo)
+target_link_libaries(target PRIVATE multififo::multififo)
 ```
 
 ## (b) Subdirectory
 Copy the project into your source tree and include it as a subdirectory in cmake
 ```cmake
-add_subdirectory(multiqueue)
-target_link_libraries(target PRIVATE multiqueue::multiqueue)
+add_subdirectory(multififo)
+target_link_libraries(target PRIVATE multififo::multififo)
 ```
 
 # Remarks
