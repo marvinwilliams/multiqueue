@@ -71,6 +71,7 @@ TEST_CASE("std::priority_queue", "[benchmark][std]") {
     };
 }
 
+#ifdef HAVE_BOOST
 TEMPLATE_TEST_CASE_SIG("boost::d_ary_heap", "[benchmark][boost][degree]", ((unsigned int Degree), Degree), 2, 4, 8, 16,
                        64) {
     using heap_t = boost::heap::d_ary_heap<int, boost::heap::arity<Degree>, std::greater<>>;
@@ -130,6 +131,7 @@ TEMPLATE_TEST_CASE_SIG("boost::d_ary_heap", "[benchmark][boost][degree]", ((unsi
         return heap.empty();
     };
 }
+#endif
 
 TEMPLATE_TEST_CASE_SIG("Degree", "[benchmark][heap][degree]", ((unsigned int Degree), Degree), 2, 4, 8, 16, 64) {
     using heap_t = multiqueue::Heap<int, std::greater<>, Degree>;
