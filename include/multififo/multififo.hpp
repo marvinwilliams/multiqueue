@@ -31,11 +31,7 @@ class MultiFifo {
     using allocator_type = Allocator;
 
    private:
-    struct Element {
-        std::uint64_t tick;
-        value_type value;
-    };
-    using queue_type = RingBuffer<Element>;
+    using queue_type = RingBuffer<value_type>;
     using guard_type = QueueGuard<queue_type>;
     using internal_allocator_type = typename std::allocator_traits<allocator_type>::template rebind_alloc<guard_type>;
 

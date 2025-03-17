@@ -21,7 +21,7 @@ namespace multififo {
 template <typename Queue>
 class alignas(build_config::l1_cache_line_size) QueueGuard {
     using queue_type = Queue;
-    std::atomic<std::uint64_t> top_tick_ = std::numeric_limits<std::uint64_t>::max();
+    std::atomic<std::uint64_t> size_ = 0;
     std::atomic_uint32_t lock_ = 0;
     queue_type queue_;
 
@@ -31,12 +31,12 @@ class alignas(build_config::l1_cache_line_size) QueueGuard {
     explicit QueueGuard(queue_type queue) : queue_(std::move(queue)) {
     }
 
-    [[nodiscard]] std::uint64_t top_tick() const noexcept {
-        return top_tick_.load(std::memory_order_relaxed);
+    [[nodiscard]] std::uint64_t size() const noexcept {
+        return size_.load(std::memory_order_relaxed);
     }
 
     [[nodiscard]] bool empty() const noexcept {
-        return top_tick() == std::numeric_limits<std::uint64_t>::max();
+        return size() == 0;
     }
 
     bool try_lock() noexcept {
@@ -61,15 +61,11 @@ class alignas(build_config::l1_cache_line_size) QueueGuard {
     }
 
     void popped() {
-        auto tick = (queue_.empty() ? std::numeric_limits<std::uint64_t>::max() : queue_.top().tick);
-        top_tick_.store(tick, std::memory_order_relaxed);
+        size_.fetch_sub(1, std::memory_order_relaxed);
     }
 
     void pushed() {
-        auto tick = queue_.top().tick;
-        if (tick != top_tick()) {
-            top_tick_.store(tick, std::memory_order_relaxed);
-        }
+        size_.fetch_add(1, std::memory_order_relaxed);
     }
 
     void unlock() {
